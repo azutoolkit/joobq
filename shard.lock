@@ -1,0 +1,14 @@
+version: 2.0
+shards:
+  cron_parser:
+    git: https://github.com/kostya/cron_parser.git
+    version: 0.3.0
+
+  pool:
+    git: https://github.com/ysbaddaden/pool.git
+    version: 0.2.3
+
+  redis:
+    git: https://github.com/stefanwille/crystal-redis.git
+    version: 2.6.0
+

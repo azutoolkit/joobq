@@ -6,6 +6,7 @@ module JoobQ
 
   enum Sets
     Delayed
+    Failed
     Retry
     Dead
   end

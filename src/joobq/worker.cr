@@ -32,7 +32,7 @@ module JoobQ
               @running = false
               log(job, Queues::Completed)
             rescue e
-              retry_attempt job, e
+              handle_failure job, e
             ensure
               redis.lrem(Queues::Busy.to_s, 0, job.to_json)
             end
@@ -75,28 +75,16 @@ module JoobQ
       stats.track @name, @wid, (Time.local - start).microseconds
     end
 
-    private def retry_attempt(job : T, e : Exception)
+    private def handle_failure(job : T, e : Exception)
       job.failed_at = Time.local
+
+      Failed.add job, e
+
       if job.retries > 0
-        count = job.retries
-        job.retries = job.retries - 1
-        redis.zadd Sets::Retry.to_s, retry_at(count).to_unix_f, job.to_json
+        Retry.attempt job
       else
-        reap job
+        DeadLetter.add job
       end
-    end
-
-    private def retry_at(count : Int32)
-      Time.local + ((count ** 4) + 15 + (rand(30)*(count + 1))).seconds
-    end
-
-    private def reap(job)
-      dead_set = Sets::Dead.to_s
-      now = Time.local.to_unix_f
-      expires = (Time.local - 6.months).to_unix_f
-      redis.zadd(dead_set, now, job.to_json)
-      redis.zremrangebyscore(dead_set, "-inf", expires)
-      redis.zremrangebyrank(dead_set, 0, -10_000)
     end
   end
 end

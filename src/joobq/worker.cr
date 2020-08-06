@@ -72,7 +72,7 @@ module JoobQ
     end
 
     private def stats_tick(start : Time)
-      stats.track @name, @wid, (Time.local - start).microseconds
+      stats.track @name, @wid, (Time.local - start).milliseconds
     end
 
     private def handle_failure(job : T, e : Exception)

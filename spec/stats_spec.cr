@@ -20,9 +20,18 @@ module JoobQ
       result.as(Int64).should be > 0.to_i64
     end
 
+    it "gets count of failed jobs" do
+      stats.redis.flushall
+
+      stats.failed("Failed").size.should eq 0
+      Failed.add(FailJob.new, Exception.new)
+
+      stats.failed("*Failed*").size.should eq 1
+    end
+
     context "count" do
       it "gets queues and sets totals" do
-        stats.count_stats.size.should eq 5
+        stats.count_stats.size.should eq 6
       end
     end
 

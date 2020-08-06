@@ -34,6 +34,10 @@ module JoobQ
       [] of Array(Int64 | String)
     end
 
+    def failed(key : String)
+      redis.keys key
+    end
+
     def count_stats
       result = redis.pipelined do |pipe|
         pipe.llen(Queues::Busy.to_s)
@@ -41,6 +45,7 @@ module JoobQ
         pipe.zcard(Sets::Delayed.to_s)
         pipe.zcard(Sets::Retry.to_s)
         pipe.zcard(Sets::Dead.to_s)
+        pipe.zcard(Sets::Failed.to_s)
       end
 
       {
@@ -49,6 +54,7 @@ module JoobQ
         delayed:   result[2].as(Int64),
         retry:     result[3].as(Int64),
         dead:      result[4].as(Int64),
+        failed:    result[5].as(Int64),
       }
     end
 

@@ -14,6 +14,19 @@ module JoobQ
       QUEUES
     end
 
+    def queues_details
+      queues.map do |k,q|
+        {
+          name: q.name, 
+          total_workers: q.total_workers,
+          jobs: q.jobs,
+          status: q.status,
+          running_workers: q.running_workers,
+          size: q.size,
+        }
+      end
+    end
+
     def query(from, to, filters, aggr = "avg", group_by = 5000, count = 100)
       q = ["TS.MRANGE", "#{from}", "#{to}"]
 

@@ -39,23 +39,45 @@ module JoobQ
     end
 
     def count_stats
-      result = redis.pipelined do |pipe|
+      result = jobs_count_by_status
+      total = sum_of_jobs(result)
+
+      {
+        total:        total,
+        busy:         result[0],
+        completed:    result[1],
+        delayed:      result[2],
+        retry:        result[3],
+        dead:         result[4],
+        failed:       result[5],
+        busy_percent:       percent_of(result[0], total),
+        completed_percent:  percent_of(result[1], total),
+        delayed_percent:    percent_of(result[2], total),
+        retry_percent:      percent_of(result[3], total),
+        dead_percent:       percent_of(result[4], total),
+        failed_percent:     percent_of(result[5], total),
+      }
+    end
+
+    def percent_of(quotient, divisor)
+      (( quotient / divisor ) * 100).round || 0.0
+    end
+
+    def sum_of_jobs(result)
+      result.reduce(0) { |acc, v| acc += v.as(Int64) }
+    end
+
+    def jobs_count_by_status
+      redis.pipelined do |pipe|
         pipe.llen(Queues::Busy.to_s)
         pipe.llen(Queues::Completed.to_s)
         pipe.zcard(Sets::Delayed.to_s)
         pipe.zcard(Sets::Retry.to_s)
         pipe.zcard(Sets::Dead.to_s)
         pipe.zcard(Sets::Failed.to_s)
+      end.map do |v|
+        v.as(Int64)
       end
-
-      {
-        busy:      result[0].as(Int64),
-        completed: result[1].as(Int64),
-        delayed:   result[2].as(Int64),
-        retry:     result[3].as(Int64),
-        dead:      result[4].as(Int64),
-        failed:    result[5].as(Int64),
-      }
     end
 
     def create_key(key_name = STATS_KEY)

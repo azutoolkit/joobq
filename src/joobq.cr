@@ -64,5 +64,6 @@ module JoobQ
     end
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }
+    sleep
   end
 end

@@ -18,7 +18,6 @@ module JoobQ
     end
 
     def process
-      return if running?
       @workers.each &.run
 
       while size > 0

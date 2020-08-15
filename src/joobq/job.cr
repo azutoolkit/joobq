@@ -31,6 +31,7 @@ module JoobQ
     property at : Time? = nil
     property failed_at : Time? = nil
     property done_at : Time? = nil
+    property ex : Hash(String, String?)? = nil
 
     abstract def perform
   end

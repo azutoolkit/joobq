@@ -55,7 +55,7 @@ module JoobQ
       loop do
         sleep rand(3)
         QUEUES.each do |_name, queue|
-          queue.process
+          spawn queue.process
         end
       end
     end

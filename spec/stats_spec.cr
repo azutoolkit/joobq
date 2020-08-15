@@ -31,7 +31,7 @@ module JoobQ
 
     context "count" do
       it "gets queues and sets totals" do
-        stats.count_stats.size.should eq 13
+        stats.count_stats.size.should eq 10
       end
     end
 

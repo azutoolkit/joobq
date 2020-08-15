@@ -23,6 +23,8 @@ module JoobQ
           status: q.status,
           running_workers: q.running_workers,
           size: q.size,
+          failed: redis.zscan(Sets::Failed.to_s, 0, "queue:#{q.name}*", count = nil),
+          retry: redis.zscan(Sets::Retry.to_s, 0, "queue:#{q.name}*", count = nil)
         }
       end
     end
@@ -53,22 +55,20 @@ module JoobQ
 
     def count_stats
       result = jobs_count_by_status
-      total = sum_of_jobs(result)
+      total = result[0] + result[1] +  result[2]
 
       {
         total:        total,
-        busy:         result[0],
-        completed:    result[1],
-        delayed:      result[2],
-        retry:        result[3],
-        dead:         result[4],
-        failed:       result[5],
-        busy_percent:       percent_of(result[0], total),
-        completed_percent:  percent_of(result[1], total),
-        delayed_percent:    percent_of(result[2], total),
-        retry_percent:      percent_of(result[3], total),
-        dead_percent:       percent_of(result[4], total),
-        failed_percent:     percent_of(result[5], total),
+        completed:    result[0],
+        retry:        result[1],
+        dead:         result[2],
+        busy:         result[3],
+        delayed:      result[4],
+
+        completed_percent:  percent_of(result[0], total),
+        retry_percent:      percent_of(result[1], total),
+        dead_percent:       percent_of(result[2], total),
+        busy_percent:       percent_of(result[4], total),
       }
     end
 
@@ -76,18 +76,13 @@ module JoobQ
       (( quotient / divisor ) * 100).round || 0.0
     end
 
-    def sum_of_jobs(result)
-      result.reduce(0) { |acc, v| acc += v.as(Int64) }
-    end
-
     def jobs_count_by_status
       redis.pipelined do |pipe|
-        pipe.llen(Queues::Busy.to_s)
-        pipe.llen(Queues::Completed.to_s)
-        pipe.zcard(Sets::Delayed.to_s)
+        pipe.llen(Queues::Completed.to_s) 
         pipe.zcard(Sets::Retry.to_s)
         pipe.zcard(Sets::Dead.to_s)
-        pipe.zcard(Sets::Failed.to_s)
+        pipe.llen(Queues::Busy.to_s)
+        pipe.zcard(Sets::Delayed.to_s)
       end.map do |v|
         v.as(Int64)
       end

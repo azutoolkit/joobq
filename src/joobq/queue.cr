@@ -5,30 +5,37 @@ module JoobQ
     getter total_workers : Int32
     getter workers : Array(Worker(T))
     getter jobs : String = T.to_s
+    
+    @channel : Channel(T)
+    @done = Channel(Control).new
 
     def initialize(@name : String, @total_workers : Int32)
+      @channel = Channel(T).new(@total_workers)
       @workers = Array(Worker(T)).new(@total_workers)
       create_workers
     end
 
     def create_workers
       total_workers.times do |n|
-        @workers << Worker(T).new @name, n
+        @workers << Worker(T).new @name, n, @channel, @done
       end
     end
 
     def process
+      return if running?
       @workers.each &.run
-
-      while size > 0
-        redis.pipelined do |pipe|
-          total_workers.times do |_i|
-            pipe.rpoplpush @name, Queues::Busy.to_s
+      spawn do
+        while running?
+          redis.pipelined do |pipe|
+            total_workers.times do |_i|
+              pipe.rpoplpush @name, Queues::Busy.to_s
+            end
+          end.each_with_index do |job, i|
+            next unless job
+            work = T.from_json(job.as(String))
+            @channel.send(work)
+            done = @done.receive
           end
-        end.each_with_index do |job, i|
-          next unless job
-          @workers[i].add T.from_json(job.as(String))
-          redis.lrem(Queues::Busy.to_s, 0, job.to_json)
         end
       end
     end

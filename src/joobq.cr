@@ -49,15 +49,11 @@ module JoobQ
 
   def self.forge
     Log.info { "JoobQ starting..." }
+    
     Scheduler.instance.run
 
-    spawn do
-      loop do
-        sleep rand(250).milliseconds
-        QUEUES.each do |_name, queue|
-          spawn queue.process
-        end
-      end
+    QUEUES.each do |_name, queue|
+      spawn queue.process
     end
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }

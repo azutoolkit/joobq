@@ -7,49 +7,32 @@ module JoobQ
     property? running : Bool = false
 
     @start : Time = Time.local
-    @channel = Channel(T | Control).new(JoobQ.workers_capacity)
-    @done = Channel(Control).new
+    @channel : Channel(T)
+    @done : Channel(Control)
 
-    def initialize(@name : String, @wid : Int32)
-    end
-
-    def add(job : T)
-      @channel.send job
+    def initialize(@name : String, @wid : Int32, @channel : Channel(T), @done : Channel(Control))
     end
 
     def run
       return if running?
       @running = true
+
       spawn do
-        loop do
-          case job = @channel.receive
-          when T
+        while (job = @channel.receive) && running?
+          begin
             start = Time.local
-            begin
-              job.perform
-              stats_tick start
-              complete(job)
-              @running = false
-              log(job, Queues::Completed)
-            rescue e
-              handle_failure job, e
-            ensure
-              redis.lrem(Queues::Busy.to_s, 0, job.to_json)
-            end
-          when Control
-            @done.send Control::Stop
-            break
+            job.perform
+            stats_tick start
+            complete(job)
+            log(job, Queues::Completed)
+          rescue e
+            handle_failure job, e
+          ensure
+            redis.lrem(Queues::Busy.to_s, 0, job.to_json)
+            @done.send(Control::Done)
           end
         end
       end
-    end
-
-    def stop
-      @channel.send Control::Stop
-    end
-
-    def join
-      @done.receive
     end
 
     private def complete(job)
@@ -68,7 +51,7 @@ module JoobQ
     end
 
     private def log(job : T, state : JoobQ::Queues, message = "")
-      Log.trace { "#{@name} (#{@wid}) Job ID: #{job.class.name} (#{job.jid}) - #{state} - Retries Left: #{job.retries}#{message}" }
+      Log.trace { "#{@name} (#{@wid}) Job ID: #{job.class.name} (#{job.jid})" }
     end
 
     private def stats_tick(start : Time)

@@ -8,13 +8,12 @@ require "./joobq/**"
 
 module JoobQ
   VERSION       = "0.1.0"
-  class_property workers_capacity = 1
   LOADER_QUEUES = {} of Nil => Nil
   REDIS = Redis::PooledClient.new(
     host: ENV.fetch("REDIS_HOST", "localhost"),
     port: ENV.fetch("REDIS_PORT", "6379").to_i,
     pool_size: ENV.fetch("REDIS_POOL_SIZE", "50").to_i,
-    pool_timeout: ENV.fetch("REDIS_POOL_SIZE", "0.5").to_f
+    pool_timeout: ENV.fetch("REDIS_TIMEOUT", "1.0").to_f
   )
 
   Log.setup_from_env(default_level: :trace)
@@ -49,7 +48,6 @@ module JoobQ
 
   def self.forge
     Log.info { "JoobQ starting..." }
-    
     Scheduler.instance.run
 
     QUEUES.each do |_name, queue|

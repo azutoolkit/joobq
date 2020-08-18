@@ -7,7 +7,6 @@ module JoobQ
     getter jobs : String = T.to_s
     
     @channel : Channel(T)
-    @done = Channel(Control).new
 
     def initialize(@name : String, @total_workers : Int32)
       @channel = Channel(T).new(@total_workers)
@@ -17,7 +16,7 @@ module JoobQ
 
     def create_workers
       total_workers.times do |n|
-        @workers << Worker(T).new @name, n, @channel, @done
+        @workers << Worker(T).new @name, n, @channel
       end
     end
 
@@ -34,7 +33,6 @@ module JoobQ
             next unless job
             work = T.from_json(job.as(String))
             @channel.send(work)
-            done = @done.receive
           end
         end
       end
@@ -46,9 +44,9 @@ module JoobQ
 
     def status
       case
-      when !running? && size > 0   then "Running"
-      when !running? && size.zero? then "Done"
-      else                              "Awaiting"
+      when !size.zero? then "Running"
+      when size.zero? then "Done"
+      else "Awaiting"
       end
     end
 

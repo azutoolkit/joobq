@@ -8,9 +8,8 @@ module JoobQ
 
     @start : Time = Time.local
     @channel : Channel(T)
-    @done : Channel(Control)
 
-    def initialize(@name : String, @wid : Int32, @channel : Channel(T), @done : Channel(Control))
+    def initialize(@name : String, @wid : Int32, @channel : Channel(T))
     end
 
     def run
@@ -29,7 +28,6 @@ module JoobQ
             handle_failure job, e
           ensure
             redis.lrem(Queues::Busy.to_s, 0, job.to_json)
-            @done.send(Control::Done)
           end
         end
       end

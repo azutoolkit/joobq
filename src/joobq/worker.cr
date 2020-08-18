@@ -33,6 +33,10 @@ module JoobQ
       end
     end
 
+    def stop!
+      @running = false
+    end
+
     private def complete(job)
       if redis.lpush(Queues::Completed.to_s, job.to_json)
         redis.lrem(Queues::Busy.to_s, 0, job.to_json)

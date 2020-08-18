@@ -4,15 +4,15 @@ module JoobQ
   describe Queue do
     job = ExampleJob.new 1
     total_jobs = 100
+    queue = JoobQ["example"]
 
     before_each do
       redis.del "example"
       JoobQ.reset
+      queue.stop!
     end
 
     describe "#size" do
-      queue = JoobQ["example"]
-
       it "returns zero for empty queue" do
         queue.size.should eq 0
       end
@@ -24,8 +24,6 @@ module JoobQ
     end
 
     describe "#running? and #status?" do
-      queue = JoobQ["example"]
-
       it "is not running when instantiated" do
         queue.running?.should be_false
         queue.status.should eq "Done"
@@ -43,24 +41,22 @@ module JoobQ
         queue.push job.to_json
         queue.process
         queue.running?.should be_true
-        queue.status.should eq "Awaiting"
+        queue.status.should eq "Running"
         queue.running_workers.should eq 1
       end
 
-      it "is stopped when done processing" do
+      it "is still running when there is no job in the queue" do
         queue.push job.to_json
         queue.process
         sleep 1
-        queue.running?.should be_false
+        queue.running?.should be_true
         queue.status.should eq "Done"
-        queue.running_workers.should eq 0
+        queue.running_workers.should eq 1
       end
     end
 
     describe "#process" do
       it "runs a job" do
-        queue = JoobQ["example"]
-
         total_jobs.times do |i|
           queue.push ExampleJob.new(i).to_json
         end
@@ -86,8 +82,6 @@ module JoobQ
 
     describe "queueing" do
       it "adds item to queue" do
-        queue = JoobQ["example"]
-
         queue.clear
         queue.push job.to_json
         queue.size.should eq 1

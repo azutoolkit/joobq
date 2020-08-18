@@ -3,19 +3,25 @@ require "./spec_helper"
 module JoobQ
   describe Worker do
     queue = "example"
-    worker = Worker(ExampleJob | FailJob).new(queue, 1)
+    channel = Channel(ExampleJob | FailJob).new(1)
+    worker = Worker(ExampleJob | FailJob).new(queue, 1, channel)
     job = ExampleJob.new(1)
+
+    before_each do
+      redis.del "example"
+      JoobQ.reset
+    end
 
     describe "#running?" do
       it "returns false when is done" do
-        worker = Worker(ExampleJob | FailJob).new(queue, 1)
+        worker = Worker(ExampleJob | FailJob).new(queue, 1, channel)
 
         worker.running?.should be_false
         worker.run
         worker.running?.should be_true
-        worker.add job
+        channel.send job
         sleep 1
-        worker.running?.should be_false
+        worker.running?.should be_true
       end
     end
 
@@ -28,7 +34,7 @@ module JoobQ
 
       context "processing" do
         it "process job" do
-          worker.add job
+          channel.send job
           sleep 1.microsecond
 
           redis.llen(job.queue).should eq 0
@@ -41,7 +47,7 @@ module JoobQ
           job = FailJob.new
           job.retries = 2
 
-          worker.add job
+          channel.send job
           sleep 1.microsecond
 
           redis.llen(job.queue).should eq 0
@@ -53,7 +59,7 @@ module JoobQ
         it "dead job" do
           job = FailJob.new
 
-          worker.add job
+          channel.send job
           sleep 1.microsecond
 
           redis.llen(job.queue).should eq 0

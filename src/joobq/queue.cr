@@ -23,6 +23,7 @@ module JoobQ
     def process
       return if running?
       @workers.each &.run
+
       spawn do
         while running?
           redis.pipelined do |pipe|
@@ -36,6 +37,10 @@ module JoobQ
           end
         end
       end
+    end
+
+    def stop!
+      @workers.all? &.stop!
     end
 
     def running?

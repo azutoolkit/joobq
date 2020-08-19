@@ -1,42 +1,42 @@
 module JoobQ
+
   class Queue(T)
     getter redis : Redis::PooledClient = JoobQ.redis
     getter name : String
     getter total_workers : Int32
     getter workers : Array(Worker(T))
     getter jobs : String = T.to_s
-    
-    @channel : Channel(T)
 
-    def initialize(@name : String, @total_workers : Int32)
-      @channel = Channel(T).new(@total_workers)
+    def initialize(@name : String, @total_workers : Int32,  @queue_size = 100)
+      @job_queue = Channel(Array(Redis::RedisValue)).new(@queue_size)
+      @dispatch_queue = Channel(Worker(T)).new(@total_workers)
       @workers = Array(Worker(T)).new(@total_workers)
       create_workers
     end
 
     def create_workers
       total_workers.times do |n|
-        @workers << Worker(T).new @name, n, @channel
+        @workers << Worker(T).new @name, n, @job_queue
       end
     end
 
     def process
-      return if running?
-      @workers.each &.run
+      return false if running?
+      workers.each &.start
 
       spawn do
         while running?
-          redis.pipelined do |pipe|
-            total_workers.times do |_i|
-              pipe.rpoplpush @name, Queues::Busy.to_s
+          result = redis.pipelined do |pipe|
+            @queue_size.times do |_i|
+              pipe.brpoplpush @name, Queues::Busy.to_s, 0
             end
-          end.each_with_index do |job, i|
-            next unless job
-            work = T.from_json(job.as(String))
-            @channel.send(work)
           end
+
+          @job_queue.send result
         end
       end
+
+      sleep
     end
 
     def stop!

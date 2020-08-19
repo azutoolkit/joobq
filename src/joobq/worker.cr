@@ -7,34 +7,50 @@ module JoobQ
     property? running : Bool = false
 
     @start : Time = Time.local
-    @channel : Channel(T)
 
-    def initialize(@name : String, @wid : Int32, @channel : Channel(T))
+    def initialize(@name : String, @wid : Int32, @job_queue : Channel(Array(Redis::RedisValue)))
+      @stopped = true
     end
 
-    def run
+    def start
       return if running?
-      @running = true
-
+      @stopped = false
       spawn do
-        while (job = @channel.receive) && running?
-          begin
-            start = Time.local
-            job.perform
-            stats_tick start
-            complete(job)
-            log(job, Queues::Completed)
-          rescue e
-            handle_failure job, e
-          ensure
-            redis.lrem(Queues::Busy.to_s, 0, job.to_json)
+        loop do
+          jobs = @job_queue.receive
+          spawn do
+            jobs.each do |job|
+              next unless job
+              job = T.from_json(job.as(String))
+              
+              begin
+                start = Time.local
+                job.perform
+                stats_tick start
+                complete(job)
+                log(job, Queues::Completed)
+              rescue e
+                exit
+              ensure
+                redis.lrem(Queues::Busy.to_s, 0, job.to_json)
+              end
+            end
           end
         end
       end
+      true 
     end
 
-    def stop!
-      @running = false
+    def stop
+      @stopped = true
+    end
+
+    def stopped?
+      @stopped
+    end
+
+    def running?
+      !@stopped
     end
 
     private def complete(job)

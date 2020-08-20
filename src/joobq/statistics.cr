@@ -23,8 +23,8 @@ module JoobQ
           status: q.status,
           running_workers: q.running_workers,
           size: q.size,
-          # failed: redis.zscan(Sets::Failed.to_s, 0, "queue:#{q.name}*", count = nil),
-          # retry: redis.zscan(Sets::Retry.to_s, 0, "queue:#{q.name}*", count = nil)
+          failed: redis.zscan(Sets::Failed.to_s, 0, "queue:#{q.name}*", count = nil),
+          retry: redis.zscan(Sets::Retry.to_s, 0, "queue:#{q.name}*", count = nil),
         }
       end
     end

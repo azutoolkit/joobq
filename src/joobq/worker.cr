@@ -6,8 +6,6 @@ module JoobQ
     getter wid : Int32
     property? running : Bool = false
 
-    @start : Time = Time.local
-
     def initialize(@name : String, @wid : Int32, @job_queue : Channel(Array(String)))
       @stopped = true
     end
@@ -35,8 +33,6 @@ module JoobQ
       log(job, Queues::Completed)
     rescue e
       handle_failure(job, e)
-    ensure
-      redis.lrem(Queues::Busy.to_s, 0, job.to_json)
     end
 
     def stop
@@ -52,7 +48,7 @@ module JoobQ
     end
 
     private def complete(job)
-      if redis.lpush(Queues::Completed.to_s, job.to_json)
+      if redis.lpush("#{Queues::Completed.to_s}:#{job.queue}", job.to_json)
         redis.lrem(Queues::Busy.to_s, 0, job.to_json)
       end
     end

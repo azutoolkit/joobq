@@ -6,6 +6,8 @@ module JoobQ
     getter total_workers : Int32
     getter workers : Array(Worker(T))
     getter jobs : String = T.to_s
+    getter job_queue : Channel(Array(String))
+    getter queue_size : Int32 = 100
 
     def initialize(@name : String, @total_workers : Int32,  @queue_size = 100)
       @job_queue = Channel(Array(String)).new(@queue_size)
@@ -16,7 +18,7 @@ module JoobQ
 
     def create_workers
       total_workers.times do |n|
-        @workers << Worker(T).new @name, n, @job_queue
+        workers << Worker(T).new name, n, job_queue
       end
     end
 
@@ -27,22 +29,22 @@ module JoobQ
       spawn do
         while running?
           result = redis.pipelined do |pipe|
-            @queue_size.times do |_i|
-              pipe.brpoplpush @name, Queues::Busy.to_s, 0
+            queue_size.times do |_i|
+              pipe.brpoplpush name, "#{Queues::Busy.to_s}:#{name}", 0
             end
           end.map { |j| j.as(String) }
 
-          @job_queue.send result
+          job_queue.send result
         end
       end
     end
 
     def stop!
-      @workers.all? &.stop
+      workers.all? &.stop
     end
 
     def running?
-      @workers.all? &.running?
+      workers.all? &.running?
     end
 
     def status
@@ -58,7 +60,7 @@ module JoobQ
     end
 
     def running_workers
-      @workers.count &.running?
+      workers.count &.running?
     end
 
     def clear

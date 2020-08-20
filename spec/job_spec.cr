@@ -2,6 +2,11 @@ require "./spec_helper"
 
 module JoobQ
   describe Job do
+
+    before_each do
+      JoobQ.reset
+    end
+
     context "one queue for single job type" do
       it "works" do
         queue = "single"

@@ -8,7 +8,7 @@ module JoobQ
     getter jobs : String = T.to_s
 
     def initialize(@name : String, @total_workers : Int32,  @queue_size = 100)
-      @job_queue = Channel(Array(Redis::RedisValue)).new(@queue_size)
+      @job_queue = Channel(Array(String)).new(@queue_size)
       @dispatch_queue = Channel(Worker(T)).new(@total_workers)
       @workers = Array(Worker(T)).new(@total_workers)
       create_workers
@@ -22,7 +22,7 @@ module JoobQ
 
     def process
       return false if running?
-      workers.each &.start
+      workers.each &.run
 
       spawn do
         while running?
@@ -30,17 +30,15 @@ module JoobQ
             @queue_size.times do |_i|
               pipe.brpoplpush @name, Queues::Busy.to_s, 0
             end
-          end
+          end.map { |j| j.as(String) }
 
           @job_queue.send result
         end
       end
-
-      sleep
     end
 
     def stop!
-      @workers.all? &.stop!
+      @workers.all? &.stop
     end
 
     def running?

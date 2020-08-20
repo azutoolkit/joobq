@@ -8,37 +8,35 @@ module JoobQ
 
     @start : Time = Time.local
 
-    def initialize(@name : String, @wid : Int32, @job_queue : Channel(Array(Redis::RedisValue)))
+    def initialize(@name : String, @wid : Int32, @job_queue : Channel(Array(String)))
       @stopped = true
     end
 
-    def start
+    def run
       return if running?
       @stopped = false
+
       spawn do
         loop do
           jobs = @job_queue.receive
-          spawn do
-            jobs.each do |job|
-              next unless job
-              job = T.from_json(job.as(String))
-              
-              begin
-                start = Time.local
-                job.perform
-                stats_tick start
-                complete(job)
-                log(job, Queues::Completed)
-              rescue e
-                exit
-              ensure
-                redis.lrem(Queues::Busy.to_s, 0, job.to_json)
-              end
-            end
+          jobs.each do |job|
+            next unless job
+            process T.from_json(job.as(String))
           end
         end
       end
-      true 
+    end
+
+    def process(job : T)
+      start = Time.local
+      job.perform
+      stats_tick start
+      complete(job)
+      log(job, Queues::Completed)
+    rescue e
+      handle_failure(job, e)
+    ensure
+      redis.lrem(Queues::Busy.to_s, 0, job.to_json)
     end
 
     def stop

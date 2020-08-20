@@ -8,6 +8,7 @@ module JoobQ
 
     before_each do
       redis.del job.queue
+      redis.del job2.queue
       redis.del Sets::Delayed.to_s
       JoobQ.reset
     end

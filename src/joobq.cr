@@ -13,7 +13,7 @@ module JoobQ
     host: ENV.fetch("REDIS_HOST", "localhost"),
     port: ENV.fetch("REDIS_PORT", "6379").to_i,
     pool_size: ENV.fetch("REDIS_POOL_SIZE", "50").to_i,
-    pool_timeout: ENV.fetch("REDIS_TIMEOUT", "1.0").to_f
+    pool_timeout: ENV.fetch("REDIS_TIMEOUT", "0.2").to_f
   )
 
   Log.setup_from_env(default_level: :trace)

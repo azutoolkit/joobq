@@ -3,7 +3,7 @@ require "./spec_helper"
 module JoobQ
   describe Worker do
     queue = "example"
-    channel = Channel(ExampleJob | FailJob).new(1)
+    channel = Channel(Array(String)).new(1)
     worker = Worker(ExampleJob | FailJob).new(queue, 1, channel)
     job = ExampleJob.new(1)
 
@@ -19,8 +19,9 @@ module JoobQ
         worker.running?.should be_false
         worker.run
         worker.running?.should be_true
-        channel.send job
+        worker.process job
         sleep 1
+        
         worker.running?.should be_true
       end
     end
@@ -34,8 +35,7 @@ module JoobQ
 
       context "processing" do
         it "process job" do
-          channel.send job
-          sleep 1.microsecond
+          worker.process job
 
           redis.llen(job.queue).should eq 0
           redis.zcard(Sets::Dead.to_s).should eq 0
@@ -47,8 +47,7 @@ module JoobQ
           job = FailJob.new
           job.retries = 2
 
-          channel.send job
-          sleep 1.microsecond
+          worker.process job
 
           redis.llen(job.queue).should eq 0
           redis.zcard(Sets::Dead.to_s).should eq 0
@@ -59,8 +58,7 @@ module JoobQ
         it "dead job" do
           job = FailJob.new
 
-          channel.send job
-          sleep 1.microsecond
+          worker.process job
 
           redis.llen(job.queue).should eq 0
           redis.zcard(Sets::Dead.to_s).should eq 1

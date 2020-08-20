@@ -50,11 +50,12 @@ module JoobQ
     Log.info { "JoobQ starting..." }
     Scheduler.instance.run
 
-    QUEUES.each do |_name, queue|
+    QUEUES.each do |_, queue|
       spawn queue.process
     end
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }
+
     sleep
   end
 end

@@ -3,8 +3,7 @@ require "./spec_helper"
 module JoobQ
   describe Worker do
     queue = "example"
-    channel = Channel(Array(String)).new(1)
-    worker = Worker(ExampleJob | FailJob).new(queue, 1, channel)
+    worker = Worker(ExampleJob | FailJob).new(queue, 1)
     job = ExampleJob.new(1)
 
     before_each do
@@ -14,7 +13,7 @@ module JoobQ
 
     describe "#running?" do
       it "returns false when is done" do
-        worker = Worker(ExampleJob | FailJob).new(queue, 1, channel)
+        worker = Worker(ExampleJob | FailJob).new(queue, 1)
 
         worker.running?.should be_false
         worker.run

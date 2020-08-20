@@ -115,8 +115,8 @@ module JoobQ
       end
     end
 
-    def track(name : String, wid : Int32, latency : Int32)
-      redis.command ["TS.ADD", "#{STATS_KEY}:#{name}", "*", "#{latency}", "LABELS", "name", "#{name}"]
+    def track(name : String, wid : Int32, latency : Int32, status : String)
+      redis.command ["TS.ADD", "#{STATS_KEY}:#{name}", "*", "#{latency}", "LABELS", "name", "#{name}", "stats", "stats", "status", status]
     rescue e
       -1
     end

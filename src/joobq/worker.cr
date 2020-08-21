@@ -32,16 +32,11 @@ module JoobQ
 
     def process(job : T, json : String, start = Time.local)
       job.perform
-      status = "complete"
+      complete job, start
     rescue e
-      status = "error"
-      handle_failure(job, e)
+      handle_failure job, e, start
     ensure
-      log job, status
-      stats_tick start, status
-      if redis.lpush(Queues::Completed.to_s,json)
-        redis.lrem(Queues::Busy.to_s, 0, json)
-      end
+      cleanup json
     end
 
     def stop
@@ -56,13 +51,25 @@ module JoobQ
       !@stopped
     end
 
-    private def stats_tick(start : Time, status)
+    def complete(job, start)
+      log job, "complete"
+      stats_tick start,  "complete"
+    end
+
+    private def cleanup(json : String)
+      if redis.lpush(Queues::Completed.to_s, json)
+        redis.lrem(Queues::Busy.to_s, 0, json)
+      end
+    end
+
+    private def stats_tick(start : Time, status : String)
       stats.track @name, @wid, (Time.local - start).microseconds, status
     end
 
-    private def handle_failure(job : T, e : Exception)
+    private def handle_failure(job : T, e : Exception, start)
       job.failed_at = Time.local
-      error(e)
+      error(job, e)
+      stats_tick start, "error"
       Failed.add job, e
       
       if job.retries > 0
@@ -73,12 +80,13 @@ module JoobQ
     end
 
     private def log(job : T, status : String)
-      Log.trace { "#{@name} (#{@wid}) Status: #{status} Job ID: #{job.class.name} (#{job.jid})" }
+      Log.trace { "#{@name} (#{@wid}) #{status.upcase} Job: #{job.class.name} (#{job.jid})" }
     end
 
-    private def error(ex : Exception)
+    private def error(job : T, ex : Exception)
       error_msg = String.build do |io|
-        io << "JoobQ error:\n"
+        io << "JOB error:\n"
+        io << "JOB ID: #{job.jid}\n"
         io << "#{ex.class} #{ex}\n"
         io << ex.backtrace.join("\n") if ex.backtrace
       end

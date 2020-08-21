@@ -23,13 +23,16 @@ module JoobQ
           status: q.status,
           running_workers: q.running_workers,
           size: q.size,
-          failed: redis.zscan(Sets::Failed.to_s, 0, "queue:#{q.name}*", count = nil),
-          retry: redis.zscan(Sets::Retry.to_s, 0, "queue:#{q.name}*", count = nil),
+          # failed: redis.zscan(Sets::Failed.to_s, 0, "#{q.name}*", count = nil),
+          # retry: redis.zscan(Sets::Retry.to_s, 0, "#{q.name}*", count = nil),
+          # errors: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "count", 60000, 100),
+          # latency: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "avg", 60000, 100),
+          # completed: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "avg", 60000, 100),
         }
       end
     end
 
-    def query(from, to, filters, aggr = "avg", group_by = 5000, count = 100)
+    def query(from, to, filters : Array(String), aggr = "avg", group_by = 5000, count = 100)
       q = ["TS.MRANGE", "#{from}", "#{to}"]
 
       q << "COUNT"
@@ -38,7 +41,7 @@ module JoobQ
       q << "#{aggr}"
       q << "#{group_by}"
       q << "FILTER"
-      q << "#{filters}"
+      filters.each { |item| q << item }
 
       result_set(redis.command q)
     end
@@ -98,7 +101,8 @@ module JoobQ
               "RETENTION", "#{RETENTION_MILLIS}",
               "LABELS",
               "name", "#{q.name}",
-              "wid", "#{w.wid}",
+              "status", "null",
+              "stats", "stats",
             ]
           rescue e
           end
@@ -116,7 +120,7 @@ module JoobQ
     end
 
     def track(name : String, wid : Int32, latency : Int32, status : String)
-      redis.command ["TS.ADD", "#{STATS_KEY}:#{name}", "*", "#{latency}", "LABELS", "name", "#{name}", "stats", "stats", "status", status]
+      redis.command ["TS.ADD", "#{STATS_KEY}:#{status}", "*", "#{latency}", "LABELS", "name", "#{name}", "status", status, "stats", "stats"]
     rescue e
       -1
     end

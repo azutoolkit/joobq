@@ -14,7 +14,7 @@ module JoobQ
       create_workers
     end
 
-    def create_workers
+    private def create_workers
       total_workers.times do |n|
         workers << Worker(T).new name, n
       end

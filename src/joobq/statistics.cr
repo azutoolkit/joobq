@@ -3,15 +3,24 @@ module JoobQ
     INSTANCE         = new
     RETENTION_MILLIS = 10800000
     STATS_KEY        = "stats"
+    STATS            = %w[Errors Retries Dead Success Latency]
 
+    getter redis : Redis::PooledClient = JoobQ.redis
+    # How to track
     def self.instance
       INSTANCE
     end
 
-    getter redis : Redis::PooledClient = JoobQ.redis
+    def self.create_series
+      instance.create_key "processing"
+      
+      JoobQ::QUEUES.each do |key, _|
+        instance.create_key key
+      end
+    end
 
     def queues
-      QUEUES
+      JoobQ::QUEUES
     end
 
     def queues_details
@@ -32,31 +41,37 @@ module JoobQ
       end
     end
 
-    def query(from, to, filters : Array(String), aggr = "avg", group_by = 5000, count = 100)
-      q = ["TS.MRANGE", "#{from}", "#{to}"]
+    def reset
+      queues.each do |name, q|
+        redis.del "#{STATS_KEY}:#{q.name}"
+      end
+    end
+
+    def success(name : String, latency : Int32)
+      track("#{name}:success", latency)
+    end
+
+    def error(name : String, latency : Int32)
+      track("#{name}:error", latency)
+    end
+
+    def processing
+      track("processing", 1)
+    end
+
+    def range(name, since = 0, to = 1.hour.from_now.to_unix_ms, aggr = "count", group = 5000, count = 100)
+      q = ["TS.RANGE", key(name), "#{since}", "#{to}"]
 
       q << "COUNT"
       q << "#{count}"
       q << "AGGREGATION"
       q << "#{aggr}"
-      q << "#{group_by}"
-      q << "FILTER"
-      filters.each { |item| q << item }
-
-      result_set(redis.command q)
+      q << "#{group}"
+      p q
+      result_set redis.command(q)
     end
 
-    def result_set(results)
-      results.not_nil!.as(Array)[0].as(Array)[2].as(Array)
-    rescue
-      [] of Array(Int64 | String)
-    end
-
-    def failed(key : String)
-      redis.keys key
-    end
-
-    def count_stats
+    def totals
       result = jobs_count_by_status
       total = result[0] + result[1] +  result[2]
 
@@ -75,11 +90,21 @@ module JoobQ
       }
     end
 
-    def percent_of(quotient, divisor)
+    private def key(name)
+      "#{STATS_KEY}:#{name}"
+    end
+
+    private def result_set(results)
+      results.not_nil!.as(Array(Redis::RedisValue))
+    rescue
+      [] of Array(Int64 | String)
+    end
+
+    private def percent_of(quotient, divisor)
       (( quotient / divisor ) * 100).round || 0.0
     end
 
-    def jobs_count_by_status
+    private def jobs_count_by_status
       redis.pipelined do |pipe|
         pipe.llen(Queues::Completed.to_s) 
         pipe.zcard(Sets::Retry.to_s)
@@ -91,38 +116,24 @@ module JoobQ
       end
     end
 
-    def create_key(key_name = STATS_KEY)
-      queues.each do |name, q|
-        q.workers.each do |w|
-          begin
-            redis.command [
-              "TS.CREATE",
-              "#{STATS_KEY}:#{q.name}",
-              "RETENTION", "#{RETENTION_MILLIS}",
-              "LABELS",
-              "name", "#{q.name}",
-              "status", "null",
-              "stats", "stats",
-            ]
-          rescue e
-          end
-        end
-      end
-      "OK"
-    end
-
-    def reset
-      queues.each do |name, q|
-        q.workers.each do |w|
-          redis.del "#{STATS_KEY}:#{q.name}:#{w.wid}"
-        end
-      end
-    end
-
-    def track(name : String, wid : Int32, latency : Int32, status : String)
-      redis.command ["TS.ADD", "#{STATS_KEY}:#{status}", "*", "#{latency}", "LABELS", "name", "#{name}", "status", status, "stats", "stats"]
+    private def track(name : String, latency : Int32)
+      redis.command ["TS.ADD", "#{STATS_KEY}:#{name}", "*", "#{latency}"]
     rescue e
       -1
+    end
+
+    def create_key(name)
+      redis.command [
+        "TS.CREATE",
+        "#{STATS_KEY}:#{name}",
+        "RETENTION", "#{RETENTION_MILLIS}",
+        "LABELS",
+        "name", "#{name}",
+        "stats", "stats",
+      ]
+      puts "Ok!"
+    rescue
+      puts "Key already exists. Ok!"
     end
   end
 end

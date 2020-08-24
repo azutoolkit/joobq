@@ -17,6 +17,7 @@ module JoobQ
   )
 
   Log.setup_from_env(default_level: :trace)
+  Statistics.create_series
 
   def self.[](name : String)
     QUEUES[name]
@@ -49,7 +50,7 @@ module JoobQ
   def self.forge
     Log.info { "JoobQ starting..." }
     Scheduler.instance.run
-
+    
     QUEUES.each do |_, queue|
       spawn queue.process
     end

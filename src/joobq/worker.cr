@@ -5,6 +5,7 @@ module JoobQ
     private getter stats : Statistics = JoobQ.statistics
     getter wid : Int32
     property? running : Bool = false
+    private getter concurrency = 50
 
     def initialize(@name : String, @wid : Int32)
       @stopped = true
@@ -17,7 +18,7 @@ module JoobQ
       spawn do
         loop do
           redis.pipelined do |pipe|
-            100.times do |_i|
+            concurrency.times do |_i|
               pipe.brpoplpush @name, Queues::Busy.to_s, 0
             end
           end.each do |job|

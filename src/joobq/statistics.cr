@@ -23,6 +23,18 @@ module JoobQ
       JoobQ::QUEUES
     end
 
+    def queue(name)
+      q = queues[name]
+      {
+        name: q.name, 
+        total_workers: q.total_workers,
+        jobs: q.jobs,
+        status: q.status,
+        running_workers: q.running_workers,
+        size: q.size,
+      }
+    end
+
     def queues_details
       queues.map do |k,q|
         {

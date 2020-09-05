@@ -3,28 +3,19 @@ require "./spec_helper"
 module JoobQ
   describe Scheduler do
     scheduler = JoobQ.scheduler
-    job = ExampleJob.new 1
-    job2 = ExampleJob.new 2
+    job = ExampleJob.new 2
 
-    before_each do
-      redis.del job.queue
-      redis.del job2.queue
-      redis.del Sets::Delayed.to_s
-      JoobQ.reset
-    end
-
-    describe "delayed jobs" do
-      it "process delayed jobs ready for execution only" do
-        redis.del Sets::Delayed.to_s
-
-        scheduler.delay job, 5.minutes
-        scheduler.delay job2, 2.seconds
-
-        redis.zcard(Sets::Delayed.to_s).should eq 2
-
-        scheduler.enqueue(2.seconds.from_now)
-
+    describe "delayes jobs" do
+      it "enqueues and process a job when ready" do
+        redis.del "scheduler"
+        job.queue = "scheduler"
+        
+        scheduler.delay job, 2.seconds
         redis.zcard(Sets::Delayed.to_s).should eq 1
+
+        scheduler.enqueue 3.seconds.from_now
+
+        redis.zcard(Sets::Delayed.to_s).should eq 0
         redis.llen(job.queue).should eq 1
       end
     end

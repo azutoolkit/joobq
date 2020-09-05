@@ -10,8 +10,4 @@ module JoobQ
     Retry
     Dead
   end
-
-  enum Control
-    Stop
-  end
 end

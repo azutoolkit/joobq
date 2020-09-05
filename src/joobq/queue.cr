@@ -7,16 +7,17 @@ module JoobQ
     getter workers : Array(Worker(T))
     getter jobs : String = T.to_s
     getter queue_size : Int32 = 100
+    getter terminate = Channel(Nil).new
+    getter done = Channel(Nil).new
 
     def initialize(@name : String, @total_workers : Int32)
-      @dispatch_queue = Channel(Worker(T)).new(@total_workers)
       @workers = Array(Worker(T)).new(@total_workers)
       create_workers
     end
 
     private def create_workers
       total_workers.times do |n|
-        workers << Worker(T).new name, n
+        workers << Worker(T).new name, n, terminate, done
       end
     end
 
@@ -29,7 +30,7 @@ module JoobQ
     end
 
     def stop!
-      workers.all? &.stop
+      workers.all? &.stop!
     end
 
     def running?

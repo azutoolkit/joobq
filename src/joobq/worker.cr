@@ -7,7 +7,7 @@ module JoobQ
     property? running : Bool = false
     private getter concurrency = 50
 
-    def initialize(@name : String, @wid : Int32)
+    def initialize(@name : String, @wid : Int32, @terminate : Channel(Nil), @done : Channel(Nil))
       @stopped = true
     end
 
@@ -17,16 +17,22 @@ module JoobQ
 
       spawn do
         loop do
-          redis.pipelined do |pipe|
-            concurrency.times do |_i|
-              pipe.brpoplpush @name, Queues::Busy.to_s, 0
+          select
+          when @terminate.receive?
+            Log.trace {"Worker QUEUE:#{@name} ID:#{wid} stopped!"}
+            break
+          else 
+            redis.pipelined do |pipe|
+              concurrency.times do |_i|
+                pipe.brpoplpush @name, Queues::Busy.to_s, 0
+              end
+            end.each do |job|
+              next unless job
+              stats.processing
+              json = job.as(String)
+              job = T.from_json json
+              process job, json
             end
-          end.each do |job|
-            next unless job
-            stats.processing
-            json = job.as(String)
-            job = T.from_json json
-            process job, json
           end
         end
       end
@@ -46,8 +52,9 @@ module JoobQ
       end
     end
 
-    def stop
+    def stop!
       @stopped = true
+      @terminate.close
     end
 
     def stopped?

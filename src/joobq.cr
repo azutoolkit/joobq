@@ -17,7 +17,6 @@ module JoobQ
   )
 
   Log.setup_from_env(default_level: :trace)
-  Statistics.create_series
 
   def self.[](name : String)
     QUEUES[name]
@@ -42,13 +41,15 @@ module JoobQ
   def self.reset
     REDIS.del Queues::Busy.to_s,
       Queues::Completed.to_s,
-      Sets::Dead.to_s,
+      Sets::Delayed.to_s,
+      Sets::Failed.to_s,
       Sets::Retry.to_s,
       Sets::Dead.to_s
   end
 
   def self.forge
     Log.info { "JoobQ starting..." }
+    Statistics.create_series
     Scheduler.instance.run
     
     QUEUES.each do |_, queue|

@@ -1,4 +1,5 @@
 # JoobQ
+![Crystal CI](https://github.com/eliasjpr/joobq/workflows/Crystal%20CI/badge.svg?branch=master) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/757ebd7d1db942da8eb9f8392415b1a6)](https://www.codacy.com/manual/eliasjpr/joobq?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=eliasjpr/joobq&amp;utm_campaign=Badge_Grade)
 
 JoobQ is a fast, efficient asynchronous reliable job queue scheduler library processing. Jobs are submitted
 to a job queue, where they reside until they are able to be scheduled to run in a

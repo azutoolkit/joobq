@@ -9,7 +9,7 @@ require "./joobq/**"
 module JoobQ
   VERSION       = "0.1.0"
   LOADER_QUEUES = {} of Nil => Nil
-  REDIS = Redis::PooledClient.new(
+  REDIS         = Redis::PooledClient.new(
     host: ENV.fetch("REDIS_HOST", "localhost"),
     port: ENV.fetch("REDIS_PORT", "6379").to_i,
     pool_size: ENV.fetch("REDIS_POOL_SIZE", "50").to_i,
@@ -51,7 +51,7 @@ module JoobQ
     Log.info { "JoobQ starting..." }
     Statistics.create_series
     Scheduler.instance.run
-    
+
     QUEUES.each do |_, queue|
       spawn queue.process
     end

@@ -4,7 +4,7 @@ module JoobQ
   describe Statistics do
     stats = Statistics.instance
     key = "example"
-    
+
     before_each do
       JoobQ.reset
       stats.reset

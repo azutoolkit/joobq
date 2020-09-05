@@ -19,9 +19,9 @@ module JoobQ
         loop do
           select
           when @terminate.receive?
-            Log.trace {"Worker QUEUE:#{@name} ID:#{wid} stopped!"}
+            Log.trace { "Worker QUEUE:#{@name} ID:#{wid} stopped!" }
             break
-          else 
+          else
             redis.pipelined do |pipe|
               concurrency.times do |_i|
                 pipe.brpoplpush @name, Queues::Busy.to_s, 0
@@ -68,7 +68,7 @@ module JoobQ
     private def handle_failure(job : T, e : Exception, start)
       job.failed_at = Time.local
       Failed.add job, e
-      
+
       if job.retries > 0
         Retry.attempt job
       else

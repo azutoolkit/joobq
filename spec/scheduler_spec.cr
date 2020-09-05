@@ -9,7 +9,7 @@ module JoobQ
       it "enqueues and process a job when ready" do
         redis.del "scheduler"
         job.queue = "scheduler"
-        
+
         scheduler.delay job, 2.seconds
         redis.zcard(Sets::Delayed.to_s).should eq 1
 

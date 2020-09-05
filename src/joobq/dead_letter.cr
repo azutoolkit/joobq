@@ -1,7 +1,7 @@
 module JoobQ
   module DeadLetter
     DEAD_LETTER = Sets::Dead.to_s
-    REDIS = JoobQ.redis
+    REDIS       = JoobQ.redis
 
     def self.add(job)
       now = Time.local.to_unix_f

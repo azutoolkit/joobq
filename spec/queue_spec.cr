@@ -6,7 +6,7 @@ module JoobQ
     total_jobs = 100
     queue = JoobQ["example"]
 
-    before_each do 
+    before_each do
       JoobQ.reset
       queue.clear
     end
@@ -39,7 +39,7 @@ module JoobQ
 
         queue.size.should eq (total_jobs * 2)
         queue.running?.should be_false
-        
+
         queue.process
         sleep 1
 

@@ -1,5 +1,4 @@
 module JoobQ
-
   class Queue(T)
     getter redis : Redis::PooledClient = JoobQ.redis
     getter name : String
@@ -40,8 +39,8 @@ module JoobQ
     def status
       case
       when !size.zero? then "Running"
-      when size.zero? then "Done"
-      else "Awaiting"
+      when size.zero?  then "Done"
+      else                  "Awaiting"
       end
     end
 

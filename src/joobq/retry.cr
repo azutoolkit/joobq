@@ -1,7 +1,7 @@
 module JoobQ
   module Retry
     RETRY_SET = Sets::Retry.to_s
-    REDIS = JoobQ.redis
+    REDIS     = JoobQ.redis
 
     def self.attempt(job)
       count = job.retries

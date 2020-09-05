@@ -26,7 +26,7 @@ module JoobQ
       spawn do
         loop do
           sleep 100.milliseconds
-          enqueue(now = Time.local)
+          enqueue(Time.local)
         end
       end
     end
@@ -47,7 +47,6 @@ module JoobQ
 
         if redis.zrem(delayed_queue, data)
           redis.rpush(json["queue"].as_s, data)
-          count += 1
         end
       end
     end

@@ -44,7 +44,7 @@ end
 
 module JoobQ
   QUEUES = {
-    "single"       => Queue(Job1).new("single", 10),
-    "example"      => Queue(ExampleJob | FailJob).new("example", 1),
+    "single"  => Queue(Job1).new("single", 10),
+    "example" => Queue(ExampleJob | FailJob).new("example", 1),
   }
 end

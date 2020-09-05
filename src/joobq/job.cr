@@ -2,7 +2,7 @@ module JoobQ
   module Job
     macro included
       include JSON::Serializable
-      
+
       def self.perform
         job = new
         JoobQ[job.queue].push job.to_json

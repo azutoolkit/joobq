@@ -33,7 +33,6 @@ module JoobQ
 
     def enqueue(now = Time.local)
       loop do
-        count = 0
         moment = "%.6f" % now.to_unix_f
 
         results = redis.zrangebyscore(

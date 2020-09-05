@@ -13,7 +13,7 @@ compute environment.
 * [x] Retry Jobs with automatic Delays
 * [x] Cron Like Periodic Jobs
 * [x] Delayed Jobs
-* [/] Stop execution of workers
+* [x] Stop execution of workers
 * [] Expiring Jobs: Jobs to expire after certain time
 * [] Rest API: Rest api to schedule jobs
 * [] Approve Queue?: Jobs have to manually approved to execute

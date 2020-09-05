@@ -6,7 +6,7 @@ module JoobQ
     STATS            = %w[Errors Retries Dead Success Latency]
 
     getter redis : Redis::PooledClient = JoobQ.redis
-    # How to track
+
     def self.instance
       INSTANCE
     end
@@ -143,9 +143,9 @@ module JoobQ
         "name", "#{name}",
         "stats", "stats",
       ]
-      puts "Ok!"
+      "Ok!"
     rescue
-      puts "Key already exists. Ok!"
+      "Key already exists. Ok!"
     end
   end
 end

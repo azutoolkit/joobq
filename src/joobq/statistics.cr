@@ -79,7 +79,7 @@ module JoobQ
       q << "AGGREGATION"
       q << "#{aggr}"
       q << "#{group}"
-      p q
+
       result_set redis.command(q)
     end
 

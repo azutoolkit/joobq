@@ -7,9 +7,8 @@ require "cron_parser"
 require "./joobq/**"
 
 module JoobQ
-  VERSION       = "0.1.0"
-  LOADER_QUEUES = {} of Nil => Nil
-  REDIS         = Redis::PooledClient.new(
+  VERSION = "0.1.0"
+  REDIS   = Redis::PooledClient.new(
     host: ENV.fetch("REDIS_HOST", "localhost"),
     port: ENV.fetch("REDIS_PORT", "6379").to_i,
     pool_size: ENV.fetch("REDIS_POOL_SIZE", "50").to_i,
@@ -17,10 +16,6 @@ module JoobQ
   )
 
   Log.setup_from_env(default_level: :trace)
-
-  def self.[](name : String)
-    QUEUES[name]
-  end
 
   def self.queues
     QUEUES
@@ -38,6 +33,10 @@ module JoobQ
     Scheduler.instance
   end
 
+  def self.[](name : String)
+    QUEUES[name]
+  end
+
   def self.reset
     REDIS.del Queues::Busy.to_s,
       Queues::Completed.to_s,
@@ -49,8 +48,8 @@ module JoobQ
 
   def self.forge
     Log.info { "JoobQ starting..." }
-    Statistics.create_series
-    Scheduler.instance.run
+    scheduler.run
+    statistics.create_series
 
     QUEUES.each do |_, queue|
       spawn queue.process

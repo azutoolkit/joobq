@@ -9,7 +9,7 @@ module JoobQ
     def self.instance
       INSTANCE
     end
-
+    
     def clear
       @periodic_jobs.clear
     end

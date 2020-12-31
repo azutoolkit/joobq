@@ -47,11 +47,13 @@ module JoobQ
   end
 
   def self.forge
-    Log.info { "JoobQ starting..." }
-    scheduler.run
-    Statistics.create_series
+    Log.info { "JoobQ booting..." }
 
-    QUEUES.each do |_, queue|
+    Statistics.create_series
+    scheduler.run
+
+    queues.each do |key, queue|
+      Log.info { "JoobQ starting #{key} queue..." }
       queue.start
     end
 

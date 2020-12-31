@@ -10,13 +10,17 @@ module JoobQ
       INSTANCE
     end
 
-    def self.record_stats(name, wid, job_id, latency)
+    def self.record_success(name, job_id, latency)
       REDIS.pipelined do |pipe|
         pipe.command ["TS.ADD", "stats:#{name}:success", "*", "#{latency}"]
         pipe.command ["TS.ADD", "stats:processing", "*", "#{latency}"]
         pipe.lpush(Queues::Completed.to_s, job_id)
         pipe.lrem(Queues::Busy.to_s, 0, job_id)
       end
+    end
+
+    def self.record_failure(name, latency)
+      REDIS.command ["TS.ADD", "stats:#{name}:error", "*", "#{latency}"]
     end
 
     def self.create_series

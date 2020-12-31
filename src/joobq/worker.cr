@@ -35,17 +35,24 @@ module JoobQ
 
     private def process(job : T, start = Time.monotonic)
       job.perform
+      record_success name, job.jid, start
     rescue ex
-      record_failure job, ex, latency(start)
-      handle_failure job
+      record_failure start
+      handle_failure job, ex
     ensure
-      spawn do
-        Log.info &.emit("Processed", {queue: name, worker_id: wid, job_id: job.jid.to_s})
-      end
-      Statistics.record_stats name, wid, "#{job.jid}", latency(start)
+      log_processed job.jid
+    end
+    
+    private def record_success(name, jid, start)
+      Statistics.record_success name, "#{jid}", latency(start)
     end
 
-    private def handle_failure(job : T)
+    private def record_failure(start)
+      Statistics.record_failure name, latency(start)
+    end
+
+    private def handle_failure(job : T, ex : Exception)
+      Failed.add job, ex
       if job.retries > 0
         Retry.attempt job, @queue
       else
@@ -53,9 +60,10 @@ module JoobQ
       end
     end
 
-    private def record_failure(job, ex, latency)
-      redis.command ["TS.ADD", "stats:#{name}:error", "*", "#{latency}"]
-      Failed.add job, ex
+    private def log_processed(jid)
+      spawn do
+        Log.info &.emit("Processed", {queue: name, worker_id: wid, job_id: jid.to_s})
+      end
     end
 
     private def latency(start)

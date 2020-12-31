@@ -4,8 +4,8 @@ module JoobQ
     REDIS      = JoobQ.redis
 
     def self.add(job, ex)
-      now = Time.local.to_unix_f
-      expires = (Time.local - 6.months).to_unix_f
+      now = Time.local
+      expires = (Time.local - 3.days).to_unix_f
 
       error = {
         queue:     job.queue,
@@ -19,7 +19,7 @@ module JoobQ
 
       key = "#{FAILED_SET}:#{job.jid}"
 
-      REDIS.zadd key, now, error.to_json
+      REDIS.zadd key, now.to_unix_f, error.to_json
       REDIS.zremrangebyscore key, "-inf", expires
       REDIS.zremrangebyrank key, 0, -10_000
     end

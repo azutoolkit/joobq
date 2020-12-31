@@ -4,11 +4,23 @@ module JoobQ
     RETENTION_MILLIS = 10800000
     STATS_KEY        = "stats"
     STATS            = %w[Errors Retries Dead Success Latency]
-
-    getter redis : Redis::PooledClient = JoobQ.redis
+    REDIS            = JoobQ.redis
 
     def self.instance
       INSTANCE
+    end
+
+    def self.record_stats(name, wid, job_id, latency)
+      spawn do
+        Log.info &.emit("Job Completed!", queue: name, worker_id: wid, job_id: job_id)
+      end
+      
+      REDIS.pipelined do |pipe|
+        pipe.command ["TS.ADD", "stats:#{name}:success", "*", "#{latency}"]
+        pipe.command ["TS.ADD", "stats:processing", "*", "#{latency}"]
+        pipe.lpush(Queues::Completed.to_s, job_id)
+        pipe.lrem(Queues::Busy.to_s, 0, job_id)
+      end
     end
 
     def self.create_series
@@ -18,7 +30,7 @@ module JoobQ
         instance.create_key key
       end
     end
-
+    
     def queues
       JoobQ::QUEUES
     end
@@ -30,7 +42,6 @@ module JoobQ
         total_workers:   q.total_workers,
         jobs:            q.jobs,
         status:          q.status,
-        running_workers: q.running_workers,
         size:            q.size,
       }
     end
@@ -42,7 +53,6 @@ module JoobQ
           total_workers:   q.total_workers,
           jobs:            q.jobs,
           status:          q.status,
-          running_workers: q.running_workers,
           size:            q.size,
           # failed: redis.zscan(Sets::Failed.to_s, 0, "#{q.name}*", count = nil),
           # retry: redis.zscan(Sets::Retry.to_s, 0, "#{q.name}*", count = nil),
@@ -55,20 +65,8 @@ module JoobQ
 
     def reset
       queues.each do |_, q|
-        redis.del "#{STATS_KEY}:#{q.name}"
+        REDIS.del "#{STATS_KEY}:#{q.name}"
       end
-    end
-
-    def success(name : String, latency : Int32)
-      track("#{name}:success", latency)
-    end
-
-    def error(name : String, latency : Int32)
-      track("#{name}:error", latency)
-    end
-
-    def processing
-      track("processing", 1)
     end
 
     def range(name, since = 0, to = 1.hour.from_now.to_unix_ms, aggr = "count", group = 5000, count = 100)
@@ -80,7 +78,7 @@ module JoobQ
       q << "#{aggr}"
       q << "#{group}"
 
-      result_set redis.command(q)
+      result_set REDIS.command(q)
     end
 
     def totals
@@ -117,7 +115,7 @@ module JoobQ
     end
 
     private def jobs_count_by_status
-      redis.pipelined do |pipe|
+      REDIS.pipelined do |pipe|
         pipe.llen(Queues::Completed.to_s)
         pipe.zcard(Sets::Retry.to_s)
         pipe.zcard(Sets::Dead.to_s)
@@ -128,14 +126,8 @@ module JoobQ
       end
     end
 
-    private def track(name : String, latency : Int32)
-      redis.command ["TS.ADD", "#{STATS_KEY}:#{name}", "*", "#{latency}"]
-    rescue e
-      -1
-    end
-
     def create_key(name)
-      redis.command [
+      REDIS.command [
         "TS.CREATE",
         "#{STATS_KEY}:#{name}",
         "RETENTION", "#{RETENTION_MILLIS}",

@@ -1,87 +1,62 @@
 module JoobQ
   class Worker(T)
     Log = ::Log.for("WORKER")
-    private getter redis : Redis::PooledClient = JoobQ.redis
-    private getter stats : Statistics = JoobQ.statistics
+    
     getter wid : Int32
     property? running : Bool = false
-    private getter concurrency = 50
 
-    def initialize(@name : String, @wid : Int32, @terminate : Channel(Nil), @done : Channel(Nil))
-      @stopped = true
+    private getter redis : Redis::PooledClient = JoobQ.redis
+    private getter stats : Statistics = JoobQ.statistics
+
+    def initialize(@wid : Int32, @terminate : Channel(Nil), @queue : Queue(T))
+    end
+
+    def name
+      @queue.name
     end
 
     def run
-      return if running?
-      @stopped = false
-
       spawn do
         loop do
           select
           when @terminate.receive?
-            Log.trace { "Worker QUEUE:#{@name} ID:#{wid} stopped!" }
             break
-          else
-            redis.pipelined do |pipe|
-              concurrency.times do |_i|
-                pipe.brpoplpush @name, Queues::Busy.to_s, 0
-              end
-            end.each do |job|
-              next unless job
-              stats.processing
-              json = job.as(String)
-              job = T.from_json json
-              process job, json
-            end
+          else 
+            job = @queue.get_next
+            process job if job
           end
         end
+        @queue.terminate(worker: self)
       end
+    rescue ex : Exception
+      Log.error &.emit("Fetching Job Failed!", { worker_id: wid, reason: ex.message})
+      @queue.restart self, ex
     end
 
-    def process(job : T, json : String, start = Time.local)
+    private def process(job : T, start = Time.monotonic)
       job.perform
-      stats.success @name, latency(start)
-    rescue e
-      log job, "error"
-      stats.error job.queue, latency(start)
-      handle_failure job, e, start
+    rescue ex
+      record_failure job, ex, latency(start)
+      handle_failure job
     ensure
-      log job, "success"
-      if redis.lpush(Queues::Completed.to_s, json)
-        redis.lrem(Queues::Busy.to_s, 0, json)
-      end
+      Statistics.record_stats name, wid, "#{job.jid}", latency(start)
     end
 
-    def stop!
-      @stopped = true
-      @terminate.close
-    end
-
-    def stopped?
-      @stopped
-    end
-
-    def running?
-      !@stopped
-    end
-
-    private def handle_failure(job : T, e : Exception, start)
-      job.failed_at = Time.local
-      Failed.add job, e
-
+    private def handle_failure(job : T)
       if job.retries > 0
-        Retry.attempt job
+        Retry.attempt job, @queue
       else
         DeadLetter.add job
       end
+    end 
+
+    private def record_failure(job, ex, latency)
+      redis.command ["TS.ADD", "stats:#{name}:error", "*", "#{latency}"]
+      Failed.add job, ex
     end
 
     private def latency(start)
-      (Time.local - start).milliseconds
-    end
-
-    private def log(job : T, status : String)
-      Log.trace { "#{@name} (#{@wid}) #{status.upcase} Job: #{job.class.name} (#{job.jid})" }
+      (Time.monotonic - start).milliseconds
     end
   end
 end

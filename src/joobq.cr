@@ -49,10 +49,10 @@ module JoobQ
   def self.forge
     Log.info { "JoobQ starting..." }
     scheduler.run
-    statistics.create_series
+    Statistics.create_series
 
     QUEUES.each do |_, queue|
-      spawn queue.process
+      queue.start
     end
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }

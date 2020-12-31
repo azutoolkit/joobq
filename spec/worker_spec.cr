@@ -2,10 +2,11 @@ require "./spec_helper"
 
 module JoobQ
   describe Worker do
-    queue = "example"
+
+    queue = Queue(Example).new("example", 1)
     done = Channel(Nil).new
     control = Channel(Nil).new
-    worker = Worker(ExampleJob | FailJob).new(queue, 1, control, done)
+    worker = queue.workers.first
     job = ExampleJob.new(1)
 
     before_each { JoobQ.reset }

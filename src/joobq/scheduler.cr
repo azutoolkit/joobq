@@ -18,7 +18,7 @@ module JoobQ
       with self yield
     end
 
-    def delay(job : Job, till : Time::Span)
+    def delay(job : JoobQ::Job, till : Time::Span)
       redis.zadd(delayed_queue, till.from_now.to_unix_f, job.to_json)
     end
 
@@ -42,10 +42,12 @@ module JoobQ
         break if results.empty?
 
         data = results.first.as(String)
-        json = JSON.parse(data)
+        job = JSON.parse(data)
+
+        Log.info &.emit("Enqueueing Job", queue: job["queue"].to_s, job_id: job["jid"].to_s)
 
         if redis.zrem(delayed_queue, data)
-          redis.rpush(json["queue"].as_s, data)
+          redis.rpush(job["queue"].as_s, data)
         end
       end
     end

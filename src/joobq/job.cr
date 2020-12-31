@@ -5,13 +5,13 @@ module JoobQ
 
       def self.perform
         job = new
-        JoobQ[job.queue].push job.to_json
+        JoobQ[job.queue].push job.jid, job.to_json
         job.jid
       end
 
       def self.perform(**args)
         job = new(**args)
-        JoobQ[job.queue].push job.to_json
+        JoobQ[job.queue].push job.jid, job.to_json
         job.jid
       end
 
@@ -29,9 +29,7 @@ module JoobQ
     property queue : String = "default"
     property retries : Int32 = 0
     property at : Time? = nil
-    property failed_at : Time? = nil
     property done_at : Time? = nil
-    property ex : Hash(String, String?)? = nil
 
     abstract def perform
   end

@@ -8,11 +8,14 @@ module JoobQ
       job.retries = job.retries - 1
       at = retry_at(count)
 
-      ## Update job
-      Log.info &.emit("Retrying Job", in_seconds: "#{at}", job_id: "#{job.jid}", retries_left: "#{job.retries}")
+      Log.warn &.emit("Retry",
+        queue: job.queue,
+        job_id: "#{job.jid}",
+        retry_in: "#{at}",
+        retries_left: "#{job.retries}")
 
       queue.set_job job.jid, job.to_json
-      # Reschedule the job in the future
+
       JoobQ.scheduler.delay job, at
     end
 

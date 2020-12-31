@@ -1,7 +1,7 @@
 module JoobQ
   class Worker(T)
     Log = ::Log.for("WORKER")
-    
+
     getter wid : Int32
     property? running : Bool = false
 
@@ -21,7 +21,7 @@ module JoobQ
           select
           when @terminate.receive?
             break
-          else 
+          else
             job = @queue.get_next
             process job if job
           end
@@ -29,7 +29,7 @@ module JoobQ
         @queue.terminate(worker: self)
       end
     rescue ex : Exception
-      Log.error &.emit("Fetching Job Failed!", { worker_id: wid, reason: ex.message})
+      Log.error &.emit("Fetch Error", {worker_id: wid, reason: ex.message})
       @queue.restart self, ex
     end
 
@@ -39,6 +39,9 @@ module JoobQ
       record_failure job, ex, latency(start)
       handle_failure job
     ensure
+      spawn do
+        Log.info &.emit("Processed", {queue: name, worker_id: wid, job_id: job.jid.to_s})
+      end
       Statistics.record_stats name, wid, "#{job.jid}", latency(start)
     end
 
@@ -48,7 +51,7 @@ module JoobQ
       else
         DeadLetter.add job
       end
-    end 
+    end
 
     private def record_failure(job, ex, latency)
       redis.command ["TS.ADD", "stats:#{name}:error", "*", "#{latency}"]

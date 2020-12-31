@@ -11,10 +11,6 @@ module JoobQ
     end
 
     def self.record_stats(name, wid, job_id, latency)
-      spawn do
-        Log.info &.emit("Job Completed!", queue: name, worker_id: wid, job_id: job_id)
-      end
-      
       REDIS.pipelined do |pipe|
         pipe.command ["TS.ADD", "stats:#{name}:success", "*", "#{latency}"]
         pipe.command ["TS.ADD", "stats:processing", "*", "#{latency}"]
@@ -30,7 +26,7 @@ module JoobQ
         instance.create_key key
       end
     end
-    
+
     def queues
       JoobQ::QUEUES
     end
@@ -38,22 +34,22 @@ module JoobQ
     def queue(name)
       q = queues[name]
       {
-        name:            q.name,
-        total_workers:   q.total_workers,
-        jobs:            q.jobs,
-        status:          q.status,
-        size:            q.size,
+        name:          q.name,
+        total_workers: q.total_workers,
+        jobs:          q.jobs,
+        status:        q.status,
+        size:          q.size,
       }
     end
 
     def queues_details
       queues.map do |_, q|
         {
-          name:            q.name,
-          total_workers:   q.total_workers,
-          jobs:            q.jobs,
-          status:          q.status,
-          size:            q.size,
+          name:          q.name,
+          total_workers: q.total_workers,
+          jobs:          q.jobs,
+          status:        q.status,
+          size:          q.size,
           # failed: redis.zscan(Sets::Failed.to_s, 0, "#{q.name}*", count = nil),
           # retry: redis.zscan(Sets::Retry.to_s, 0, "#{q.name}*", count = nil),
           # errors: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "count", 60000, 100),

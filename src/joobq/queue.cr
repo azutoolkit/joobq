@@ -21,7 +21,7 @@ module JoobQ
     end
 
     def get_next : T?
-      # Add to BUSY queue so we can later monitor busy jobs and be able to 
+      # Add to BUSY queue so we can later monitor busy jobs and be able to
       # gracefully terminate jobs processing them
       if job_id = redis.brpoplpush(name, Queues::Busy.to_s, TIMEOUT)
         return self.[job_id]?

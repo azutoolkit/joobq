@@ -8,12 +8,15 @@ module JoobQ
       expires = (Time.local - 6.months).to_unix_f
 
       error = {
-        "failed_at" => now,
-        "message"   => ex.message,
-        "backtrace" => ex.inspect_with_backtrace,
-        "cause"     => ex.cause.to_s,
+        queue:     job.queue,
+        failed_at: now,
+        message:   ex.message,
+        backtrace: ex.inspect_with_backtrace,
+        cause:     ex.cause.to_s,
       }
-      
+
+      Log.error &.emit("Error", error)
+
       key = "#{FAILED_SET}:#{job.jid}"
 
       REDIS.zadd key, now, error.to_json

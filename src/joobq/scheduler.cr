@@ -9,7 +9,7 @@ module JoobQ
     def self.instance
       INSTANCE
     end
-    
+
     def clear
       @periodic_jobs.clear
     end
@@ -25,7 +25,7 @@ module JoobQ
     def run
       spawn do
         loop do
-          sleep 100.milliseconds
+          sleep 5
           enqueue(Time.local)
         end
       end
@@ -44,10 +44,10 @@ module JoobQ
         data = results.first.as(String)
         job = JSON.parse(data)
 
-        Log.info &.emit("Enqueueing Job", queue: job["queue"].to_s, job_id: job["jid"].to_s)
+        Log.info &.emit("Enqueue", queue: job["queue"].to_s, job_id: job["jid"].to_s)
 
         if redis.zrem(delayed_queue, data)
-          redis.rpush(job["queue"].as_s, data)
+          JoobQ.queues[job["queue"].as_s].push UUID.new(job["jid"].as_s), data
         end
       end
     end

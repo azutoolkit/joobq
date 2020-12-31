@@ -2,7 +2,6 @@ require "./spec_helper"
 
 module JoobQ
   describe Worker do
-
     queue = Queue(Example).new("example", 1)
     done = Channel(Nil).new
     control = Channel(Nil).new

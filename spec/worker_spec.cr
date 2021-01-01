@@ -43,7 +43,7 @@ module JoobQ
       redis.llen(job.queue).should eq 0
       redis.zcard(Sets::Dead.to_s).should eq 0
       redis.zcard(Sets::Retry.to_s).should eq 0
-      redis.llen(Queues::Busy.to_s).should eq 0
+      redis.llen(Status::Busy.to_s).should eq 0
     end
 
     it "retries job" do
@@ -55,7 +55,7 @@ module JoobQ
       redis.llen(job.queue).should eq 0
       redis.zcard(Sets::Dead.to_s).should eq 0
       redis.zcard(Sets::Retry.to_s).should eq 1
-      redis.llen(Queues::Busy.to_s).should eq 0
+      redis.llen(Status::Busy.to_s).should eq 0
     end
 
     it "dead job" do
@@ -66,7 +66,7 @@ module JoobQ
       redis.llen(job.queue).should eq 0
       redis.zcard(Sets::Dead.to_s).should eq 1
       redis.zcard(Sets::Retry.to_s).should eq 0
-      redis.llen(Queues::Busy.to_s).should eq 0
+      redis.llen(Status::Busy.to_s).should eq 0
     end
   end
 end

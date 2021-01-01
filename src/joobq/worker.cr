@@ -23,7 +23,7 @@ module JoobQ
             break
           else
             job = @queue.get_next
-            process job if job
+            execute job if job
           end
         end
         @queue.terminate(worker: self)
@@ -33,41 +33,13 @@ module JoobQ
       @queue.restart self, ex
     end
 
-    private def process(job : T, start = Time.monotonic)
+    private def execute(job : T, start = Time.monotonic)
       job.perform
-      record_success name, job.jid, start
-    rescue ex
-      record_failure start
-      handle_failure job, ex
+      Track.success job, start
+    rescue ex : Exception
+      Track.failure job, start, ex
     ensure
-      log_processed job.jid
-    end
-    
-    private def record_success(name, jid, start)
-      Statistics.record_success name, "#{jid}", latency(start)
-    end
-
-    private def record_failure(start)
-      Statistics.record_failure name, latency(start)
-    end
-
-    private def handle_failure(job : T, ex : Exception)
-      Failed.add job, ex
-      if job.retries > 0
-        Retry.attempt job, @queue
-      else
-        DeadLetter.add job
-      end
-    end
-
-    private def log_processed(jid)
-      spawn do
-        Log.info &.emit("Processed", {queue: name, worker_id: wid, job_id: jid.to_s})
-      end
-    end
-
-    private def latency(start)
-      (Time.monotonic - start).milliseconds
+      Track.processed job, start
     end
   end
 end

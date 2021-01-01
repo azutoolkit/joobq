@@ -1,5 +1,6 @@
 module JoobQ
-  enum Queues
+  enum Status
+    Retry
     Busy
     Completed
   end

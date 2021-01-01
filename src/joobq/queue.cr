@@ -23,18 +23,24 @@ module JoobQ
     def get_next : T?
       # Add to BUSY queue so we can later monitor busy jobs and be able to
       # gracefully terminate jobs processing them
-      if job_id = redis.brpoplpush(name, Queues::Busy.to_s, TIMEOUT)
+      if job_id = redis.brpoplpush(name, Status::Busy.to_s, TIMEOUT)
         return self.[job_id]?
       end
     end
 
-    def push(job_id : UUID, job : String)
-      set_job job_id, job
-      redis.rpush name, "#{job_id}"
+    def push(job : String)
+      job = T.from_json(job)
+      set_job job
+      redis.rpush name, "#{job.jid}"
     end
 
-    def set_job(job_id : UUID, job : String)
-      redis.set "jobs:#{job_id}", job
+    def push(job : Job)
+      set_job job
+      redis.rpush name, "#{job.jid}"
+    end
+
+    def set_job(job)
+      redis.setex "jobs:#{job.jid}", job.expires, job.to_json
     end
 
     def []?(job_id) : T?

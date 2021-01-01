@@ -10,29 +10,15 @@ module JoobQ
       INSTANCE
     end
 
-    def self.record_success(name, job_id, latency)
-      REDIS.pipelined do |pipe|
-        pipe.command ["TS.ADD", "stats:#{name}:success", "*", "#{latency}"]
-        pipe.command ["TS.ADD", "stats:processing", "*", "#{latency}"]
-        pipe.lpush(Queues::Completed.to_s, job_id)
-        pipe.lrem(Queues::Busy.to_s, 0, job_id)
-      end
-    end
-
-    def self.record_failure(name, latency)
-      REDIS.command ["TS.ADD", "stats:#{name}:error", "*", "#{latency}"]
+    def queues
+      JoobQ::QUEUES
     end
 
     def self.create_series
       instance.create_key "processing"
-
       JoobQ::QUEUES.each do |key, _|
         instance.create_key key
       end
-    end
-
-    def queues
-      JoobQ::QUEUES
     end
 
     def queue(name)
@@ -48,18 +34,7 @@ module JoobQ
 
     def queues_details
       queues.map do |_, q|
-        {
-          name:          q.name,
-          total_workers: q.total_workers,
-          jobs:          q.jobs,
-          status:        q.status,
-          size:          q.size,
-          # failed: redis.zscan(Sets::Failed.to_s, 0, "#{q.name}*", count = nil),
-          # retry: redis.zscan(Sets::Retry.to_s, 0, "#{q.name}*", count = nil),
-          # errors: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "count", 60000, 100),
-          # latency: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "avg", 60000, 100),
-          # completed: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "avg", 60000, 100),
-        }
+        queue(q.name)
       end
     end
 
@@ -79,6 +54,18 @@ module JoobQ
       q << "#{group}"
 
       result_set REDIS.command(q)
+    end
+
+    def list(name : String, from : Int32, to : Int32)
+      keys =  case name
+              when "Dead" then REDIS.zrange(name, from, to).as(Array)
+              else REDIS.lrange(name, from, to).as(Array)
+              end
+
+      keys.map do |job_id|
+        job_data = REDIS.get("jobs:#{job_id}")
+        JSON.parse job_data.as(String) if job_data
+      end.compact
     end
 
     def totals
@@ -116,10 +103,10 @@ module JoobQ
 
     private def jobs_count_by_status
       REDIS.pipelined do |pipe|
-        pipe.llen(Queues::Completed.to_s)
-        pipe.zcard(Sets::Retry.to_s)
+        pipe.llen(Status::Completed.to_s)
+        pipe.llen(Sets::Retry.to_s)
         pipe.zcard(Sets::Dead.to_s)
-        pipe.llen(Queues::Busy.to_s)
+        pipe.llen(Status::Busy.to_s)
         pipe.zcard(Sets::Delayed.to_s)
       end.map do |v|
         v.as(Int64)

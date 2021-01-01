@@ -5,7 +5,7 @@ module JoobQ
 
     def self.add(job)
       now = Time.local.to_unix_f
-      expires = (Time.local - 6.months).to_unix_f
+      expires = (Time.local - 3.days).to_unix_f
 
       REDIS.zadd DEAD_LETTER, now, job.jid.to_s
       REDIS.zremrangebyscore DEAD_LETTER, "-inf", expires

@@ -3,15 +3,23 @@ module JoobQ
     macro included
       include JSON::Serializable
 
+      # The Unique identifier for this job
+      getter jid : UUID = UUID.random
+      property queue : String = "default"
+      property retries : Int32 = 0
+      property expires : Int32 = 3.minutes.total_seconds.to_i
+      property at : Time? = nil
+      property done_at : Time? = nil
+
       def self.perform
         job = new
-        JoobQ[job.queue].push job.jid, job.to_json
+        JoobQ[job.queue].push job
         job.jid
       end
 
       def self.perform(**args)
         job = new(**args)
-        JoobQ[job.queue].push job.jid, job.to_json
+        JoobQ[job.queue].push job
         job.jid
       end
 
@@ -23,13 +31,6 @@ module JoobQ
         job.jid
       end
     end
-
-    # The Unique identifier for this job
-    getter jid : UUID = UUID.random
-    property queue : String = "default"
-    property retries : Int32 = 0
-    property at : Time? = nil
-    property done_at : Time? = nil
 
     abstract def perform
   end

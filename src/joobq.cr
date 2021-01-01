@@ -38,8 +38,8 @@ module JoobQ
   end
 
   def self.reset
-    REDIS.del Queues::Busy.to_s,
-      Queues::Completed.to_s,
+    REDIS.del Status::Busy.to_s,
+      Status::Completed.to_s,
       Sets::Delayed.to_s,
       Sets::Failed.to_s,
       Sets::Retry.to_s,

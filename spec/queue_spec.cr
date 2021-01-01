@@ -45,7 +45,7 @@ module JoobQ
 
         queue.running?.should be_true
         queue.size.should eq 0
-        redis.llen(Queues::Busy.to_s).should eq 0
+        redis.llen(Status::Busy.to_s).should eq 0
         redis.zcard(Sets::Retry.to_s).should eq 100
         queue.stop!
       end

@@ -47,7 +47,7 @@ module JoobQ
         Log.info &.emit("Enqueue", queue: job["queue"].to_s, job_id: job["jid"].to_s)
 
         if redis.zrem(delayed_queue, data)
-          JoobQ.queues[job["queue"].as_s].push UUID.new(job["jid"].as_s), data
+          JoobQ.queues[job["queue"].as_s].push data
         end
       end
     end

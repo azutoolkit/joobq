@@ -24,7 +24,7 @@ module JoobQ
       # Add to BUSY queue so we can later monitor busy jobs and be able to
       # gracefully terminate jobs processing them
       if job_id = redis.brpoplpush(name, Status::Busy.to_s, TIMEOUT)
-        return self.[job_id]?
+        return self.[job_id]? if !job_id.is_a? Int64
       end
     end
 
@@ -34,7 +34,7 @@ module JoobQ
       redis.rpush name, "#{job.jid}"
     end
 
-    def push(job : Job)
+    def push(job : T)
       set_job job
       redis.rpush name, "#{job.jid}"
     end
@@ -45,7 +45,9 @@ module JoobQ
 
     def []?(job_id) : T?
       job_data = redis.get("jobs:#{job_id}")
-      T.from_json job_data.as(String) if job_data
+      T.from_json job_data.as(String) if job_data && !job_data.is_a? Int64
+    rescue ex 
+      
     end
 
     def size
@@ -83,12 +85,10 @@ module JoobQ
       return if stopped?
 
       Log.error &.emit("Restarting Worker!", Queue: name, Worker_Id: worker.wid)
-      if workers.size < total_workers
-        worker = create_worker
-        workers << worker
-        worker.run
-        worker
-      end
+      worker = create_worker
+      workers << worker
+      worker.run
+      worker
     end
 
     private def create_workers

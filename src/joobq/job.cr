@@ -7,9 +7,7 @@ module JoobQ
       getter jid : UUID = UUID.random
       property queue : String = "default"
       property retries : Int32 = 0
-      property expires : Int32 = 3.minutes.total_seconds.to_i
-      property at : Time? = nil
-      property done_at : Time? = nil
+      property expires : Int32 = 3.days.total_seconds.to_i
 
       def self.perform
         job = new

@@ -25,7 +25,7 @@ module JoobQ
     def run
       spawn do
         loop do
-          sleep 5
+          sleep 1
           enqueue(Time.local)
         end
       end
@@ -41,13 +41,15 @@ module JoobQ
 
         break if results.empty?
 
-        data = results.first.as(String)
-        job = JSON.parse(data)
+        results.each do |data|
+          _data = data.as(String)
+          job = JSON.parse(_data)
 
-        Log.info &.emit("Enqueue", queue: job["queue"].to_s, job_id: job["jid"].to_s)
+          Log.info &.emit("Enqueue", queue: job["queue"].to_s, job_id: job["jid"].to_s)
 
-        if redis.zrem(delayed_queue, data)
-          JoobQ.queues[job["queue"].as_s].push data
+          if redis.zrem(delayed_queue, _data)
+            JoobQ.queues[job["queue"].as_s].push _data
+          end
         end
       end
     end

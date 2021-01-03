@@ -15,7 +15,7 @@ compute environment.
 -   [x] Cron Like Periodic Jobs
 -   [x] Delayed Jobs
 -   [x] Stop execution of workers
--   \[] Expiring Jobs: Jobs to expire after certain time
+-   [x] Expiring Jobs: Jobs to expire after certain time
 -   \[] Rest API: Rest api to schedule jobs
 -   \[] Approve Queue?: Jobs have to manually approved to execute
 -   \[] Job Locking / Disable Concurrent Execution (1 Job Per Instance)
@@ -36,14 +36,33 @@ Then run:
 shards install
 ```
 
+## Requirements
+
+This project uses REDIS with the Time Series as the database for the Jobs.
+
+
 ## Configuration Options
 
 ```crystal
+require "joobq"
+```
+
+**Environment variables**
+
+```crystal
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_POOL_SIZE=50
+REDIS_TIMEOUT=0.2
+```
+
+**In App Configuration**
+
+```crystal
 module JoobQ
-  # Each worker job capacity
-  workers_capacity = 1
-  
   # Define Queues
+  # Queue Name = `queue:email`
+  # Queue No. Workers = 10
   QUEUES = { "queue:email" => Queue(EmailJob).new("queue:email", 10)}
 
   # Define recurring jobs
@@ -58,9 +77,10 @@ end
 ```crystal
 struct EmailJob
   include JoobQ::Job
-  @queue = "default"    # Name of the queue to be processed by
-  @retries : Int32 = 0  # Number Of Retries for this job
-
+  @queue   = "default"    # Name of the queue to be processed by
+  @retries = 0  # Number Of Retries for this job
+  @expires = 1.days.total_seconds.to_i
+  
   # Define initializers as normal with or without named tuple arguments
   def initialize(email_address : String)
   end
@@ -75,13 +95,33 @@ EmailJob.perform(email_address: "john.doe@example.com")
 EmailJob.perform(within: 1.hour, email_address: "john.doe@example.com")
 ```
 
+Start JoobQ server to start forging jobs
+
+```crystal
+JoobQ.forge
+```
+
+## Statistics
+
+JoobQ includes a Statistics class that allow you get stats about queue performance. 
+
+**Available stats**
+
+```
+total enqueued jobs
+total, percent completed jobs
+total, percent retry jobs
+total, percent dead jobs
+total busy jobs
+total delayed jobs
+```
 ## How To Integrate
 
 TODO: Define how JoobQ can be used outside of Crystal another language
 
 ## Contributing
 
-1.  Fork it (<https://github.com/your-github-user/joobq/fork>)
+1.  Fork it (<https://github.com/eliasjpr/joobq/fork>)
 2.  Create your feature branch ( `git checkout -b my-new-feature` )
 3.  Commit your changes ( `git commit -am 'Add some feature'` )
 4.  Push to the branch ( `git push origin my-new-feature` )
@@ -89,4 +129,4 @@ TODO: Define how JoobQ can be used outside of Crystal another language
 
 ## Contributors
 
--   [Elias J. Perez](https://github.com/your-github-user) - creator and maintainer
+-   [Elias J. Perez](https://github.com/eliasjpr) - creator and maintainer

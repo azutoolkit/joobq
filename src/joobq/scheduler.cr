@@ -25,8 +25,8 @@ module JoobQ
     def run
       spawn do
         loop do
-          sleep 1
-          enqueue(Time.local)
+          sleep 5
+          enqueue
         end
       end
     end

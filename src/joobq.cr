@@ -29,6 +29,14 @@ module JoobQ
     REDIS
   end
 
+  def self.push(job)
+    JoobQ::REDIS.pipelined do |p|
+      p.setex "jobs:#{job.jid}", job.expires || 180, job.to_json
+      p.rpush job.queue, "#{job.jid}"
+    end
+    job.jid
+  end
+
   def self.scheduler
     Scheduler.instance
   end

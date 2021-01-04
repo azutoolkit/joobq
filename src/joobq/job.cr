@@ -10,15 +10,11 @@ module JoobQ
       property expires : Int32 = 3.days.total_seconds.to_i
 
       def self.perform
-        job = new
-        JoobQ[job.queue].push job
-        job.jid
+        JoobQ.push new
       end
 
       def self.perform(**args)
-        job = new(**args)
-        JoobQ[job.queue].push job
-        job.jid
+        JoobQ.push new(**args)
       end
 
       def self.perform(within : Time::Span, **args)

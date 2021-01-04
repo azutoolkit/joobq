@@ -16,8 +16,6 @@ module JoobQ
         retry_in: "#{at}",
         retries_left: "#{job.retries}")
 
-      queue.set_job job
-
       JoobQ.scheduler.delay job, at
     end
 

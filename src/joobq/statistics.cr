@@ -1,7 +1,7 @@
 module JoobQ
   class Statistics
     INSTANCE         = new
-    RETENTION_MILLIS = 10800000
+    RETENTION_MILLIS = 60 * 6 * 1000
     STATS_KEY        = "stats"
     STATS            = %w[Errors Retries Dead Success Latency]
     REDIS            = JoobQ.redis

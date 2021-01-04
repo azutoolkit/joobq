@@ -24,31 +24,32 @@ module JoobQ
 
     def run
       spawn do
-        loop do
-          sleep 5
-          enqueue
-        end
+        enqueue
       end
     end
 
     def enqueue(now = Time.local)
       loop do
+        sleep 5
+
         moment = "%.6f" % now.to_unix_f
 
         results = redis.zrangebyscore(
-          delayed_queue, "-inf", moment, limit: [0, 1]
-        ).as(Array)
+          delayed_queue, "-inf", moment, limit: [0, 10]
+        )
 
-        break if results.empty?
+        next unless results.is_a?(Array)
 
-        results.each do |data|
+        results.as(Array).each do |data|
+          next unless data.is_a?(String)
           _data = data.as(String)
           job = JSON.parse(_data)
+          queue = JoobQ.queues[job["queue"].as_s]
 
           Log.info &.emit("Enqueue", queue: job["queue"].to_s, job_id: job["jid"].to_s)
 
           if redis.zrem(delayed_queue, _data)
-            JoobQ.queues[job["queue"].as_s].push _data
+            queue.push _data
           end
         end
       end

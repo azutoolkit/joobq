@@ -30,8 +30,8 @@ module JoobQ
       Log.error &.emit("Error", error)
 
       REDIS.pipelined do |pipe|
-        pipe.setex "jobs:#{job.jid}", job.expires, job.to_json
         pipe.command ["TS.ADD", "stats:#{job.queue}:error", "*", "#{latency}"]
+        pipe.setex "jobs:#{job.jid}", job.expires, job.to_json
         pipe.lrem(Status::Busy.to_s, 0, job.jid.to_s)
         pipe.lpush(Status::Retry.to_s, job.jid.to_s)
         pipe.zadd key, now.to_unix_f, error.to_json

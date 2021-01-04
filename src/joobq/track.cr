@@ -7,6 +7,7 @@ module JoobQ
       REDIS.pipelined do |pipe|
         pipe.command ["TS.ADD", "stats:#{job.queue}:success", "*", "#{latency(start)}"]
         pipe.lpush(Status::Completed.to_s, "#{job.jid}")
+        pipe.lrem(Status::Retry.to_s, 0, "#{job.jid}")
         pipe.lrem(Status::Busy.to_s, -1, "#{job.jid}")
       end
     end
@@ -14,6 +15,7 @@ module JoobQ
     def self.processed(job, start)
       REDIS.pipelined do |pipe|
         pipe.command ["TS.ADD", "stats:processing", "*", "#{latency(start)}"]
+        pipe.lrem(Status::Retry.to_s, 0, "#{job.jid}")
         pipe.lrem(Status::Busy.to_s, 0, "#{job.jid}")
       end
     end

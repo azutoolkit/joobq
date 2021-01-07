@@ -3,7 +3,7 @@ module JoobQ
     extend self
 
     FAILED_SET = Sets::Failed.to_s
-    REDIS      = JoobQ.redis
+    REDIS      = JoobQ::REDIS
 
     def call(job, latency, ex : Exception)
       track job, latency, ex
@@ -33,7 +33,6 @@ module JoobQ
         pipe.command ["TS.ADD", "stats:#{job.queue}:error", "*", "#{latency}"]
         pipe.setex "jobs:#{job.jid}", job.expires, job.to_json
         pipe.lrem(Status::Busy.to_s, 0, job.jid.to_s)
-        pipe.lpush(Status::Retry.to_s, job.jid.to_s)
         pipe.zadd key, now.to_unix_f, error.to_json
         pipe.zremrangebyscore key, "-inf", expires
         pipe.zremrangebyrank key, 0, -10_000

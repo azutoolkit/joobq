@@ -4,14 +4,10 @@ module JoobQ
     RETENTION_MILLIS = 60 * 6 * 1000
     STATS_KEY        = "stats"
     STATS            = %w[Errors Retries Dead Success Latency]
-    REDIS            = JoobQ.redis
+    REDIS            = JoobQ::REDIS
 
     def self.instance
       INSTANCE
-    end
-
-    def queues
-      JoobQ::QUEUES
     end
 
     def self.create_series
@@ -19,6 +15,10 @@ module JoobQ
       JoobQ::QUEUES.each do |key, _|
         instance.create_key key
       end
+    end
+
+    def queues
+      JoobQ::QUEUES
     end
 
     def queue(name)
@@ -38,10 +38,18 @@ module JoobQ
       end
     end
 
-    def reset
-      queues.each do |_, q|
-        REDIS.del "#{STATS_KEY}:#{q.name}"
-      end
+    def create_key(name)
+      REDIS.command [
+        "TS.CREATE",
+        "#{STATS_KEY}:#{name}",
+        "RETENTION", "#{RETENTION_MILLIS}",
+        "LABELS",
+        "name", "#{name}",
+        "stats", "stats",
+      ]
+      "Ok!"
+    rescue
+      "Ok!"
     end
 
     def range(name, since = 0, to = 1.hour.from_now.to_unix_ms, aggr = "count", group = 5000, count = 100)
@@ -57,10 +65,10 @@ module JoobQ
     end
 
     def list(name : String, from : Int32, to : Int32)
-      keys =  case name
-              when "Dead" then REDIS.zrange(name, from, to).as(Array)
-              else REDIS.lrange(name, from, to).as(Array)
-              end
+      keys = case name
+             when "Dead" then REDIS.zrange(name, from, to).as(Array)
+             else             REDIS.lrange(name, from, to).as(Array)
+             end
 
       keys.map do |job_id|
         job_data = REDIS.get("jobs:#{job_id}")
@@ -111,20 +119,6 @@ module JoobQ
       end.map do |v|
         v.as(Int64)
       end
-    end
-
-    def create_key(name)
-      REDIS.command [
-        "TS.CREATE",
-        "#{STATS_KEY}:#{name}",
-        "RETENTION", "#{RETENTION_MILLIS}",
-        "LABELS",
-        "name", "#{name}",
-        "stats", "stats",
-      ]
-      "Ok!"
-    rescue
-      "Key already exists. Ok!"
     end
   end
 end

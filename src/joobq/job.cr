@@ -8,6 +8,7 @@ module JoobQ
       property queue : String = "default"
       property retries : Int32 = 0
       property expires : Int32 = 3.days.total_seconds.to_i
+      property at : Time? = nil
 
       def self.perform
         JoobQ.push new

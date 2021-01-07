@@ -3,9 +3,9 @@ module JoobQ
     Log = ::Log.for("WORKER")
 
     getter wid : Int32
-    property? running : Bool = false
+    property? active : Bool = false
 
-    private getter redis : Redis::PooledClient = JoobQ.redis
+    private getter redis : Redis::PooledClient = JoobQ::REDIS
     private getter stats : Statistics = JoobQ.statistics
 
     def initialize(@wid : Int32, @terminate : Channel(Nil), @queue : Queue(T))
@@ -15,18 +15,25 @@ module JoobQ
       @queue.name
     end
 
+    def stop!
+      @terminate.send nil
+    end
+
     def run
+      return if active?
+      @active = true
+
       spawn do
         loop do
           select
           when @terminate.receive?
+            @active = false
             break
           else
             job = @queue.get_next
             execute job if job
           end
         end
-        @queue.terminate(worker: self)
       end
     rescue ex : Exception
       Log.error &.emit("Fetch Error", {worker_id: wid, reason: ex.message})

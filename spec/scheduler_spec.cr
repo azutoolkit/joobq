@@ -5,18 +5,21 @@ module JoobQ
     scheduler = JoobQ.scheduler
     job = ExampleJob.new 2
 
+    before_each do
+      JoobQ.reset
+    end
+
     describe "delayes jobs" do
       it "enqueues and process a job when ready" do
-        redis.del "scheduler"
-        job.queue = "scheduler"
+        REDIS.del Sets::Delayed.to_s
+        REDIS.del job.queue
 
         scheduler.delay job, 2.seconds
-        redis.zcard(Sets::Delayed.to_s).should eq 1
+        REDIS.zcard(Sets::Delayed.to_s).should eq 1
 
-        scheduler.enqueue 3.seconds.from_now
+        scheduler.enqueue 5.seconds.from_now
 
-        redis.zcard(Sets::Delayed.to_s).should eq 0
-        redis.llen(job.queue).should eq 1
+        REDIS.zcard(Sets::Delayed.to_s).should eq 0
       end
     end
 

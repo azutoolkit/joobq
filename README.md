@@ -40,7 +40,13 @@ shards install
 
 This project uses REDIS with the Time Series as the database for the Jobs.
 
+## Redis Time Series Configuration
 
+Use DUPLICATE POLICY first to ignore duplicate entries
+
+```bash
+redis-server --loadmodule ./redistimeseries.so DUPLICATE_POLICY FIRST
+```
 ## Configuration Options
 
 ```crystal

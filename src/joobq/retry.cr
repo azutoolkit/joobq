@@ -8,7 +8,7 @@ module JoobQ
       count = job.retries
       job.retries = job.retries - 1
       at = retry_at(count)
-      
+
       Log.warn &.emit("Retry",
         queue: job.queue,
         job_id: "#{job.jid}",

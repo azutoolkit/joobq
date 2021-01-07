@@ -25,10 +25,6 @@ module JoobQ
     Statistics.instance
   end
 
-  def self.redis
-    REDIS
-  end
-
   def self.push(job)
     JoobQ::REDIS.pipelined do |p|
       p.setex "jobs:#{job.jid}", job.expires || 180, job.to_json
@@ -46,12 +42,16 @@ module JoobQ
   end
 
   def self.reset
+    queues.each { |key, _| REDIS.del key }
+
     REDIS.del Status::Busy.to_s,
       Status::Completed.to_s,
       Sets::Delayed.to_s,
       Sets::Failed.to_s,
       Sets::Retry.to_s,
       Sets::Dead.to_s
+
+    Statistics.create_series
   end
 
   def self.forge

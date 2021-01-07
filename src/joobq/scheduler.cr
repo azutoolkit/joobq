@@ -2,7 +2,7 @@ module JoobQ
   class Scheduler
     INSTANCE = new
 
-    getter redis : Redis::PooledClient = JoobQ.redis
+    getter redis : Redis::PooledClient = JoobQ::REDIS
     getter periodic_jobs = {} of String => CronParser
     getter delayed_queue : String = Sets::Delayed.to_s
 
@@ -24,27 +24,27 @@ module JoobQ
 
     def run
       spawn do
-        enqueue
+        loop do
+          sleep 1
+          enqueue
+        end
       end
     end
 
-    def enqueue(now = Time.local)
-      loop do
-        sleep 5
+    def enqueue(now = Time.monotonic)
+      moment = "%.6f" % now.to_unix_f
 
-        moment = "%.6f" % now.to_unix_f
+      results = redis.zrangebyscore(
+        delayed_queue, "-inf", moment, limit: [0, 10]
+      )
 
-        results = redis.zrangebyscore(
-          delayed_queue, "-inf", moment, limit: [0, 10]
-        )
-
-        next unless results.is_a?(Array)
-
+      if results.is_a?(Array)
         results.as(Array).each do |data|
           next unless data.is_a?(String)
           _data = data.as(String)
           job = JSON.parse(_data)
-          queue = JoobQ.queues[job["queue"].as_s]
+
+          queue = JoobQ[job["queue"].as_s]
 
           Log.info &.emit("Enqueue", queue: job["queue"].to_s, job_id: job["jid"].to_s)
 
@@ -60,7 +60,7 @@ module JoobQ
       @periodic_jobs[(name || pattern).to_s] = parser
 
       spawn do
-        prev_nxt = Time.local - 1.minute
+        prev_nxt = Time.monotonic - 1.minute
         loop do
           now = Time.local
           nxt = parser.next(now)

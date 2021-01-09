@@ -75,7 +75,7 @@ module JoobQ
     end
 
     def terminate(worker : Worker(T))
-      Log.error &.emit("Terminating Worker!", Queue: name, Worker_Id: worker.wid)
+      Log.warn &.emit("Terminating Worker!", Queue: name, Worker_Id: worker.wid)
       workers.delete worker
     end
 
@@ -83,7 +83,7 @@ module JoobQ
       terminate worker
       return unless running?
 
-      Log.error &.emit("Restarting Worker!", Queue: name, Worker_Id: worker.wid)
+      Log.warn &.emit("Restarting Worker!", Queue: name, Worker_Id: worker.wid)
       worker = create_worker
       workers << worker
       worker.run

@@ -62,6 +62,8 @@ module JoobQ
       q << "#{group}"
 
       result_set REDIS.command(q)
+    rescue Redis::Error
+      [] of Array(Int64 | String)
     end
 
     def list(name : String, from : Int32, to : Int32)

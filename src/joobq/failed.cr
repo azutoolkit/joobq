@@ -27,7 +27,7 @@ module JoobQ
         cause:     ex.cause.to_s,
       }
 
-      Log.error &.emit("Error", error)
+      Log.info &.emit("Failed", error)
 
       REDIS.pipelined do |pipe|
         pipe.command ["TS.ADD", "stats:#{job.queue}:error", "*", "#{latency}"]

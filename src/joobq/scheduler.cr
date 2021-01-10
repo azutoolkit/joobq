@@ -31,7 +31,7 @@ module JoobQ
       end
     end
 
-    def enqueue(now = Time.monotonic)
+    def enqueue(now = Time.local)
       moment = "%.6f" % now.to_unix_f
 
       results = redis.zrangebyscore(

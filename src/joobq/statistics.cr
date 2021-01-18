@@ -1,11 +1,10 @@
 module JoobQ
   class Statistics
     INSTANCE         = new
-    RETENTION_MILLIS = 10800000
+    RETENTION_MILLIS = 60 * 6 * 1000
     STATS_KEY        = "stats"
     STATS            = %w[Errors Retries Dead Success Latency]
-
-    getter redis : Redis::PooledClient = JoobQ.redis
+    REDIS            = JoobQ::REDIS
 
     def self.instance
       INSTANCE
@@ -13,7 +12,6 @@ module JoobQ
 
     def self.create_series
       instance.create_key "processing"
-
       JoobQ::QUEUES.each do |key, _|
         instance.create_key key
       end
@@ -26,49 +24,32 @@ module JoobQ
     def queue(name)
       q = queues[name]
       {
-        name:            q.name,
-        total_workers:   q.total_workers,
-        jobs:            q.jobs,
-        status:          q.status,
-        running_workers: q.running_workers,
-        size:            q.size,
+        name:          q.name,
+        total_workers: q.total_workers,
+        jobs:          q.jobs,
+        status:        q.status,
+        size:          q.size,
       }
     end
 
     def queues_details
       queues.map do |_, q|
-        {
-          name:            q.name,
-          total_workers:   q.total_workers,
-          jobs:            q.jobs,
-          status:          q.status,
-          running_workers: q.running_workers,
-          size:            q.size,
-          # failed: redis.zscan(Sets::Failed.to_s, 0, "#{q.name}*", count = nil),
-          # retry: redis.zscan(Sets::Retry.to_s, 0, "#{q.name}*", count = nil),
-          # errors: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "count", 60000, 100),
-          # latency: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "avg", 60000, 100),
-          # completed: query(1.hour.ago.to_unix_ms, 1.hour.from_now.to_unix_ms, "avg", 60000, 100),
-        }
+        queue(q.name)
       end
     end
 
-    def reset
-      queues.each do |_, q|
-        redis.del "#{STATS_KEY}:#{q.name}"
-      end
-    end
-
-    def success(name : String, latency : Int32)
-      track("#{name}:success", latency)
-    end
-
-    def error(name : String, latency : Int32)
-      track("#{name}:error", latency)
-    end
-
-    def processing
-      track("processing", 1)
+    def create_key(name)
+      REDIS.command [
+        "TS.CREATE",
+        "#{STATS_KEY}:#{name}",
+        "RETENTION", "#{RETENTION_MILLIS}",
+        "LABELS",
+        "name", "#{name}",
+        "stats", "stats",
+      ]
+      "Ok!"
+    rescue
+      "Ok!"
     end
 
     def range(name, since = 0, to = 1.hour.from_now.to_unix_ms, aggr = "count", group = 5000, count = 100)
@@ -80,7 +61,21 @@ module JoobQ
       q << "#{aggr}"
       q << "#{group}"
 
-      result_set redis.command(q)
+      result_set REDIS.command(q)
+    rescue Redis::Error
+      [] of Array(Int64 | String)
+    end
+
+    def list(name : String, from : Int32, to : Int32)
+      keys = case name
+             when "Dead" then REDIS.zrange(name, from, to).as(Array)
+             else             REDIS.lrange(name, from, to).as(Array)
+             end
+
+      keys.map do |job_id|
+        job_data = REDIS.get("jobs:#{job_id}")
+        JSON.parse job_data.as(String) if job_data
+      end.compact
     end
 
     def totals
@@ -117,35 +112,15 @@ module JoobQ
     end
 
     private def jobs_count_by_status
-      redis.pipelined do |pipe|
-        pipe.llen(Queues::Completed.to_s)
-        pipe.zcard(Sets::Retry.to_s)
+      REDIS.pipelined do |pipe|
+        pipe.llen(Status::Completed.to_s)
+        pipe.llen(Sets::Retry.to_s)
         pipe.zcard(Sets::Dead.to_s)
-        pipe.llen(Queues::Busy.to_s)
+        pipe.llen(Status::Busy.to_s)
         pipe.zcard(Sets::Delayed.to_s)
       end.map do |v|
         v.as(Int64)
       end
-    end
-
-    private def track(name : String, latency : Int32)
-      redis.command ["TS.ADD", "#{STATS_KEY}:#{name}", "*", "#{latency}"]
-    rescue e
-      -1
-    end
-
-    def create_key(name)
-      redis.command [
-        "TS.CREATE",
-        "#{STATS_KEY}:#{name}",
-        "RETENTION", "#{RETENTION_MILLIS}",
-        "LABELS",
-        "name", "#{name}",
-        "stats", "stats",
-      ]
-      "Ok!"
-    rescue
-      "Key already exists. Ok!"
     end
   end
 end

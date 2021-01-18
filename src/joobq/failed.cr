@@ -1,21 +1,42 @@
 module JoobQ
-  module Failed
-    FAILED_SET = Sets::Failed.to_s
-    REDIS      = JoobQ.redis
+  module FailHandler
+    extend self
 
-    def self.add(job, ex)
-      now = Time.local.to_unix_f
-      expires = (Time.local - 6.months).to_unix_f
-      job.retries = job.retries - 1
-      job.ex = {
-        "message"   => ex.message,
-        "backtrace" => ex.inspect_with_backtrace,
-        "cause"     => ex.cause.to_s,
+    FAILED_SET = Sets::Failed.to_s
+    REDIS      = JoobQ::REDIS
+
+    def call(job, latency, ex : Exception)
+      track job, latency, ex
+
+      if job.retries > 0
+        Retry.attempt job
+      else
+        DeadLetter.add job
+      end
+    end
+
+    def track(job, latency, ex)
+      now = Time.local
+      expires = (Time.local - 3.days).to_unix_f
+      key = "#{FAILED_SET}:#{job.jid}"
+      error = {
+        queue:     job.queue,
+        failed_at: now,
+        message:   ex.message,
+        backtrace: ex.inspect_with_backtrace,
+        cause:     ex.cause.to_s,
       }
-      key = "#{FAILED_SET}:#{job.queue}:#{job.jid}"
-      REDIS.zadd key, now, job.to_json
-      REDIS.zremrangebyscore key, "-inf", expires
-      REDIS.zremrangebyrank key, 0, -10_000
+
+      Log.info &.emit("Failed", error)
+
+      REDIS.pipelined do |pipe|
+        pipe.command ["TS.ADD", "stats:#{job.queue}:error", "*", "#{latency}"]
+        pipe.setex "jobs:#{job.jid}", job.expires, job.to_json
+        pipe.lrem(Status::Busy.to_s, 0, job.jid.to_s)
+        pipe.zadd key, now.to_unix_f, error.to_json
+        pipe.zremrangebyscore key, "-inf", expires
+        pipe.zremrangebyrank key, 0, -10_000
+      end
     end
   end
 end

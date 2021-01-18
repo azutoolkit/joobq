@@ -2,29 +2,26 @@ require "./spec_helper"
 
 module JoobQ
   describe Worker do
-    queue = "example"
-    done = Channel(Nil).new
-    control = Channel(Nil).new
-    worker = Worker(ExampleJob | FailJob).new(queue, 1, control, done)
     job = ExampleJob.new(1)
+    queue = Queue(ExampleJob | FailJob).new("example", 1)
+    done = Channel(Nil).new
+    worker = queue.workers.first
 
-    before_each { JoobQ.reset }
+    before_each do
+      JoobQ.reset
+    end
 
-    describe "#running?" do
+    describe "#active?" do
       it "stops worker gracefully" do
         worker.run
-        worker.running?.should be_true
-
+        worker.active?.should be_true
         worker.stop!
-
-        worker.running?.should be_false
+        worker.active?.should be_false
       end
 
       it "stops and syncs multiple workers" do
-        d1 = Channel(Nil).new
-        c1 = Channel(Nil).new
-        w1 = Worker(ExampleJob | FailJob).new(queue, 1, c1, d1)
-        w2 = Worker(ExampleJob | FailJob).new(queue, 2, c1, d1)
+        w1 = Worker(ExampleJob | FailJob).new(1, done, queue)
+        w2 = Worker(ExampleJob | FailJob).new(2, done, queue)
 
         w1.run
         w2.run
@@ -32,41 +29,22 @@ module JoobQ
         w1.stop!
         w2.stop!
 
-        w1.running?.should be_false
-        w2.running?.should be_false
+        w1.active?.should be_false
+        w2.active?.should be_false
       end
     end
 
-    it "process job" do
-      worker.process job, job.to_json
+    it "runs the worker" do
+      REDIS.llen(job.queue).should eq 0
 
-      redis.llen(job.queue).should eq 0
-      redis.zcard(Sets::Dead.to_s).should eq 0
-      redis.zcard(Sets::Retry.to_s).should eq 0
-      redis.llen(Queues::Busy.to_s).should eq 0
-    end
+      JoobQ.push job
+      REDIS.llen(job.queue).should eq 1
 
-    it "retries job" do
-      job = FailJob.new
-      job.retries = 2
+      worker.run
+      sleep 1
 
-      worker.process job, job.to_json
-
-      redis.llen(job.queue).should eq 0
-      redis.zcard(Sets::Dead.to_s).should eq 0
-      redis.zcard(Sets::Retry.to_s).should eq 1
-      redis.llen(Queues::Busy.to_s).should eq 0
-    end
-
-    it "dead job" do
-      job = FailJob.new
-
-      worker.process job, job.to_json
-
-      redis.llen(job.queue).should eq 0
-      redis.zcard(Sets::Dead.to_s).should eq 1
-      redis.zcard(Sets::Retry.to_s).should eq 0
-      redis.llen(Queues::Busy.to_s).should eq 0
+      worker.active?.should be_true
+      REDIS.llen(job.queue).should eq 0
     end
   end
 end

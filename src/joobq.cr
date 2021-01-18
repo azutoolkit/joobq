@@ -7,7 +7,7 @@ require "cron_parser"
 require "./joobq/**"
 
 module JoobQ
-  VERSION = "0.1.0"
+  VERSION = "0.2.0"
   REDIS   = Redis::PooledClient.new(
     host: ENV.fetch("REDIS_HOST", "localhost"),
     port: ENV.fetch("REDIS_PORT", "6379").to_i,
@@ -25,8 +25,12 @@ module JoobQ
     Statistics.instance
   end
 
-  def self.redis
-    REDIS
+  def self.push(job)
+    JoobQ::REDIS.pipelined do |p|
+      p.setex "jobs:#{job.jid}", job.expires || 180, job.to_json
+      p.rpush job.queue, "#{job.jid}"
+    end
+    job.jid
   end
 
   def self.scheduler
@@ -38,21 +42,27 @@ module JoobQ
   end
 
   def self.reset
-    REDIS.del Queues::Busy.to_s,
-      Queues::Completed.to_s,
+    queues.each { |key, _| REDIS.del key }
+
+    REDIS.del Status::Busy.to_s,
+      Status::Completed.to_s,
       Sets::Delayed.to_s,
       Sets::Failed.to_s,
       Sets::Retry.to_s,
       Sets::Dead.to_s
+
+    Statistics.create_series
   end
 
   def self.forge
-    Log.info { "JoobQ starting..." }
-    scheduler.run
-    statistics.create_series
+    Log.info { "JoobQ booting..." }
 
-    QUEUES.each do |_, queue|
-      spawn queue.process
+    Statistics.create_series
+    scheduler.run
+
+    queues.each do |key, queue|
+      Log.info { "JoobQ starting #{key} queue..." }
+      queue.start
     end
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }

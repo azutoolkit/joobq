@@ -7,18 +7,10 @@ module JoobQ
 
     before_each do
       JoobQ.reset
-      stats.reset
     end
 
     it "creates stats key" do
       stats.create_key(key).should eq "Ok!"
-    end
-
-    it "records a stat for worker" do
-      stats.create_key(key)
-
-      result = stats.success "example", 1
-      result.as(Int64).should be > 0.to_i64
     end
 
     context "count" do
@@ -29,14 +21,10 @@ module JoobQ
 
     context "querying" do
       it "queries and perform aggregations (avg, sum, count)" do
-        stats.reset
-        stats.create_key(key)
-
         from = 1.day.ago.to_unix_ms
 
-        10.times do |i|
+        10.times do |_i|
           sleep 10.milliseconds
-          stats.success "example", i
         end
 
         to = 10.milliseconds.from_now.to_unix_ms

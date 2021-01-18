@@ -4,9 +4,7 @@ module JoobQ
 
     getter wid : Int32
     property? active : Bool = false
-
     private getter redis : Redis::PooledClient = JoobQ::REDIS
-    private getter stats : Statistics = JoobQ.statistics
 
     def initialize(@wid : Int32, @terminate : Channel(Nil), @queue : Queue(T))
     end
@@ -36,7 +34,7 @@ module JoobQ
         end
       end
     rescue ex : Exception
-      Log.error &.emit("Fetch Error", {worker_id: wid, reason: ex.message})
+      Log.error &.emit("Fetch", {worker_id: wid, reason: ex.message})
       @queue.restart self, ex
     end
 

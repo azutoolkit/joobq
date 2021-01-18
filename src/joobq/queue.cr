@@ -43,7 +43,7 @@ module JoobQ
     end
 
     def stop!
-      total_workers.times do |n|
+      total_workers.times do |_n|
         terminate_channel.send nil
       end
     end
@@ -91,7 +91,7 @@ module JoobQ
     end
 
     private def create_workers
-      total_workers.times do |n|
+      total_workers.times do |_n|
         workers << create_worker
       end
     end

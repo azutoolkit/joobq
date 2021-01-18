@@ -5,7 +5,6 @@ module JoobQ
     job = ExampleJob.new(1)
     queue = Queue(ExampleJob | FailJob).new("example", 1)
     done = Channel(Nil).new
-    control = Channel(Nil).new
     worker = queue.workers.first
 
     before_each do

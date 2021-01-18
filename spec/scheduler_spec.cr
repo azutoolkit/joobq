@@ -9,8 +9,14 @@ module JoobQ
       JoobQ.reset
     end
 
-    describe "delayes jobs" do
-      it "enqueues and process a job when ready" do
+    describe "#every" do
+      it "executes job at interval" do
+        scheduler.every 10.seconds, ExampleJob, x: 2
+      end
+    end
+
+    describe "#delay" do
+      it "delays job to a time in the future" do
         REDIS.del Sets::Delayed.to_s
         REDIS.del job.queue
 
@@ -23,31 +29,26 @@ module JoobQ
       end
     end
 
-    describe "periodic jobs" do
-      it "should define jobs" do
+    describe "#cron" do
+      it "registers recurring jobs at specific time" do
         scheduler.register do
-          at("*/1 * * * *") { }
-          at("*/5 20-23 * * *") { }
+          cron("*/1 * * * *") { }
+          cron("*/5 20-23 * * *") { }
         end
       end
 
-      it "custom add job" do
-        scheduler.at("*/1 * * * *") { }
+      it "schedules a new recurring job" do
+        scheduler.cron("*/1 * * * *") { }
       end
 
-      it "run the jobs" do
+      it "runs recurring jobs" do
         x = 0
-        scheduler.at("* * * * * *") { x = job.perform }
+        scheduler.cron "* * * * * *" { x = job.perform }
+
         sleep 2.5
+
         x.should be >= 2
         x.should be <= 3
-      end
-
-      it "stats" do
-        scheduler.at("* * * * * *") { }
-        s = scheduler.stats
-        x = s.find { |c| c[:name] == "* * * * * *" }.not_nil!
-        (x[:sleeping_for].as(Float64)).should be <= 1.0
       end
     end
   end

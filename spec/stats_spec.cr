@@ -23,7 +23,7 @@ module JoobQ
       it "queries and perform aggregations (avg, sum, count)" do
         from = 1.day.ago.to_unix_ms
 
-        10.times do |i|
+        10.times do |_i|
           sleep 10.milliseconds
         end
 

@@ -28,7 +28,7 @@ compute environment.
 ```yaml
 dependencies:
   joobq:
-    github: eliasjpr/joobq
+    github: azutoolkit/joobq
 ```
 
 Then run:

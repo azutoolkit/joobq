@@ -1,5 +1,5 @@
 name: joobq
-version: 0.2.0
+version: 0.1.1
 
 authors:
   - Elias J. Perez <eliasjpr@gmail.com>
@@ -8,14 +8,13 @@ targets:
   joobq:
     main: src/joobq.cr
 
-crystal: 0.34.0
+crystal: ">=0.34.0"
 
 license: MIT
 
 dependencies:
   redis:
     github: stefanwille/crystal-redis
-    version: ~> 2.6.0
 
   cron_parser:
     github: kostya/cron_parser

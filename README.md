@@ -8,20 +8,21 @@ compute environment.
 
 **Features:**
 
--   [x] Priority queues based on number of workers
--   [x] Reliable queue
--   [x] Error Handling
--   [x] Retry Jobs with automatic Delays
--   [x] Cron Like Periodic Jobs
--   [x] Delayed Jobs
--   [x] Stop execution of workers
--   [x] Jobs expiration
+- [x] Priority queues based on number of workers
+- [x] Reliable queue
+- [x] Error Handling
+- [x] Retry Jobs with automatic Delays
+- [x] Cron Like Periodic Jobs
+- [x] Delayed Jobs
+- [x] Stop execution of workers
+- [x] Jobs expiration
 
-**Help Wanted**
--   \[ ] CLI to manage queues and monitor server
--   \[ ] Rest API: Rest api to schedule jobs
--   \[ ] Throttle (Rate limit)
--   \[ ] Approve Queue?: Jobs have to manually approved to execute
+## Help Wanted
+
+- \[ ] CLI to manage queues and monitor server
+- \[ ] Rest API: Rest api to schedule jobs
+- \[ ] Throttle (Rate limit)
+- \[ ] Approve Queue?: Jobs have to manually approved to execute
 
 ## Installation
 
@@ -48,7 +49,29 @@ Use **DUPLICATE POLICY FIRST** to ignore duplicate stats entries
 redis-server --loadmodule ./redistimeseries.so DUPLICATE_POLICY FIRST
 ```
 
-## Configuration Options
+## Usage
+
+```crystal
+require "joobq"
+```
+
+### Environment variables
+
+```shell
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_POOL_SIZE=50
+REDIS_TIMEOUT=0.2
+```
+
+## Defining Queues
+
+Defining Queues: Queues are of type `Hash(String, Queue(T))` where the name of the key matches the name of the Queue.
+
+### Properties
+
+- **Name:** `queue:email`
+- **Number Workers:** 10
 
 ```crystal
 require "joobq"
@@ -102,7 +125,7 @@ struct EmailJob
 end
 ```
 
-**Executing Job**
+### Executing Job
 
 ```crystal
     EmailJob.perform(email_address: "john.doe@example.com")
@@ -130,9 +153,9 @@ JoobQ.forge
 
 ## Statistics
 
-JoobQ includes a Statistics class that allow you get stats about queue performance. 
+JoobQ includes a Statistics class that allow you get stats about queue performance.
 
-**Available stats**
+### Available stats
 
 ```text
 total enqueued jobs
@@ -145,12 +168,12 @@ total delayed jobs
 
 ## Contributing
 
-1.  Fork it (<https://github.com/eliasjpr/joobq/fork>)
-2.  Create your feature branch ( `git checkout -b my-new-feature` )
-3.  Commit your changes ( `git commit -am 'Add some feature'` )
-4.  Push to the branch ( `git push origin my-new-feature` )
-5.  Create a new Pull Request
+1. Fork it (<https://github.com/eliasjpr/joobq/fork>)
+2. Create your feature branch ( `git checkout -b my-new-feature` )
+3. Commit your changes ( `git commit -am 'Add some feature'` )
+4. Push to the branch ( `git push origin my-new-feature` )
+5. Create a new Pull Request
 
 ## Contributors
 
--   [Elias J. Perez](https://github.com/eliasjpr) - creator and maintainer
+- [Elias J. Perez](https://github.com/eliasjpr) - creator and maintainer

@@ -1,10 +1,10 @@
 module JoobQ
   class Statistics
     INSTANCE         = new
-    RETENTION_MILLIS = 60 * 6 * 1000
-    STATS_KEY        = "stats"
-    STATS            = %w[Errors Retries Dead Success Latency]
-    REDIS            = JoobQ::REDIS
+    private RETENTION_MILLIS = 60 * 6 * 1000
+    private STATS_KEY        = "stats"
+    private STATS            = %w[Errors Retries Dead Success Latency]
+    private REDIS            = JoobQ::REDIS
 
     def self.instance
       INSTANCE

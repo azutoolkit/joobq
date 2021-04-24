@@ -1,7 +1,7 @@
 module JoobQ
   class Scheduler
     INSTANCE = new
-    REDIS    = JoobQ::REDIS
+    private REDIS    = JoobQ::REDIS
 
     record RecurringJobs, job : Job, queue : String, interval : Time::Span | CronParser
 

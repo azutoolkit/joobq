@@ -1,11 +1,9 @@
 module JoobQ
   module FailHandler
-    extend self
+    private FAILED_SET = Sets::Failed.to_s
+    private REDIS      = JoobQ::REDIS
 
-    FAILED_SET = Sets::Failed.to_s
-    REDIS      = JoobQ::REDIS
-
-    def call(job, latency, ex : Exception)
+    def self.call(job, latency, ex : Exception)
       track job, latency, ex
 
       if job.retries > 0
@@ -15,7 +13,7 @@ module JoobQ
       end
     end
 
-    def track(job, latency, ex)
+    private def self.track(job, latency, ex)
       now = Time.local
       expires = (Time.local - 3.days).to_unix_f
       key = "#{FAILED_SET}:#{job.jid}"

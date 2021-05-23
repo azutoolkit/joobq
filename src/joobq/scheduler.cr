@@ -34,6 +34,8 @@ module JoobQ
           spawn { job_instance.perform }
         end
       end
+
+      job_instance
     end
 
     def cron(pattern, &block : ->)

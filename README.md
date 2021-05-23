@@ -1,12 +1,12 @@
 # JoobQ
 
-![Crystal CI](https://github.com/eliasjpr/joobq/workflows/Crystal%20CI/badge.svg?branch=master) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/757ebd7d1db942da8eb9f8392415b1a6)](https://www.codacy.com/manual/eliasjpr/joobq?utm_source=github.com&utm_medium=referral&utm_content=eliasjpr/joobq&utm_campaign=Badge_Grade)
+![Crystal CI](https://github.com/eliasjpr/joobq/workflows/Crystal%20CI/badge.svg?branch=master)
 
 JoobQ is a fast, efficient asynchronous reliable job queue scheduler library processing. Jobs are submitted
 to a job queue, where they reside until they are able to be scheduled to run in a
 compute environment.
 
-**Features:**
+#### Features:
 
 - [x] Priority queues based on number of workers
 - [x] Reliable queue
@@ -41,6 +41,7 @@ shards install
 ## Requirements
 
 This project uses REDIS with the TimeSeries module loaded. The Redis TimeSeries is used to monitor stats of job execution the module is free for use and easy to configure. Follow the guidelines at [redistimeseries.io](https://oss.redislabs.com/redistimeseries/)
+
 ### Loading and Configuring Redis TimeSeries
 
 Use **DUPLICATE POLICY FIRST** to ignore duplicate stats entries
@@ -73,31 +74,13 @@ Defining Queues: Queues are of type `Hash(String, Queue(T))` where the name of t
 - **Name:** `queue:email`
 - **Number Workers:** 10
 
-```crystal
-require "joobq"
-```
-
-**Environment variables**
-
-```shell
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_POOL_SIZE=50
-REDIS_TIMEOUT=0.2
-```
-
-## Defining Queues
-
-Defining Queues: Queues are of type `Hash(String, Queue(T))` where the name of the key matches the name of the Queue.
-
-### Properties
-
--   **Name:** `queue:email`
--   **Number Workers:** 10
+### Example
 
 ```crystal
 module JoobQ
-  QUEUES = { "queue:email" => Queue(EmailJob).new("queue:email", 10)}
+  QUEUES = { "queue:priority:high" => Queue(EmailJob).new("queue:priority:high", 20)}
+  QUEUES = { "queue:priority:medium" => Queue(EmailJob).new("queue:priority:medium", 10)}
+  QUEUES = { "queue:priority:low" => Queue(EmailJob).new("queue:priority:low", 2)}
 end
 ```
 
@@ -128,9 +111,19 @@ end
 ### Executing Job
 
 ```crystal
-    EmailJob.perform(email_address: "john.doe@example.com")
-    EmailJob.perform(within: 1.hour, email_address: "john.doe@example.com")
+  # Perform Immediately
+  EmailJob.new(email_address: "john.doe@example.com").perform
+
+  # Async - Adds to Queue
+  EmailJob.perform(email_address: "john.doe@example.com")
+  
+  # Delayed 
+  EmailJob.perform(within: 1.hour, email_address: "john.doe@example.com")
+  
+  # Recurring at given interval
+  EmailJob.run(every: 1.second, x: 1) 
 ```
+
 ## Defining And Scheduling Recurring Jobs
 
 ```crystal

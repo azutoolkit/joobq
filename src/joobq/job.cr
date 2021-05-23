@@ -25,6 +25,15 @@ module JoobQ
         JoobQ.scheduler.delay(job, within)
         job.jid
       end
+
+      # Allows for scheduling Jobs at an interval time span. 
+      #
+      # ```crystal
+      # TestJob.run(every: 1.second, x: 1)
+      # ```
+      def self.run(every : Time::Span, **args)
+        JoobQ.scheduler.every every, self, **args
+      end
     end
 
     abstract def perform

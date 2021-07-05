@@ -2,9 +2,9 @@
 
 ![Crystal CI](https://github.com/eliasjpr/joobq/workflows/Crystal%20CI/badge.svg?branch=master)
 
-JoobQ is a fast, efficient asynchronous reliable job queue scheduler library processing. Jobs are submitted
-to a job queue, where they reside until they are able to be scheduled to run in a
-compute environment.
+JoobQ is a fast, efficient asynchronous reliable job queue scheduler library
+processing. Jobs are submitted to a job queue, where they reside until they are
+able to be scheduled to run in a compute environment.
 
 #### Features:
 
@@ -40,15 +40,9 @@ shards install
 
 ## Requirements
 
-This project uses REDIS with the TimeSeries module loaded. The Redis TimeSeries is used to monitor stats of job execution the module is free for use and easy to configure. Follow the guidelines at [redistimeseries.io](https://oss.redislabs.com/redistimeseries/)
-
-### Loading and Configuring Redis TimeSeries
-
-Use **DUPLICATE POLICY FIRST** to ignore duplicate stats entries
-
-```bash
-redis-server --loadmodule ./redistimeseries.so DUPLICATE_POLICY FIRST
-```
+This project uses REDIS with the TimeSeries module loaded. The Redis TimeSeries
+is used to monitor stats of job execution the module is free for use and easy to
+configure. Follow the guidelines at [redistimeseries.io](https://oss.redislabs.com/redistimeseries/)
 
 ## Usage
 
@@ -95,9 +89,9 @@ struct EmailJob
   @queue   = "default"
   # Number Of Retries for this job
   @retries = 0
-  # Job Expiration 
+  # Job Expiration
   @expires = 1.days.total_seconds.to_i
-  
+
   # Initialize as normal with or without named tuple arguments
   def initialize(email_address : String)
   end
@@ -116,12 +110,12 @@ end
 
   # Async - Adds to Queue
   EmailJob.perform(email_address: "john.doe@example.com")
-  
-  # Delayed 
+
+  # Delayed
   EmailJob.perform(within: 1.hour, email_address: "john.doe@example.com")
-  
+
   # Recurring at given interval
-  EmailJob.run(every: 1.second, x: 1) 
+  EmailJob.run(every: 1.second, x: 1)
 ```
 
 ## Defining And Scheduling Recurring Jobs

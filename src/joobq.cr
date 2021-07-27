@@ -7,8 +7,7 @@ require "cron_parser"
 require "./joobq/**"
 
 module JoobQ
-  VERSION = "0.2.1"
-  REDIS   = Redis::PooledClient.new(
+  REDIS = Redis::PooledClient.new(
     host: ENV.fetch("REDIS_HOST", "localhost"),
     port: ENV.fetch("REDIS_PORT", "6379").to_i,
     pool_size: ENV.fetch("REDIS_POOL_SIZE", "50").to_i,

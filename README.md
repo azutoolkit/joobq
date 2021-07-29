@@ -72,9 +72,11 @@ Defining Queues: Queues are of type `Hash(String, Queue(T))` where the name of t
 
 ```crystal
 module JoobQ
-  QUEUES = { "queue:priority:high" => Queue(EmailJob).new("queue:priority:high", 20)}
-  QUEUES = { "queue:priority:medium" => Queue(EmailJob).new("queue:priority:medium", 10)}
-  QUEUES = { "queue:priority:low" => Queue(EmailJob).new("queue:priority:low", 2)}
+  QUEUES =  {
+    "queue:Email" => JoobQ::Queue(EmailJob).new("queue:Email", 1),
+    "queue:Fail"  => JoobQ::Queue(FailJob).new("queue:Fail", 1),
+    "queue:Test"  => JoobQ::Queue(TestJob).new("queue:Test", 1),
+  }
 end
 ```
 

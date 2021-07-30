@@ -18,11 +18,11 @@ module JoobQ
         JoobQ.push new(**args)
       end
 
-      def self.perform(within : Time::Span, **args)
-        ts = Time.local + within
+      def self.delay(for wait_time : Time::Span, **args)
+        ts = Time.local + wait_time
         job = new(**args)
         job.at = ts if ts > Time.local
-        JoobQ.scheduler.delay(job, within)
+        JoobQ.scheduler.delay(job, wait_time)
         job.jid
       end
 
@@ -31,7 +31,7 @@ module JoobQ
       # ```crystal
       # TestJob.run(every: 1.second, x: 1)
       # ```
-      def self.run(every : Time::Span, **args)
+      def self.schedule(every : Time::Span, **args)
         JoobQ.scheduler.every every, self, **args
       end
     end

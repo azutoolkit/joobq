@@ -120,10 +120,10 @@ end
   EmailJob.perform(email_address: "john.doe@example.com")
 
   # Delayed
-  EmailJob.perform(within: 1.hour, email_address: "john.doe@example.com")
+  EmailJob.delay(for: 1.hour, email_address: "john.doe@example.com")
 
   # Recurring at given interval
-  EmailJob.run(every: 1.second, email_address: "john.doe@example.com")
+  EmailJob.schedule(every: 1.second, email_address: "john.doe@example.com")
 ```
 
 ## Running JoobQ

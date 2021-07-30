@@ -16,5 +16,9 @@ module JoobQ
       queues[{{name}}] = JoobQ::Queue({{kind.id}}).new({{name}}, {{workers}})
       {% end %}
     end
+
+    def scheduler
+      with Scheduler.instance yield
+    end
   end
 end

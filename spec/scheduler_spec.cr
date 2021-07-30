@@ -30,13 +30,6 @@ module JoobQ
     end
 
     describe "#cron" do
-      it "registers recurring jobs at specific time" do
-        scheduler.register do
-          cron("*/1 * * * *") { }
-          cron("*/5 20-23 * * *") { }
-        end
-      end
-
       it "schedules a new recurring job" do
         scheduler.cron("*/1 * * * *") { }
       end

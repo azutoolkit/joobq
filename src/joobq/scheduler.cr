@@ -16,10 +16,6 @@ module JoobQ
       @periodic_jobs.clear
     end
 
-    def register(&block)
-      with self yield
-    end
-
     def delay(job : JoobQ::Job, for till : Time::Span)
       REDIS.zadd(delayed_queue, till.from_now.to_unix_f, job.to_json)
     end

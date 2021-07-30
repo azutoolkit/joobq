@@ -61,7 +61,8 @@ REDIS_TIMEOUT=0.2
 
 ## Defining Queues
 
-Defining Queues: Queues are of type `Hash(String, Queue(T))` where the name of the key matches the name of the Queue.
+Defining Queues: Queues are of type `Hash(String, Queue(T))` where the name of
+the key matches the name of the Queue.
 
 ### Properties
 
@@ -73,9 +74,15 @@ Defining Queues: Queues are of type `Hash(String, Queue(T))` where the name of t
 
 ```crystal
 JoobQ.configure do
-  queue "queue:Email", 1, EmailJob
-  queue "queue:Fail", 1, FailJob
-  queue "queue:Test", 1, TestJob
+  queue "single", 10, Job1
+  queue "example", 10, ExampleJob | FailJob
+
+  # Scheduling Recurring Jobs
+  scheduler do
+    cron("*/1 * * * *") { # Do Something }
+    cron("*/5 20-23 * * *") { # Do Something }
+    every 1.hour, ExampleJob, x: 1
+  end
 end
 ```
 
@@ -94,7 +101,7 @@ struct EmailJob
   @expires = 1.days.total_seconds.to_i
 
   # Initialize as normal with or without named tuple arguments
-  def initialize(email_address : String)
+  def initialize(@email_address : String)
   end
 
   def perform
@@ -116,19 +123,7 @@ end
   EmailJob.perform(within: 1.hour, email_address: "john.doe@example.com")
 
   # Recurring at given interval
-  EmailJob.run(every: 1.second, x: 1)
-```
-
-## Defining And Scheduling Recurring Jobs
-
-```crystal
-module JoobQ
-  scheduler.register do
-    cron "5 4 * * *" { Somejob.perform }
-    delay job_instance, for: 1.minute
-    every 1.hour, EmailJob, email_address: "notify@example.com"
-  end
-end
+  EmailJob.run(every: 1.second, email_address: "john.doe@example.com")
 ```
 
 ## Running JoobQ

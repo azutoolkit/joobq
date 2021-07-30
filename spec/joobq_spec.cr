@@ -9,4 +9,12 @@ describe JoobQ do
     JoobQ["example"].should be_a JoobQ::Queue(ExampleJob | FailJob)
     JoobQ["single"].should be_a JoobQ::Queue(Job1)
   end
+
+  it "registers recurring jobs at specific time" do
+    jobs = JoobQ.scheduler.jobs
+
+    jobs["*/1 * * * *"].should_not be_nil
+    jobs["*/5 20-23 * * *"].should_not be_nil
+    jobs[ExampleJob.name].should_not be_nil
+  end
 end

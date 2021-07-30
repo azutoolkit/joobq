@@ -42,9 +42,7 @@ struct Job1
   end
 end
 
-module JoobQ
-  QUEUES = {
-    "single"  => Queue(Job1).new("single", 10),
-    "example" => Queue(ExampleJob | FailJob).new("example", 1),
-  }
+JoobQ.configure do
+  queue "single", 10, Job1
+  queue "example", 10, ExampleJob | FailJob
 end

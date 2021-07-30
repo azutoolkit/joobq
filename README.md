@@ -67,16 +67,15 @@ Defining Queues: Queues are of type `Hash(String, Queue(T))` where the name of t
 
 - **Name:** `queue:email`
 - **Number Workers:** 10
+- **Job Class:** TestJob - a class or union of classes
 
 ### Example
 
 ```crystal
-module JoobQ
-  QUEUES =  {
-    "queue:Email" => JoobQ::Queue(EmailJob).new("queue:Email", 1),
-    "queue:Fail"  => JoobQ::Queue(FailJob).new("queue:Fail", 1),
-    "queue:Test"  => JoobQ::Queue(TestJob).new("queue:Test", 1),
-  }
+JoobQ.configure do
+  queue "queue:Email", 1, EmailJob
+  queue "queue:Fail", 1, FailJob
+  queue "queue:Test", 1, TestJob
 end
 ```
 

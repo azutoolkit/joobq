@@ -7,17 +7,16 @@ require "cron_parser"
 require "./joobq/**"
 
 module JoobQ
-  REDIS = Redis::PooledClient.new(
-    host: ENV.fetch("REDIS_HOST", "localhost"),
-    port: ENV.fetch("REDIS_PORT", "6379").to_i,
-    pool_size: ENV.fetch("REDIS_POOL_SIZE", "50").to_i,
-    pool_timeout: ENV.fetch("REDIS_TIMEOUT", "0.2").to_f
-  )
+  REDIS = Configure::INSTANCE.redis
 
   Log.setup_from_env(default_level: :trace)
 
+  def self.configure
+    with Configure::INSTANCE yield
+  end
+
   def self.queues
-    QUEUES
+    Configure::INSTANCE.queues
   end
 
   def self.statistics
@@ -37,7 +36,7 @@ module JoobQ
   end
 
   def self.[](name : String)
-    QUEUES[name]
+    queues[name]
   end
 
   def self.reset

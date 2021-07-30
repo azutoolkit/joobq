@@ -12,13 +12,13 @@ module JoobQ
 
     def self.create_series
       instance.create_key "processing"
-      JoobQ::QUEUES.each do |key, _|
+      JoobQ.queues.each do |key, _|
         instance.create_key key
       end
     end
 
     def queues
-      JoobQ::QUEUES
+      JoobQ.queues
     end
 
     def queue(name)

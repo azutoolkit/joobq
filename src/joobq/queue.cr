@@ -1,5 +1,9 @@
 module JoobQ
-  class Queue(T)
+  abstract class BaseQueue
+    abstract def push(job : String)
+  end
+
+  class Queue(T) < BaseQueue
     private TIMEOUT = 2
 
     getter redis : Redis::PooledClient = JoobQ::REDIS

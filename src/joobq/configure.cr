@@ -5,6 +5,7 @@ module JoobQ
     getter redis : Redis::PooledClient = Redis::PooledClient.new(
       host: ENV.fetch("REDIS_HOST", "localhost"),
       port: ENV.fetch("REDIS_PORT", "6379").to_i,
+      password: ENV["REDIS_PASS"]?,
       pool_size: ENV.fetch("REDIS_POOL_SIZE", "50").to_i,
       pool_timeout: ENV.fetch("REDIS_TIMEOUT", "0.2").to_f
     )

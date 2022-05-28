@@ -56,6 +56,7 @@ require "joobq"
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_POOL_SIZE=50
+REDIS_PASS=somepass
 REDIS_TIMEOUT=0.2
 ```
 

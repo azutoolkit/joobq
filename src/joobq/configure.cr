@@ -7,7 +7,7 @@ module JoobQ
       port: ENV.fetch("REDIS_PORT", "6379").to_i,
       password: ENV["REDIS_PASS"]?,
       pool_size: ENV.fetch("REDIS_POOL_SIZE", "50").to_i,
-      pool_timeout: ENV.fetch("REDIS_TIMEOUT", "0.2").to_i.seconds
+      pool_timeout: ENV.fetch("REDIS_TIMEOUT", "0.2").to_f
     )
 
     getter queues = {} of String => BaseQueue

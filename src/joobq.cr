@@ -7,23 +7,25 @@ require "cron_parser"
 require "./joobq/**"
 
 module JoobQ
+  extend self
+
   REDIS = Configure::INSTANCE.redis
 
   Log.setup_from_env(default_level: :trace)
 
-  def self.configure
+  def configure
     with Configure::INSTANCE yield
   end
 
-  def self.queues
+  def queues
     Configure::INSTANCE.queues
   end
 
-  def self.statistics
+  def statistics
     Statistics.instance
   end
 
-  def self.push(job)
+  def push(job)
     JoobQ::REDIS.pipelined do |p|
       p.setex "jobs:#{job.jid}", job.expires || 180, job.to_json
       p.rpush job.queue, "#{job.jid}"
@@ -31,15 +33,15 @@ module JoobQ
     job.jid
   end
 
-  def self.scheduler
+  def scheduler
     Scheduler.instance
   end
 
-  def self.[](name : String)
+  def [](name : String)
     queues[name]
   end
 
-  def self.reset
+  def reset
     queues.each { |key, _| REDIS.del key }
 
     REDIS.del Status::Busy.to_s,
@@ -52,7 +54,7 @@ module JoobQ
     Statistics.create_series
   end
 
-  def self.forge
+  def forge
     Log.info { "JoobQ booting..." }
 
     Statistics.create_series

@@ -30,12 +30,6 @@ end
 
 JoobQ.reset
 
-module JoobQ
-  QUEUES = {
-    "queue:test" => JoobQ::Queue(TestJob).new("queue:test", 80),
-    "queue:fail" => JoobQ::Queue(FailJob).new("queue:fail", 20),
-  }
-end
 
 1000000.times do |i|
   TestJob.perform(x: i)

@@ -1,7 +1,9 @@
 module JoobQ
   module Job
+
     macro included
       include JSON::Serializable
+      include Comparable({{@type}})
 
       # The Unique identifier for this job
       getter jid : UUID = UUID.random
@@ -9,6 +11,8 @@ module JoobQ
       property retries : Int32 = 0
       property expires : Int32 = 3.days.total_seconds.to_i
       property at : Time? = nil
+      property priority : Int32 = 0
+      property status : String = "enqueued"
 
       def self.perform
         JoobQ.push new
@@ -26,7 +30,7 @@ module JoobQ
         job.jid
       end
 
-      # Allows for scheduling Jobs at an interval time span. 
+      # Allows for scheduling Jobs at an interval time span.
       #
       # ```crystal
       # TestJob.run(every: 1.second, x: 1)
@@ -37,5 +41,9 @@ module JoobQ
     end
 
     abstract def perform
+
+    def <=>(other : Job)
+      self.priority <=> other.priority
+    end
   end
 end

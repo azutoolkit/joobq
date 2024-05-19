@@ -4,7 +4,6 @@ module JoobQ
 
     getter wid : Int32
     property? active : Bool = false
-    private getter redis : Redis::PooledClient = JoobQ::REDIS
 
     def initialize(@wid : Int32, @terminate : Channel(Nil), @queue : Queue(T))
     end
@@ -39,12 +38,11 @@ module JoobQ
     end
 
     private def execute(job : T, start = Time.monotonic)
+      job.running!
       job.perform
-      Track.success job, start
+      job.completed!
     rescue ex : Exception
-      Track.failure job, start, ex
-    ensure
-      Track.processed job, start
+      FailHandler.call job, start, ex
     end
   end
 end

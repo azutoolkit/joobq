@@ -1,15 +1,12 @@
 module JoobQ
   class Scheduler
-    INSTANCE = new
-    private REDIS    = JoobQ::REDIS
-
     record RecurringJobs, job : Job, queue : String, interval : Time::Span | CronParser
 
     getter jobs = {} of String => RecurringJobs | CronParser
     getter delayed_queue : String = Sets::Delayed.to_s
 
     def self.instance
-      INSTANCE
+      @@instance ||= new
     end
 
     def clear
@@ -17,7 +14,7 @@ module JoobQ
     end
 
     def delay(job : JoobQ::Job, for till : Time::Span)
-      REDIS.zadd(delayed_queue, till.from_now.to_unix_f, job.to_json)
+      store.delay_add(job, till)
     end
 
     def every(interval : Time::Span, job : JoobQ::Job.class, **args)
@@ -63,21 +60,21 @@ module JoobQ
     def enqueue(now = Time.local)
       moment = "%.6f" % now.to_unix_f
 
-      results = REDIS.zrangebyscore(
-        delayed_queue, "-inf", moment, limit: [0, 10]
-      )
+      results = store.get_delayed(now)
 
       if results.is_a?(Array)
         results.as(Array).each do |data|
           next unless data.is_a?(String)
           _data = data.as(String)
           job = JSON.parse(_data)
+          job_id = job["jid"].as(String)
+          queue_name = job["queue"].as(String)
+          queue = JoobQ[queue_name]
 
-          queue = JoobQ[job["queue"].as_s]
+          Log.info &.emit("Enqueue", queue: queue_name, job_id: job_id)
 
-          Log.info &.emit("Enqueue", queue: job["queue"].to_s, job_id: job["jid"].to_s)
-
-          if REDIS.zrem(delayed_queue, _data)
+          if store.remove_delayed(_data, delayed_queue)
+            job["status"] = :enqueued
             queue.push _data
           end
         end

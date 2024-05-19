@@ -6,7 +6,7 @@ module JoobQ
   class Queue(T) < BaseQueue
     private TIMEOUT = 2
 
-    getter redis : Redis::PooledClient = JoobQ::REDIS
+    getter store : RedisStore = RedisStore
     getter name : String
     getter total_workers : Int32
     getter workers : Array(Worker(T))
@@ -23,11 +23,11 @@ module JoobQ
     end
 
     def push(job : String)
-      JoobQ.push T.from_json(job)
+      RedisStore.push T.from_json(job)
     end
 
     def push(job : T)
-      JoobQ.push job
+      RedisStore.push job
     end
 
     def size
@@ -43,12 +43,12 @@ module JoobQ
     end
 
     def clear
-      redis.del name
+      JoobQ.redis.del name
     end
 
     def stop!
-      total_workers.times do |_n|
-        terminate_channel.send nil
+      total_workers.times do
+        terminate_channel.send(nil)
       end
     end
 
@@ -95,7 +95,7 @@ module JoobQ
     end
 
     private def create_workers
-      total_workers.times do |_n|
+      total_workers.times do
         workers << create_worker
       end
     end

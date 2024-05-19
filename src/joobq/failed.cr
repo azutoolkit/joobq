@@ -1,9 +1,7 @@
 module JoobQ
   module FailHandler
-    private FAILED_SET = Sets::Failed.to_s
-    private REDIS      = JoobQ::REDIS
-
     def self.call(job, latency, ex : Exception)
+      job.failed!
       track job, latency, ex
 
       if job.retries > 0
@@ -13,28 +11,19 @@ module JoobQ
       end
     end
 
-    private def self.track(job, latency, ex)
-      now = Time.local
-      expires = (Time.local - 3.days).to_unix_f
-      key = "#{FAILED_SET}:#{job.jid}"
+    private def self.track(job, start, ex)
       error = {
         queue:     job.queue,
-        failed_at: now,
+        failed_at: Time.local,
         message:   ex.message,
         backtrace: ex.inspect_with_backtrace,
         cause:     ex.cause.to_s,
       }
 
-      Log.info &.emit("Failed", error)
+      job.failed!
+      store.failure(job, start, ex)
 
-      REDIS.pipelined do |pipe|
-        pipe.command ["TS.ADD", "stats:#{job.queue}:error", "*", "#{latency}", "ON_DUPLICATE", "FIRST"]
-        pipe.setex "jobs:#{job.jid}", job.expires, job.to_json
-        pipe.lrem(Status::Busy.to_s, 0, job.jid.to_s)
-        pipe.zadd key, now.to_unix_f, error.to_json
-        pipe.zremrangebyscore key, "-inf", expires
-        pipe.zremrangebyrank key, 0, -10_000
-      end
+      Log.info &.emit("Failed", error)
     end
   end
 end

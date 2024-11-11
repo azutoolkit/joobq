@@ -1,5 +1,8 @@
 require "../src/joobq"
-require "benchmark"
+JoobQ.configure do |_|
+  queue "queue:test", 30, TestJob
+  queue "queue:fail", 20, FailJob
+end
 
 struct TestJob
   include JoobQ::Job
@@ -12,6 +15,12 @@ struct TestJob
   end
 
   def perform
+    random = Random.rand(100)
+
+    if random > 98
+      raise "Bad"
+    end
+
     x + 1
   end
 end
@@ -29,15 +38,5 @@ struct FailJob
   end
 end
 
-JoobQ.reset
-
-module JoobQ
-  QUEUES = {
-    "queue:test" => JoobQ::Queue(TestJob).new("queue:test", 80),
-    "queue:fail" => JoobQ::Queue(FailJob).new("queue:fail", 20),
-  }
-end
-
-JoobQ.run
-
+JoobQ.forge
 sleep

@@ -49,19 +49,17 @@ module JoobQ
     # and sets the default log level to `:trace`.
     Log.setup_from_env(default_level: :trace)
 
-    def self.instance
-      @@instance ||= new
-    end
+    class_getter instance : Configure = new
 
     getter queues = {} of String => BaseQueue
 
     property store : Store = RedisStore.new
-    property stats_enabled : Bool = false
+    property? stats_enabled : Bool = false
     property default_queue : String = "default"
     property retries : Int32 = 3
     property expires : Time::Span = 3.days
     property timeout : Time::Span = 2.seconds
-    property failed_ttl : Time::Span = 3.days
+    property failed_ttl : Time::Span = 3.milliseconds
     property dead_letter_ttl : Time::Span = 7.days
 
     macro queue(name, workers, kind)
@@ -70,7 +68,7 @@ module JoobQ
       {% end %}
     end
 
-    def scheduler
+    def scheduler(&)
       with Scheduler.instance yield
     end
   end

@@ -62,38 +62,36 @@ module JoobQ
   # - The module leverages the functionality of the `JoobQ` module for managing job queues and scheduling.
   #
   module Job
+    enum Status
+      Enqueued
+      Delayed
+      Running
+      Completed
+      Failed
+    end
+
     macro included
-      include JSON::Serializable
       include Comparable({{@type}})
-
-      enum Status
-        Enqueued
-        Delayed
-        Running
-        Completed
-        Failed
-      end
-
-      {% for status in Status %}
-        # Methods for checking
-        def {{status.id}}?
-          status == Status.{{status.id}}
-        end
-
-        # Methods for setting status
-        def {{status.id}}!
-          self.status = Status.{{status.id}}
-        end
-      {% end %}
-
-
+      include JSON::Serializable
       # The Unique identifier for this job
       getter jid : UUID = UUID.random
       property queue : String = JoobQ.config.default_queue
       property retries : Int32 = JoobQ.config.retries
       property expires : Int32 = JoobQ.config.expires.total_seconds.to_i
       property at : Time? = nil
-      property status : String = Status::Enqueued
+      property status : Status = Status::Enqueued
+
+      {% for status in Status.constants %}
+        # Methods for checking
+        def {{status.downcase}}?
+          @status == Status::{{status.id}}
+        end
+
+        # Methods for setting status
+        def {{status.downcase}}!
+          @status = Status::{{status.id}}
+        end
+      {% end %}
 
       def self.perform
         JoobQ.push new
@@ -114,7 +112,7 @@ module JoobQ
 
       # Allows for scheduling Jobs at an interval time span.
       #
-      # ```crystal
+      # ```
       # TestJob.run(every: 1.second, x: 1)
       # ```
       def self.schedule(every : Time::Span, **args)
@@ -123,5 +121,9 @@ module JoobQ
     end
 
     abstract def perform
+
+    def <=>(other : T)
+      self.jid <=> other.jid
+    end
   end
 end

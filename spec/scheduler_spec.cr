@@ -17,15 +17,15 @@ module JoobQ
 
     describe "#delay" do
       it "delays job to a time in the future" do
-        REDIS.del Sets::Delayed.to_s
-        REDIS.del job.queue
+        JoobQ.store.del Sets::Delayed.to_s
+        JoobQ.store.del job.queue
 
         scheduler.delay job, 2.seconds
-        REDIS.zcard(Sets::Delayed.to_s).should eq 1
+        JoobQ.store.delay_size.should eq 1
 
         scheduler.enqueue 5.seconds.from_now
 
-        REDIS.zcard(Sets::Delayed.to_s).should eq 0
+        JoobQ.store.delay_size.should eq 0
       end
     end
 

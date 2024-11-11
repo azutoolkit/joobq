@@ -27,13 +27,17 @@ module JoobQ
             @active = false
             break
           else
-            job = @queue.get_next
-            execute job if job
+            job = @queue.next
+            if job
+              @queue.busy.add(1)
+              execute job
+              @queue.busy.sub(1)
+            end
           end
         end
       end
     rescue ex : Exception
-      Log.error &.emit("Fetch", {worker_id: wid, reason: ex.message})
+      Log.error &.emit("Fetch", worker_id: wid, reason: ex.message)
       @queue.restart self, ex
     end
 
@@ -41,8 +45,11 @@ module JoobQ
       job.running!
       job.perform
       job.completed!
+      Log.info &.emit("Job completed", queue: job.queue, jid: job.jid.to_s)
+      @queue.completed.add(1)
+      @queue.store.delete job
     rescue ex : Exception
-      FailHandler.call job, start, ex
+      FailHandler.call job, start, ex, @queue
     end
   end
 end

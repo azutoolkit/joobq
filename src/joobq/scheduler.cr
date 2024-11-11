@@ -2,8 +2,9 @@ module JoobQ
   class Scheduler
     record RecurringJobs, job : Job, queue : String, interval : Time::Span | CronParser
 
-    getter jobs = {} of String => RecurringJobs | CronParser
-    getter delayed_queue : String = Sets::Delayed.to_s
+    private getter jobs = {} of String => RecurringJobs | CronParser
+    private getter delayed_queue : String = Sets::Delayed.to_s
+    private getter store : Store = JoobQ.store
 
     def self.instance
       @@instance ||= new
@@ -14,7 +15,7 @@ module JoobQ
     end
 
     def delay(job : JoobQ::Job, for till : Time::Span)
-      store.delay_add(job, till)
+      store.add_delayed(job, till)
     end
 
     def every(interval : Time::Span, job : JoobQ::Job.class, **args)
@@ -51,31 +52,24 @@ module JoobQ
     def run
       spawn do
         loop do
-          sleep 1
+          sleep 0.5.seconds
           enqueue
         end
       end
     end
 
     def enqueue(now = Time.local)
-      moment = "%.6f" % now.to_unix_f
-
       results = store.get_delayed(now)
 
       if results.is_a?(Array)
         results.as(Array).each do |data|
           next unless data.is_a?(String)
-          _data = data.as(String)
-          job = JSON.parse(_data)
-          job_id = job["jid"].as(String)
-          queue_name = job["queue"].as(String)
-          queue = JoobQ[queue_name]
 
-          Log.info &.emit("Enqueue", queue: queue_name, job_id: job_id)
-
-          if store.remove_delayed(_data, delayed_queue)
-            job["status"] = :enqueued
-            queue.push _data
+          if store.remove_delayed(data)
+            job_json = JSON.parse(data.as(String))
+            queue_name = job_json["queue"].as_s
+            queue = JoobQ.queues[queue_name]
+            queue.push data.as(String)
           end
         end
       end

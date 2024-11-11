@@ -39,7 +39,7 @@ module JoobQ
           queue.push job.to_json
         end
 
-        queue.size.should eq (total_jobs * 2)
+        queue.size.should eq(total_jobs * 2)
         queue.running?.should be_false
 
         queue.start

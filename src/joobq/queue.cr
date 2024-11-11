@@ -6,16 +6,26 @@ module JoobQ
   class Queue(T) < BaseQueue
     private TIMEOUT = 2
 
-    getter store : RedisStore = RedisStore
+    getter store : Store = JoobQ.config.store
     getter name : String
     getter total_workers : Int32
     getter workers : Array(Worker(T))
     getter jobs : String = T.to_s
     getter terminate_channel = Channel(Nil).new
+    property completed : Atomic(Int64) = Atomic.new(0_i64)
+    property retried : Atomic(Int64) = Atomic.new(0_i64)
+    property dead : Atomic(Int64) = Atomic.new(0_i64)
+    property busy : Atomic(Int64) = Atomic.new(0_i64)
+    property start_time : Time::Span = Time.monotonic
 
     def initialize(@name : String, @total_workers : Int32)
       @workers = Array(Worker(T)).new(@total_workers)
+      reprocess_busy_jobs!
       create_workers
+    end
+
+    def parse_job(job_data : JSON::Any)
+      T.from_json job_data.as(String)
     end
 
     def start
@@ -23,15 +33,18 @@ module JoobQ
     end
 
     def push(job : String)
-      RedisStore.push T.from_json(job)
+      push T.from_json(job)
     end
 
     def push(job : T)
-      RedisStore.push job
+      Log.info &.emit("Enqueing", queue: name, job_id: job.jid.to_s)
+      store.push job
+    rescue ex
+      Log.error &.emit("Error Enqueuing", queue: name, error: ex.message)
     end
 
     def size
-      redis.llen(name)
+      store.length name
     end
 
     def running?
@@ -43,7 +56,7 @@ module JoobQ
     end
 
     def clear
-      JoobQ.redis.del name
+      store.del name
     end
 
     def stop!
@@ -52,22 +65,12 @@ module JoobQ
       end
     end
 
-    def get_next : T?
-      # Add to BUSY queue so we can later monitor busy jobs and be able to
-      # gracefully terminate jobs in flight
-      if job_id = redis.brpoplpush(name, Status::Busy.to_s, TIMEOUT)
-        return self.get_job(job_id)
-      end
+    def next : T?
+      job = store.get(name, Status::Busy.to_s, T)
+      Log.info &.emit("Dequeuing", queue: name, job_id: job.jid.to_s) if job
+      job
     rescue ex
-      nil
-    end
-
-    def get_job(job_id : String | UUID) : T?
-      if job_data = redis.get("jobs:#{job_id}")
-        return T.from_json job_data.as(String)
-      end
-    rescue ex
-      nil
+      Log.error &.emit("Error Dequeuing", queue: name, job_id: job.jid.to_s, error: ex.message)
     end
 
     def status
@@ -79,7 +82,7 @@ module JoobQ
     end
 
     def terminate(worker : Worker(T))
-      Log.warn &.emit("Terminating Worker!", Queue: name, Worker_Id: worker.wid)
+      Log.warn &.emit("Terminating Worker", queue: name, worker_id: worker.wid)
       workers.delete worker
     end
 
@@ -87,11 +90,60 @@ module JoobQ
       terminate worker
       return unless running?
 
-      Log.warn &.emit("Restarting Worker!", Queue: name, Worker_Id: worker.wid)
+      Log.warn &.emit("Restarting Worker!", queue: name, worker_id: worker.wid)
       worker = create_worker
       workers << worker
       worker.run
       worker
+    end
+
+    def info
+      {
+        name:                name,
+        total_workers:       total_workers,
+        status:              status,
+        enqueued:            size,
+        completed:           completed.get,
+        retried:             retried.get,
+        dead:                dead.get,
+        processing:          busy.get,
+        running_workers:     running_workers,
+        jobs_per_second:     jobs_per_second,
+        errors_per_second:   errors_per_second,
+        enqueued_per_second: enqueued_per_second,
+        jobs_latency:        jobs_latency,
+      }
+    end
+
+    def jobs_per_second
+      elapsed_time = Time.monotonic - @start_time
+      return 0.0 if elapsed_time == 0
+      (@completed.get.to_f / elapsed_time.to_f)
+    end
+
+    def errors_per_second
+      elapsed_time = Time.monotonic - @start_time
+      return 0.0 if elapsed_time == 0
+      (@retried.get.to_f / elapsed_time.to_f)
+    end
+
+    def enqueued_per_second
+      elapsed_time = Time.monotonic - @start_time
+      return 0.0 if elapsed_time == 0
+      (size.to_f / elapsed_time.to_f)
+    end
+
+    def jobs_latency
+      elapsed_time = Time.monotonic - @start_time
+      return 0 if completed.get == 0
+      elapsed_time / completed.get
+    end
+
+    private def reprocess_busy_jobs!
+      loop do
+        item = @store.get(Status::Busy.to_s, name, T)
+        break unless item
+      end
     end
 
     private def create_workers

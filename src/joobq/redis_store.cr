@@ -1,19 +1,22 @@
 module JoobQ
   class RedisStore < Store
+    private FAILED_SET  = Sets::Failed.to_s
+    private DEAD_LETTER = Sets::Dead.to_s
+
     @@expiration = JoobQ.config.expires
     getter redis : Redis::PooledClient
 
-    def initialize(host = ENV.fetch("REDIS_HOST", "localhost"),
-                   port = ENV.fetch("REDIS_PORT", "6379").to_i,
-                   password = ENV["REDIS_PASS"]?,
-                   pool_size = ENV.fetch("REDIS_POOL_SIZE", "50").to_i,
-                   pool_timeout = ENV.fetch("REDIS_TIMEOUT", "0.2").to_i.seconds)
+    def initialize(@host : String = ENV.fetch("REDIS_HOST", "localhost"),
+                   @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
+                   @password : String? = ENV["REDIS_PASS"]?,
+                   @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "100").to_i,
+                   @pool_timeout : Time::Span = 0.5.seconds)
       @redis = Redis::PooledClient.new(
-        host: host,
-        port: port,
-        password: password,
-        pool_size: pool_size,
-        pool_timeout: pool_timeout
+        host: @host,
+        port: @port,
+        password: @password,
+        pool_size: @pool_size,
+        pool_timeout: 1.seconds
       )
     end
 
@@ -21,119 +24,62 @@ module JoobQ
       redis.flushdb
     end
 
-    def add(job) : String
-      redis.rpush job.queue, job.to_json
-      Log.info { "Pushed - Job #{job.jid}" }
-      job.jid
+    def get(queue : String, target_queue : String, klass : Class) : Job?
+      if job_data = redis.brpoplpush(queue, target_queue, 0.2)
+        return klass.from_json(job_data.as(String))
+      end
     end
 
     def push(job) : String
-      config.redis.pipelined do |p|
-        p.setex "jobs:#{job.jid}", job.expires || @@expiration, job.to_json
-        p.rpush job.queue, "#{job.jid}"
-      end
-      job.jid
+      redis.rpush job.queue, job.to_json
+      job.jid.to_s
     end
 
-    def find(job_id : String | UUIDi, klass : Class)
-      get job_id, klass
+    def [](job_id : String | UUID) : String?
+      redis.get("jobs:#{job_id}")
     end
 
-    def get(job_id : String | UUID, klass : Class)
-      if job_data = redis.get("jobs:#{job_id}")
-        return klass.from_json job_data.as(String)
-      end
+    def delete(job)
+      redis.rpop Status::Busy.to_s
     rescue ex
-      nil
+      # Log.error &.emit("Error deleting job", jid: job.jid, error: ex.message)
     end
 
-    def get(queue_name, klass : Class)
-      if job_data = redis.brpoplpush(queue_name, Status::Busy.to_s, TIMEOUT)
-        job = klass.from_json job_data.as(String)
-        return job
-      end
-    rescue ex
-      Log.error { ex.message }
-      nil
+    def failed(job, error) : Nil
+      redis.set "failed:#{job.jid}", {job: job, error: error}.to_json
     end
 
-    def del(key)
-      redis.del key
-
-      Status.each do |status|
-        redis.del status.to_s
+    def dead(job, expires) : Nil
+      redis.pipelined do |piped|
+        piped.zadd DEAD_LETTER, Time.local.to_unix_f, job.jid.to_s
+        piped.zremrangebyscore DEAD_LETTER, "-inf", expires
+        piped.zremrangebyrank DEAD_LETTER, 0, -10_000
       end
     end
 
-    def done(job, duration)
-      redis.pipelined do |pipe|
-        pipe.command ["TS.ADD", "stats:processing", "*", "#{duration}", "ON_DUPLICATE", "FIRST"]
-        pipe.command ["TS.ADD", "stats:#{job.queue}:success", "*", "#{duration}", "ON_DUPLICATE", "FIRST"]
-      end
-    end
-
-    def failed(job, duration)
-      redis.pipelined do |pipe|
-        pipe.command ["TS.ADD", "stats:#{job.queue}:error", "*", "#{duration}", "ON_DUPLICATE", "FIRST"]
-        pipe.zadd key, now.to_unix_f, error.to_json
-        pipe.zremrangebyscore key, "-inf", expires
-        pipe.zremrangebyrank key, 0, -10_000
-      end
-    end
-
-    def dead(job, expires)
-      redis.pipelined do |p|
-        p.zadd DEAD_LETTER, now, job.jid.to_s
-        p.zremrangebyscore DEAD_LETTER, "-inf", expires
-        p.zremrangebyrank DEAD_LETTER, 0, -10_000
-      end
-    end
-
-    def add_delayed(job : JoobQ::Job, for till : Time::Span)
+    def add_delayed(job : JoobQ::Job, till : Time::Span) : Nil
       redis.zadd(Sets::Delayed.to_s, till.from_now.to_unix_f, job.to_json)
     end
 
-    def get_delayed(now)
+    def get_delayed(now = Time.local) : Array(String)
       moment = "%.6f" % now.to_unix_f
-      redis.zrangebyscore(Sets::Delayed.to_s, "-inf", moment, limit: [0, 10])
-    end
-
-    def remove_delayed(job, queue)
-      if redis.zrem(Sets::Delayed.to_s, _data)
-        queue.push _data
+      redis.zrangebyscore(Sets::Delayed.to_s, "-inf", moment, limit: [0, 10]).map do |job|
+        job.as(String)
       end
     end
 
-    def success(job, start)
-      pipe.command ["TS.ADD", "stats:#{job.queue}:success", "*", "#{latency(start)}", "ON_DUPLICATE", "FIRST"]
+    def remove_delayed(job) : Int64
+      redis.zrem(Sets::Delayed.to_s, job.to_json)
     end
 
-    def processed(job, start)
-      pipe.command ["TS.ADD", "stats:processing", "*", "#{latency(start)}", "ON_DUPLICATE", "FIRST"]
+    def length(queue : String) : Int64
+      redis.llen(queue)
     end
 
-    def failure(job, start, ex)
-      key = "#{Sets::Failed.to_s}:#{job.jid}"
-
-      REDIS.pipelined do |pipe|
-        pipe.command ["TS.ADD", "stats:#{job.queue}:error", "*", "#{latency(start)}", "ON_DUPLICATE", "FIRST"]
-        pipe.setex "jobs:#{job.jid}", job.expires, job.to_json
-
-        # Add the error to the failed set
-        # Remove any errors older than the expiration
-        # Remove any errors beyond the 10,000th
-        pipe.zadd key, now.to_unix_f, error.to_json
-        pipe.zremrangebyscore key, "-inf", expires
-        pipe.zremrangebyrank key, 0, -10_000
-      end
-    end
-
-    private def redis
-      JoobQ.config.instance.redis
-    end
-
-    private def latency(start)
-      (Time.monotonic - start).milliseconds
+    def list(queue : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(Job)
+      start_index = (page_number - 1) * page_size
+      end_index = start_index + page_size - 1
+      redis.lrange(queue, start_index, end_index)
     end
   end
 end

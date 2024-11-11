@@ -1,5 +1,10 @@
 require "../src/joobq"
 
+JoobQ.configure do |_|
+  queue "queue:test", 80, TestJob
+  queue "queue:fail", 20, FailJob
+end
+
 struct TestJob
   include JoobQ::Job
 
@@ -28,16 +33,9 @@ struct FailJob
   end
 end
 
-JoobQ.reset
-
-module JoobQ
-  QUEUES = {
-    "queue:test" => JoobQ::Queue(TestJob).new("queue:test", 80),
-    "queue:fail" => JoobQ::Queue(FailJob).new("queue:fail", 20),
-  }
-end
-
-1000000.times do |i|
+1_000_000.times do |i|
   TestJob.perform(x: i)
-  FailJob.perform
+  # FailJob.perform
 end
+
+puts "Enqueued 1,000,000 jobs"

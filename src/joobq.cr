@@ -59,6 +59,14 @@ require "./joobq/**"
 module JoobQ
   extend self
 
+  def config
+    Configure.instance
+  end
+
+  def configure(&)
+    with config yield config
+  end
+
   def store
     config.store
   end
@@ -84,22 +92,11 @@ module JoobQ
   end
 
   def reset
-    queues.each { |key, _| REDIS.del key }
-
-    config.redis.del Status::Busy.to_s,
-      Status::Completed.to_s,
-      Sets::Delayed.to_s,
-      Sets::Failed.to_s,
-      Sets::Retry.to_s,
-      Sets::Dead.to_s
-
-    Statistics.create_series
+    config.store.reset
   end
 
   def forge
-    Log.info { "JoobQ booting..." }
-
-    Statistics.create_series
+    Log.info { "JoobQ starting..." }
     scheduler.run
 
     queues.each do |key, queue|
@@ -108,7 +105,35 @@ module JoobQ
     end
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }
+    spawn do
+      loop do
+        print "\e[H\e[2J"
+        queues.each do |key, queue|
+          stats = queue.info
+          message = <<-STATS
+          Queue: #{key}, Workers: #{queue.total_workers}, Status: #{queue.status}
+          ====================================
+          Enqueued: #{stats[:enqueued]}
+          Completed: #{stats[:completed]}
+          Retried: #{stats[:retried]}
+          Dead: #{stats[:dead]}
+          Processing: #{stats[:processing]}
+          Running Workers: #{stats[:running_workers]}
+          Jobs per second: #{stats[:jobs_per_second]}
+          Errors per second: #{stats[:errors_per_second]}
+          Enqueued per second: #{stats[:enqueued_per_second]}
+          Jobs latency: #{stats[:jobs_latency]}
 
+
+          STATS
+          print message
+        end
+
+        # Clear the screen and move the cursor to the top
+        STDOUT.flush
+        sleep 1.second
+      end
+    end
     sleep
   end
 end

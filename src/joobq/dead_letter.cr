@@ -11,17 +11,11 @@ module JoobQ
   # queue for longer than the dead letter expiration time. The dead letter
   # expiration time is configurable and defaults to 7 days.
   module DeadLetter
-    private DEAD_LETTER = Sets::Dead.to_s
+    private class_getter expires : String = JoobQ.config.dead_letter_ttl.to_s
+    private class_getter store : Store = JoobQ.config.store
 
     def self.add(job)
-      now = Time.local.to_unix_f
-      expires = Config.dead_letter_expires.to_s
-
-      joobq.redis.pipelined do |p|
-        p.zadd DEAD_LETTER, now, job.jid.to_s
-        p.zremrangebyscore DEAD_LETTER, "-inf", expires
-        p.zremrangebyrank DEAD_LETTER, 0, -10_000
-      end
+      store.dead(job, expires)
     end
   end
 end

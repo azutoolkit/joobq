@@ -19,7 +19,6 @@ module JoobQ
     def run
       return if active?
       @active = true
-
       spawn do
         loop do
           select
@@ -27,6 +26,15 @@ module JoobQ
             @active = false
             break
           else
+            if @queue.throttle_limit
+              now = Time.monotonic
+              if @queue.last_job_time
+                elapsed = now - @queue.last_job_time
+                sleep_time = 1.0 / @queue.throttle_limit - elapsed
+                sleep sleep_time if sleep_time > 0
+              end
+              @queue.last_job_time = now
+            end
             job = @queue.next
             if job
               @queue.busy.add(1)

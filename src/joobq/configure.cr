@@ -62,9 +62,9 @@ module JoobQ
     property failed_ttl : Time::Span = 3.milliseconds
     property dead_letter_ttl : Time::Span = 7.days
 
-    macro queue(name, workers, kind)
+    macro queue(name, workers, kind, throttle_limit = nil)
       {% begin %}
-      queues[{{name}}] = JoobQ::Queue({{kind.id}}).new({{name}}, {{workers}})
+      queues[{{name}}] = JoobQ::Queue({{kind.id}}).new({{name}}, {{workers}}, {{throttle_limit}})
       {% end %}
     end
 

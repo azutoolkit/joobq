@@ -17,8 +17,10 @@ module JoobQ
     property dead : Atomic(Int64) = Atomic.new(0_i64)
     property busy : Atomic(Int64) = Atomic.new(0_i64)
     property start_time : Time::Span = Time.monotonic
+    property throttle_limit : Int32? = nil
+    property last_job_time : Time? = nil
 
-    def initialize(@name : String, @total_workers : Int32)
+    def initialize(@name : String, @total_workers : Int32, @throttle_limit : Int32? = nil)
       @workers = Array(Worker(T)).new(@total_workers)
       reprocess_busy_jobs!
       create_workers

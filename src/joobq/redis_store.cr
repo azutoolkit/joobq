@@ -1,8 +1,8 @@
 module JoobQ
   class RedisStore < Store
-    private FAILED_SET  = "joobq:failed_jobs"
-    private DEAD_LETTER = "joobq:dead_letter"
-    private DELAYED_SET = "joobq:delayed_jobs"
+    private FAILED_SET       = "joobq:failed_jobs"
+    private DEAD_LETTER      = "joobq:dead_letter"
+    private DELAYED_SET      = "joobq:delayed_jobs"
     private PROCESSING_QUEUE = "joobq:processing"
 
     @@expiration = JoobQ.config.expires

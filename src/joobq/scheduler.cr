@@ -56,8 +56,8 @@ module JoobQ
         end
       end
     rescue ex : Exception
-        Log.error &.emit("Scheduler Crashed", reason: ex.message)
-        run
+      Log.error &.emit("Scheduler Crashed", reason: ex.message)
+      run
     end
 
     def enqueue(now = Time.local)

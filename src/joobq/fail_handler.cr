@@ -28,7 +28,7 @@ module JoobQ
 
       job.retries = retry_left
       if retry_left > 0
-        delay = (2 ** (original_retries-retry_left)) * 1000 # Delay in ms
+        delay = (2 ** (original_retries - retry_left)) * 1000 # Delay in ms
 
         # Logic to add the job back to the queue after a delay
         queue.store.add_delayed(job, delay)

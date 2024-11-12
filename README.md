@@ -1,23 +1,21 @@
 # JoobQ
 
-<img src="./joobq-logo.png">
+<img src="./joobq-logo.png" alt="JoobQ Logo">
 
 [![Crystal CI](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml/badge.svg)](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml)
 
-JoobQ is a fast, efficient asynchronous reliable job queue scheduler library
-processing. Jobs are submitted to a job queue, where they reside until they are
-able to be scheduled to run in a compute environment.
+JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler library. Jobs are submitted to a job queue, where they reside until they are scheduled to run in a compute environment.
 
-#### Features
+## Features
 
-- [x] Priority queues based on number of workers
+- [x] Priority queues based on the number of workers
 - [x] Reliable queue
-- [x] Error Handling
-- [x] Retry Jobs with automatic Delays
-- [x] Cron Like Periodic Jobs
-- [x] Delayed Jobs
+- [x] Error handling
+- [x] Retry jobs with automatic delays
+- [x] Cron-like periodic jobs
+- [x] Delayed jobs
 - [x] Stop execution of workers
-- [x] Jobs expiration
+- [x] Job expiration
 
 ## Help Wanted
 
@@ -33,6 +31,8 @@ is used to monitor stats of job execution the module is free for use and easy to
 configure. Follow the guidelines at [redistimeseries.io](https://oss.redislabs.com/redistimeseries/)
 
 ## Installation
+
+Add the following to your `shard.yml`:
 
 ```yaml
 dependencies:

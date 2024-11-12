@@ -1,10 +1,8 @@
 # JoobQ
 
-<hr />
-
 <img src="./joobq-logo.png">
 
-![Crystal CI](https://github.com/eliasjpr/joobq/workflows/Crystal%20CI/badge.svg?branch=master)
+[![Crystal CI](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml/badge.svg)](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml)
 
 JoobQ is a fast, efficient asynchronous reliable job queue scheduler library
 processing. Jobs are submitted to a job queue, where they reside until they are
@@ -12,7 +10,6 @@ able to be scheduled to run in a compute environment.
 
 #### Features
 
-<hr />
 - [x] Priority queues based on number of workers
 - [x] Reliable queue
 - [x] Error Handling
@@ -24,8 +21,6 @@ able to be scheduled to run in a compute environment.
 
 ## Help Wanted
 
-<hr />
-
 - \[ ] CLI to manage queues and monitor server
 - \[ ] Rest API: Rest api to schedule jobs
 - \[ ] Throttle (Rate limit)
@@ -33,15 +28,11 @@ able to be scheduled to run in a compute environment.
 
 ## Requirements
 
-<hr />
-
 This project uses REDIS with the TimeSeries module loaded. The Redis TimeSeries
 is used to monitor stats of job execution the module is free for use and easy to
 configure. Follow the guidelines at [redistimeseries.io](https://oss.redislabs.com/redistimeseries/)
 
 ## Installation
-
-<hr />
 
 ```yaml
 dependencies:
@@ -56,8 +47,6 @@ shards install
 ```
 
 ## Usage
-
-<hr />
 
 ```crystal
 require "joobq"

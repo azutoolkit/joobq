@@ -1,13 +1,18 @@
 # JoobQ
 
+<hr />
+
+<img src="./joobq-logo.png">
+
 ![Crystal CI](https://github.com/eliasjpr/joobq/workflows/Crystal%20CI/badge.svg?branch=master)
 
 JoobQ is a fast, efficient asynchronous reliable job queue scheduler library
 processing. Jobs are submitted to a job queue, where they reside until they are
 able to be scheduled to run in a compute environment.
 
-#### Features:
+#### Features
 
+<hr />
 - [x] Priority queues based on number of workers
 - [x] Reliable queue
 - [x] Error Handling
@@ -19,12 +24,24 @@ able to be scheduled to run in a compute environment.
 
 ## Help Wanted
 
+<hr />
+
 - \[ ] CLI to manage queues and monitor server
 - \[ ] Rest API: Rest api to schedule jobs
 - \[ ] Throttle (Rate limit)
 - \[ ] Approve Queue?: Jobs have to manually approved to execute
 
+## Requirements
+
+<hr />
+
+This project uses REDIS with the TimeSeries module loaded. The Redis TimeSeries
+is used to monitor stats of job execution the module is free for use and easy to
+configure. Follow the guidelines at [redistimeseries.io](https://oss.redislabs.com/redistimeseries/)
+
 ## Installation
+
+<hr />
 
 ```yaml
 dependencies:
@@ -38,13 +55,9 @@ Then run:
 shards install
 ```
 
-## Requirements
-
-This project uses REDIS with the TimeSeries module loaded. The Redis TimeSeries
-is used to monitor stats of job execution the module is free for use and easy to
-configure. Follow the guidelines at [redistimeseries.io](https://oss.redislabs.com/redistimeseries/)
-
 ## Usage
+
+<hr />
 
 ```crystal
 require "joobq"
@@ -60,7 +73,7 @@ REDIS_PASS=somepass
 REDIS_TIMEOUT=0.2
 ```
 
-## Defining Queues
+### Defining Queues
 
 Defining Queues: Queues are of type `Hash(String, Queue(T))` where the name of
 the key matches the name of the Queue.
@@ -87,7 +100,7 @@ JoobQ.configure do
 end
 ```
 
-## Jobs
+### Jobs
 
 To define Jobs, must include the JoobQ::Job module, and must implement perform method
 
@@ -127,7 +140,7 @@ end
   EmailJob.schedule(every: 1.second, email_address: "john.doe@example.com")
 ```
 
-## Running JoobQ
+### Running JoobQ
 
 Starts JoobQ server and listens for jobs
 

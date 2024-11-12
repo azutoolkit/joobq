@@ -75,10 +75,6 @@ module JoobQ
     config.queues
   end
 
-  def statistics
-    Statistics.instance
-  end
-
   def push(job)
     store.push(job)
   end
@@ -105,35 +101,7 @@ module JoobQ
     end
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }
-    spawn do
-      loop do
-        print "\e[H\e[2J"
-        queues.each do |key, queue|
-          stats = queue.info
-          message = <<-STATS
-          Queue: #{key}, Workers: #{queue.total_workers}, Status: #{queue.status}
-          ====================================
-          Enqueued: #{stats[:enqueued]}
-          Completed: #{stats[:completed]}
-          Retried: #{stats[:retried]}
-          Dead: #{stats[:dead]}
-          Processing: #{stats[:processing]}
-          Running Workers: #{stats[:running_workers]}
-          Jobs per second: #{stats[:jobs_per_second]}
-          Errors per second: #{stats[:errors_per_second]}
-          Enqueued per second: #{stats[:enqueued_per_second]}
-          Jobs latency: #{stats[:jobs_latency]}
 
-
-          STATS
-          print message
-        end
-
-        # Clear the screen and move the cursor to the top
-        STDOUT.flush
-        sleep 3.second
-      end
-    end
     sleep
   end
 end

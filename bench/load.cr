@@ -9,7 +9,7 @@ struct TestJob
   include JoobQ::Job
 
   property x : Int32
-  @retries = 3
+  @retries = 2
   @queue = "queue:test"
 
   def initialize(@x : Int32)
@@ -33,7 +33,7 @@ struct FailJob
   end
 end
 
-1_000_000.times do |i|
+1_000.times do |i|
   TestJob.perform(x: i)
   # FailJob.perform
 end

@@ -66,11 +66,9 @@ module JoobQ
     end
 
     def next : T?
-      job = store.get(name, Status::Busy.to_s, T)
-      Log.info &.emit("Dequeuing", queue: name, job_id: job.jid.to_s) if job
-      job
+      store.get(name, T)
     rescue ex
-      Log.error &.emit("Error Dequeuing", queue: name, job_id: job.jid.to_s, error: ex.message)
+      Log.error &.emit("Error Dequeuing", queue: name, error: ex.message)
     end
 
     def status
@@ -140,9 +138,12 @@ module JoobQ
     end
 
     private def reprocess_busy_jobs!
-      loop do
-        item = @store.get(Status::Busy.to_s, name, T)
-        break unless item
+      spawn do
+        loop do
+          item = @store.put_back(name)
+          next unless item
+          sleep 3.seconds unless status == "Awaiting"
+        end
       end
     end
 

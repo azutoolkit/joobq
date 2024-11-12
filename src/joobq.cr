@@ -131,7 +131,7 @@ module JoobQ
 
         # Clear the screen and move the cursor to the top
         STDOUT.flush
-        sleep 1.second
+        sleep 3.second
       end
     end
     sleep

@@ -3,7 +3,6 @@ module JoobQ
     record RecurringJobs, job : Job, queue : String, interval : Time::Span | CronParser
 
     private getter jobs = {} of String => RecurringJobs | CronParser
-    private getter delayed_queue : String = Sets::Delayed.to_s
     private getter store : Store = JoobQ.store
 
     def self.instance
@@ -52,26 +51,24 @@ module JoobQ
     def run
       spawn do
         loop do
-          sleep 0.5.seconds
           enqueue
+          sleep 3.seconds
         end
       end
+    rescue ex : Exception
+        Log.error &.emit("Scheduler Crashed", reason: ex.message)
+        run
     end
 
     def enqueue(now = Time.local)
       results = store.get_delayed(now)
-
-      if results.is_a?(Array)
-        results.as(Array).each do |data|
-          next unless data.is_a?(String)
-
-          if store.remove_delayed(data)
-            job_json = JSON.parse(data.as(String))
-            queue_name = job_json["queue"].as_s
-            queue = JoobQ.queues[queue_name]
-            queue.push data.as(String)
-          end
-        end
+      print "Scheduler - Results: #{results}"
+      results.as(Array).each do |data|
+        next unless data.is_a?(String)
+        job_json = JSON.parse(data.as(String))
+        queue_name = job_json["queue"].as_s
+        queue = JoobQ.queues[queue_name]
+        queue.push data.as(String)
       end
     end
   end

@@ -8,7 +8,7 @@ struct TestJob
   include JoobQ::Job
 
   property x : Int32
-  @retries = 3
+  @retries = 2
   @queue = "queue:test"
 
   def initialize(@x : Int32)

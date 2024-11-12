@@ -45,7 +45,6 @@ module JoobQ
       job.running!
       job.perform
       job.completed!
-      Log.info &.emit("Job completed", queue: job.queue, jid: job.jid.to_s)
       @queue.completed.add(1)
       @queue.store.delete job
     rescue ex : Exception

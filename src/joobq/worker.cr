@@ -37,6 +37,11 @@ module JoobQ
             end
             job = @queue.next
             if job
+              if job.expires && Time.local > job.expires
+                @queue.store.dead(job, job.expires)
+                next
+              end
+
               @queue.busy.add(1)
               execute job
               @queue.busy.sub(1)

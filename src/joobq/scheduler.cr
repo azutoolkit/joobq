@@ -62,7 +62,6 @@ module JoobQ
 
     def enqueue(now = Time.local)
       results = store.get_delayed(now)
-      print "Scheduler - Results: #{results}"
       results.as(Array).each do |data|
         next unless data.is_a?(String)
         job_json = JSON.parse(data.as(String))

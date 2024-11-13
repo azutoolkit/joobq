@@ -47,8 +47,6 @@ module JoobQ
 
     def delete(job)
       redis.rpop PROCESSING_QUEUE
-    rescue ex
-      # Log.error &.emit("Error deleting job", jid: job.jid, error: ex.message)
     end
 
     def failed(job, error) : Nil

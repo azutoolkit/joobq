@@ -1,36 +1,9 @@
 require "../src/joobq"
+require "./jobs/*"
 
 JoobQ.configure do |_|
   queue "queue:test", 80, TestJob
   queue "queue:fail", 20, FailJob
-end
-
-struct TestJob
-  include JoobQ::Job
-
-  property x : Int32
-  @retries = 2
-  @queue = "queue:test"
-
-  def initialize(@x : Int32)
-  end
-
-  def perform
-    x + 1
-  end
-end
-
-struct FailJob
-  include JoobQ::Job
-  @queue = "queue:fail"
-  @retries = 3
-
-  def initialize
-  end
-
-  def perform
-    raise "Bad"
-  end
 end
 
 1_000.times do |i|

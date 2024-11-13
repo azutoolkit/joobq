@@ -16,12 +16,12 @@ JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler librar
 - [x] Delayed jobs
 - [x] Stop execution of workers
 - [x] Job expiration
+- [x] Throttle (Rate limit)
 
 ## Help Wanted
 
 - \[ ] CLI to manage queues and monitor server
 - \[ ] Rest API: Rest api to schedule jobs
-- \[ ] Throttle (Rate limit)
 - \[ ] Approve Queue?: Jobs have to manually approved to execute
 
 ## Requirements

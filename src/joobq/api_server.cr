@@ -20,11 +20,14 @@ module JoobQ
   class APIHandler
     include HTTP::Handler
 
+    Log = ::Log.for("API")
+
     def call(context : HTTP::Server::Context)
-      if context.request.method == "POST" && context.request.path == "/joobq/enqueue"
+      if context.request.method == "POST" && context.request.path == "/joobq/jobs"
         if request_body = context.request.body.try(&.gets_to_end)
           response = enqueue(request_body)
           context.response.content_type = "application/json"
+          context.response.status = HTTP::Status::CREATED
           context.response.print(response)
         else
           context.response.status_code = 400
@@ -66,11 +69,20 @@ module JoobQ
       payload = JSON.parse(raw_payload)
       queue_name = payload["queue"].to_s
       queue = JoobQ.queues[queue_name]
+
       return {error: "Invalid queue name"}.to_json unless queue
 
       # Assuming there's a method to add a job to the queue
       jid = queue.add(raw_payload)
-      {status: "Job enqueued", queue: queue_name, job_id: jid}.to_json
+      response = {
+        status: "Job enqueued",
+        queue: queue.name,
+        job_id: jid.to_s,
+      }
+
+      Log.info &.emit("Job enqueued", queue: queue.name.to_s, job_id: jid.to_s)
+
+      response.to_json
     end
   end
 end

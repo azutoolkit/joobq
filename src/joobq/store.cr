@@ -2,7 +2,7 @@ module JoobQ
   # Define a generic Store interface
   abstract class Store
     # Pushes a job to the queue
-    abstract def push(job : JoobQ::Job) : String
+    abstract def add(job : JoobQ::Job) : String
     # Fetch the next job from the queue, returns an instance of the provided class
     abstract def get(queue : String, klass : Class) : Job?
     # Mark a job as failed with associated details

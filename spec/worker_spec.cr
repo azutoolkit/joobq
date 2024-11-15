@@ -37,7 +37,7 @@ module JoobQ
     it "runs the worker" do
       REDIS.llen(job.queue).should eq 0
 
-      JoobQ.push job
+      JoobQ.add job
       REDIS.llen(job.queue).should eq 1
 
       worker.run

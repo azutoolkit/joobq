@@ -29,14 +29,14 @@ module JoobQ
         total_jobs = 10
 
         total_jobs.times do |i|
-          queue.push ExampleJob.new(i).to_json
+          queue.add ExampleJob.new(i).to_json
         end
 
         total_jobs.times do
           job = FailJob.new
           job.queue = "example"
           job.retries = 3
-          queue.push job.to_json
+          queue.add job.to_json
         end
 
         queue.size.should eq(total_jobs * 2)

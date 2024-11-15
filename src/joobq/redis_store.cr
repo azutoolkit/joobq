@@ -36,7 +36,7 @@ module JoobQ
       redis.brpoplpush(PROCESSING_QUEUE, queue, 5)
     end
 
-    def push(job) : String
+    def add(job) : String
       redis.rpush job.queue, job.to_json
       job.jid.to_s
     end

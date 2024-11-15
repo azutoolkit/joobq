@@ -9,15 +9,14 @@ module JoobQ
         backtrace: ex.inspect_with_backtrace[0..10],
         cause:     ex.cause.to_s,
       }
-      Log.info &.emit("Failed", queue: queue.name, job_id: job.jid.to_s, error: error)
 
-      if job.expires && Time.local > job.expires
+      if job.expires && Time.local.to_unix_ms > job.expires
         DeadLetterManager.add(job)
         queue.dead.add(1)
         Log.error &.emit("Job expired and moved to Dead Letter Queue", job_id: job.jid.to_s)
       elsif job.retries > 0
         ExponentialBackoff.retry(job, queue)
-        Log.warn &.emit("Retrying job", queue: queue.name, job_id: job.jid.to_s, retries_left: job.retries)
+        Log.warn &.emit("Job moved to Retry Queue", job_id: job.jid.to_s)
         queue.retried.add(1)
       else
         DeadLetterManager.add(job)

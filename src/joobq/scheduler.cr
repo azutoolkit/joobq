@@ -67,7 +67,7 @@ module JoobQ
         job_json = JSON.parse(data.as(String))
         queue_name = job_json["queue"].as_s
         queue = JoobQ.queues[queue_name]
-        queue.push data.as(String)
+        queue.add data.as(String)
       end
     end
   end

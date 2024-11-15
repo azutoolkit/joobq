@@ -1,85 +1,144 @@
 module JoobQ
-  # ### Module `JoobQ::Job`
+  # JoobQ::Job Module
   #
-  # This module is designed to be mixed into specific job classes, providing them with serialization
-  # capabilities and queue-related methods. It's meant for defining jobs that can be pushed to and
-  # handled by the `JoobQ` queue system.
+  # The `JoobQ::Job` module provides an abstract structure for defining jobs
+  # within the JoobQ asynchronous job processing framework. This module includes
+  # functionality for managing job statuses, scheduling, retries, timeouts, and more.
   #
-  # #### Mixin `included` Macro
+  # ## Example Usage
   #
-  # When included in a class, this macro endows the class with the following properties and methods:
-  #
-  # - **JSON Serialization**: Includes `JSON::Serializable` for easy serialization and deserialization of job instances.
-  #
-  # - **Configuration Constants**:
-  #   - `CONFIG`: A constant set to `Configure.instance`, representing the job configuration.
-  #
-  # - **Properties**:
-  #   - `jid`: A unique identifier for the job, generated using `UUID.random`.
-  #   - `queue`: The name of the queue to which the job will be pushed. Defaults to `CONFIG.default_queue`.
-  #   - `retries`: The number of times the job should be retried. Defaults to `CONFIG.retries`.
-  #   - `expires`: The expiration time for the job. Defaults to `CONFIG.expires`.
-  #   - `at`: An optional `Time` indicating when the job should be executed. Initially `nil`.
-  #
-  # - **Class Methods**:
-  #   - `perform`: Creates a new instance of the job and pushes it to the queue. Overloaded to
-  #     accept arguments for initializing the job.
-  #   - `delay(for wait_time : Time::Span, **args)`: Schedules the job to be performed after a
-  #     specified `wait_time`. Returns the job's `jid`.
-  #   - `schedule(every : Time::Span, **args)`: Schedules the job to run at regular intervals specified by `every`.
-  #
-  # #### Abstract Instance Method
-  #
-  # - `perform`: An abstract instance method that must be implemented by the including class. This method defines
-  # what the job does when executed.
-  #
-  # ### Usage Example
+  # To define a custom job, include the `JoobQ::Job` module within your job class
+  # and implement the `perform` method.
   #
   # ```
-  # class MyJob
+  # class ExampleJob
   #   include JoobQ::Job
   #
   #   def perform
-  #     # Define what the job does here
+  #     puts "Executing job logic"
   #   end
   # end
-  #
-  # # Pushing the job to the queue immediately
-  # MyJob.perform
-  #
-  # # Scheduling the job to be performed after 5 minutes
-  # MyJob.delay(for: 5.minutes)
-  #
-  # # Scheduling the job to run every hour
-  # MyJob.schedule(every: 1.hour)
   # ```
   #
-  # ### Notes
+  # You can then enqueue, delay, or schedule the job using provided methods.
   #
-  # - The `Job` module requires the including class to implement the `perform` method,
-  #   which defines the job's functionality.
-  # - Jobs can be queued for immediate execution, delayed execution, or scheduled at regular intervals.
-  # - The module leverages the functionality of the `JoobQ` module for managing job queues and scheduling.
+  # ### Job Status
+  # The `JoobQ::Job::Status` enum defines the possible states for a job:
+  # - `Pending`: The job has been created but not scheduled.
+  # - `Scheduled`: The job is scheduled to run at a specific time.
+  # - `Running`: The job is currently executing.
+  # - `Completed`: The job finished successfully.
+  # - `Retrying`: The job is retrying after a failure.
+  # - `Failed`: The job execution failed after exhausting retries.
+  # - `Expired`: The job expired before execution.
+  #
+  # Each status has corresponding predicate and setter methods for checking
+  # and updating job status.
+  #
+  # ### Properties
+  #
+  # - `jid`: The unique identifier for the job (UUID).
+  # - `queue`: The queue to which the job is assigned.
+  # - `retries`: The maximum number of retries allowed.
+  # - `expires`: The expiration time of the job in Unix milliseconds.
+  # - `at`: Optional time for delayed job execution.
+  # - `status`: The current status of the job.
+  # - `timeout`: The maximum execution time allowed for the job.
+  #
+  # ### Methods
+  #
+  # #### Status Predicate and Setter Methods
+  #
+  # The module automatically defines predicate and setter methods for each job
+  # status:
+  #
+  # ```
+  # job = ExampleJob.new
+  # job.running! # Sets the job's status to Running
+  # job.running? # Checks if the job's status is Running
+  # ```
+  #
+  # #### Enqueue and Execution Methods
+  #
+  # - `batch_enqueue(jobs : Array({{type}}))`: Enqueues an array of jobs.
+  #
+  #   ```
+  # ExampleJob.batch_enqueue([job1, job2, job3])
+  #   ```
+  #
+  # - `enqueue(**args)`: Enqueues a single job to the queue.
+  #
+  #   ```
+  # ExampleJob.enqueue(param: "value")
+  #   ```
+  #
+  # - `perform`: Executes the job immediately without enqueuing.
+  #
+  #   ```
+  # ExampleJob.perform(param: "value")
+  #   ```
+  #
+  # #### Delay and Scheduling
+  #
+  # - `enqueue_at(time : Time::Span, **args)`: Enqueues a job to be processed after a specified delay.
+  #
+  #   ```
+  # ExampleJob.enqueue_at(1.minute, param: "value")
+  #   ```
+  #
+  # - `delay(for wait_time : Time::Span, **args)`: Delays job execution by a specified timespan.
+  #
+  #   ```
+  # ExampleJob.delay(2.minutes, param: "value")
+  #   ```
+  #
+  # - `schedule(every : Time::Span, **args)`: Schedules a recurring job to run at a specified interval.
+  #
+  #   ```
+  # ExampleJob.schedule(5.seconds, param: "value")
+  #   ```
+  #
+  # #### Timeout Handling
+  #
+  # `with_timeout` provides a way to enforce a timeout on the job's execution.
+  # If the block takes longer than the specified `@timeout`, it raises a `Timeout::TimeoutError`.
+  #
+  # ```
+  # def perform
+  #   with_timeout do
+  #     # Simulate a long-running task
+  #     puts "Starting a task that should timeout..."
+  #     sleep 10.seconds
+  #   rescue Timeout::TimeoutError => e
+  #     puts e.message # => "execution expired after 5 seconds"
+  #   end
+  # end
+  # ```
   #
   module Job
     enum Status
-      Enqueued
-      Delayed
+      Pending
+      Scheduled
       Running
       Completed
+      Retrying
       Failed
+      Expired
     end
 
     macro included
       include Comparable({{@type}})
       include JSON::Serializable
+
       # The Unique identifier for this job
       getter jid : UUID = UUID.random
       property queue : String = JoobQ.config.default_queue
       property retries : Int32 = JoobQ.config.retries
-      property expires : Int32 = JoobQ.config.expires.total_seconds.to_i
+      property expires : Int64 = JoobQ.config.expires.from_now.to_unix_ms
       property at : Time? = nil
       property status : Status = Status::Enqueued
+      property timeout : Time::Span = JoobQ.config.timeout
+
 
       {% for status in Status.constants %}
         # Methods for checking
@@ -93,14 +152,55 @@ module JoobQ
         end
       {% end %}
 
-      def self.perform
-        JoobQ.push new
+      # Batch enqueue jobs in an array of jobs
+      # ```
+      # TestJob.batch_enqueue([job1, job2, job3])
+      # ```
+      def self.batch_enqueue(jobs : Array({{@type}}))
+        jobs.each do |job|
+          job.enqueue
+        end
       end
 
-      def self.perform(**args)
+      # Enqueue a job to the queue for processing
+      #
+      # ```
+      # TestJob.enqueue(x: 1)
+      # ```
+      def self.enqueue(**args)
         JoobQ.push new(**args)
       end
 
+      # Execute the job immediately does not enqueue the job
+      #
+      # ```
+      # TestJob.enqueue(x: 1)
+      # ```
+      def self.perform
+        new.perform
+      end
+
+      # Execute the job immediately does not enqueue the job
+      #
+      # ```
+      # TestJob.perform(x: 1)
+      # ```
+      def self.perform(**args)
+        new(**args).perform
+      end
+
+      # Delay a job for a specific time span and enqueue it
+      # ```
+      # TestJob.delayed(time: 1.minute, x: 1)
+      # ```
+      def self.enqueue_at(time : Time::Span, **args)
+        delayed(time, **args)
+      end
+
+      # Delay a job for a specific time span and enqueue it
+      # ```
+      # TestJob.delayed(time: 1.minute, x: 1)
+      # ```
       def self.delay(for wait_time : Time::Span, **args)
         ts = Time.local + wait_time
         job = new(**args)
@@ -121,6 +221,26 @@ module JoobQ
     end
 
     abstract def perform
+
+    # With timeout method to run a block of code with a timeout limit set
+    #
+    # ```
+    # @timeout = 5.seconds
+    #
+    # with_timeout do
+    #   # Simulate a long-running task
+    #   puts "Starting a task that should timeout..."
+    #   sleep 10.seconds
+    #   puts "This should not print because the task should be timed out"
+    # rescue Timeout::TimeoutError => e
+    #   puts e.message # => "execution expired after 5 seconds"
+    # end
+    # ```
+    def with_timeout(&block : ->)
+      Timeout.run(@timeout) do
+        block.call
+      end
+    end
 
     def <=>(other : T)
       self.jid <=> other.jid

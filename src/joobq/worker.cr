@@ -5,7 +5,10 @@ module JoobQ
     getter wid : Int32
     property? active : Bool = false
 
+    @last_job_time : Int64
+
     def initialize(@wid : Int32, @terminate : Channel(Nil), @queue : Queue(T))
+      @last_job_time = Time.utc.to_unix_ms
     end
 
     def name
@@ -20,41 +23,48 @@ module JoobQ
       return if active?
       @active = true
       spawn do
-        loop do
-          select
-          when @terminate.receive?
-            @active = false
-            break
-          else
-            if @queue.throttle_limit
-              now = Time.local.to_unix_ms
-              if last_job_time = @queue.last_job_time
-                elapsed = now - last_job_time
-                sleep_time = (1000.0 / @queue.throttle_limit.not_nil!) - elapsed
-                sleep sleep_time / 1000.0 if sleep_time > 0
-              end
-              @queue.last_job_time = now
-            end
-            job = @queue.next
-            if job
-              if job.expires && Time.local > job.expires
-                @queue.store.dead(job, job.expires)
-                next
-              end
+        begin
+          loop do
+            select
+            when @terminate.receive?
+              @active = false
+              break
+            else
+              if job = @queue.next_job
+                if job.expires && Time.utc.to_unix_ms > job.expires
+                  @queue.store.dead(job, job.expires)
+                  next
+                end
 
-              @queue.busy.add(1)
-              execute job
-              @queue.busy.sub(1)
+                throttle if @queue.throttle_limit
+                @queue.busy.add(1)
+                execute job
+                @queue.busy.sub(1)
+              end
             end
           end
+        rescue ex : Exception
+          Log.error &.emit("Fetch", worker_id: wid, reason: ex.message)
+          @queue.restart self, ex
         end
       end
-    rescue ex : Exception
-      Log.error &.emit("Fetch", worker_id: wid, reason: ex.message)
-      @queue.restart self, ex
     end
 
-    private def execute(job : T, start = Time.monotonic)
+    private def throttle
+      min_interval = (1000.0 / @queue.throttle_limit.not_nil!) # milliseconds
+      now = Time.utc.to_unix_ms
+      elapsed = now - @last_job_time
+      sleep_time = min_interval - elapsed
+      if sleep_time > 0
+        sleep (sleep_time / 1000.0).seconds
+        @last_job_time = Time.utc.to_unix_ms
+      else
+        @last_job_time = now
+      end
+    end
+
+    private def execute(job : T)
+      start = Time.monotonic
       job.running!
       job.perform
       job.completed!

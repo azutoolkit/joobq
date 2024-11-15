@@ -47,7 +47,7 @@ require "./joobq/**"
 #
 # - To initialize and start the `JoobQ` system, call `JoobQ.forge`.
 # - Use `JoobQ.configure` to set up system configurations.
-# - Jobs can be pushed to the queue using `JoobQ.push(job)`.
+# - Jobs can be pushed to the queue using `JoobQ.add(job)`.
 # - Access specific queues or the scheduler as needed.
 #
 # ### Notes
@@ -75,8 +75,8 @@ module JoobQ
     config.queues
   end
 
-  def push(job)
-    store.push(job)
+  def add(job)
+    store.add(job)
   end
 
   def scheduler
@@ -101,6 +101,10 @@ module JoobQ
     end
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }
+
+    spawn do
+      APIServer.start
+    end
 
     sleep
   end

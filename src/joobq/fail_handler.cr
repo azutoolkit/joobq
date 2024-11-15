@@ -79,7 +79,7 @@ module JoobQ
 
       if job.expires && Time.local.to_unix_ms > job.expires
         job.expired!
-        DeadLetterManager.add(job)
+        DeadLetterManager.add(job, queue)
       elsif job.retries > 0
         job.retrying!
         ExponentialBackoff.retry(job, queue)
@@ -93,7 +93,7 @@ module JoobQ
           cause:     ex.cause.to_s,
         }
 
-        DeadLetterManager.add(job, error)
+        DeadLetterManager.add(job, queue, error)
       end
     end
   end
@@ -107,7 +107,7 @@ module JoobQ
       if retry_left > 0
         delay = (2 ** (original_retries - retry_left)) * 1000 # Delay in ms
         # Logic to add the job back to the queue after a delay
-        queue.store.add_delayed(job, delay)
+        queue.store.schedule(job, delay)
         queue.retried.add(1)
         Log.warn &.emit("Job moved to Retry Queue", job_id: job.jid.to_s)
       end
@@ -115,9 +115,8 @@ module JoobQ
   end
 
   module DeadLetterManager
-    def self.add(job, error = nil)
-      queue.dead.add(1)
-      DeadLetter.add job.to_json
+    def self.add(job, queue, error = nil)
+      DeadLetter.add job
       Log.error &.emit("Job moved to Dead Letter Queue", error: error)
     end
   end

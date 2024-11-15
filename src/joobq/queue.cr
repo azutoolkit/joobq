@@ -39,13 +39,13 @@ module JoobQ
     end
 
     def add(job : T)
-      store.add job
+      store.enqueue job
     rescue ex
       Log.error &.emit("Error Enqueuing", queue: name, error: ex.message)
     end
 
     def size
-      store.length name
+      store.queue_size name
     end
 
     def running?
@@ -57,7 +57,7 @@ module JoobQ
     end
 
     def clear
-      store.del name
+      store.clear_queue name
     end
 
     def stop!
@@ -68,7 +68,7 @@ module JoobQ
 
     def next_job
       # Try to get a job from the store
-      store.get(name, T)
+      store.dequeue(name, T)
     rescue ex
       Log.error &.emit("Error Dequeuing", queue: name, error: ex.message)
     end
@@ -145,7 +145,7 @@ module JoobQ
     end
 
     private def reprocess_busy_jobs!
-      @store.put_back(name)
+      @store.move_job_back_to_queue(name)
     end
 
     private def create_workers

@@ -35,7 +35,7 @@ module JoobQ
 
                 if job.expires && Time.utc.to_unix_ms > job.expires
                   job.expired!
-                  DeadLetterManager.add(job)
+                  DeadLetterManager.add(job, @queue)
                   next
                 end
 
@@ -73,7 +73,7 @@ module JoobQ
       job.perform
       job.completed!
       @queue.completed.add(1)
-      @queue.store.delete job
+      @queue.store.delete_job job
     rescue ex : Exception
       FailHandler.call job, start, ex, @queue
     end

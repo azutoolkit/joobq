@@ -22,10 +22,14 @@ module JoobQ
 
     def call(context : HTTP::Server::Context)
       if context.request.method == "POST" && context.request.path == "/joobq/enqueue"
-        request_body = context.request.body
-        response = enqueue(request_body.gets_to_end)
-        context.response.content_type = "application/json"
-        context.response.print(response)
+        if request_body = context.request.body.try(&.gets_to_end)
+          response = enqueue(request_body)
+          context.response.content_type = "application/json"
+          context.response.print(response)
+        else
+          context.response.status_code = 400
+          context.response.print("Invalid request")
+        end
       elsif context.request.method == "GET" && context.request.path == "/joobq/jobs/registry"
         context.response.content_type = "application/json"
         context.response.print(JoobQ.config.job_registry.json)

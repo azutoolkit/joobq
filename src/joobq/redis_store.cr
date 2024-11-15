@@ -12,7 +12,7 @@ module JoobQ
                    @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
                    @password : String? = ENV["REDIS_PASS"]?,
                    @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "100").to_i,
-                   @pool_timeout : Time::Span = 0.5.seconds)
+                   @pool_timeout : Time::Span = 1.seconds)
       @redis = Redis::PooledClient.new(
         host: @host,
         port: @port,
@@ -22,8 +22,16 @@ module JoobQ
       )
     end
 
+    def clear_queue(queue_name : String) : Nil
+      redis.del(queue_name)
+    end
+
+    def delete_job(job : JoobQ::Job) : Nil
+      redis.lrem(job.queue, 1, job.to_json)
+    end
+
     def enqueue(job : JoobQ::Job) : String
-      redis.rpush job.queue_name, job.to_json
+      redis.rpush job.queue, job.to_json
       job.jid.to_s
     end
 
@@ -44,7 +52,7 @@ module JoobQ
       redis.set FAILED_SET, {job: job, error: error_details}.to_json
     end
 
-    def mark_as_dead(job : JoobQ::Job, expiration_time : Float64) : Nil
+    def mark_as_dead(job : JoobQ::Job, expiration_time : String) : Nil
       redis.zadd DEAD_LETTER, expiration_time, job.to_json
     end
 
@@ -53,21 +61,21 @@ module JoobQ
       redis.zadd DELAYED_SET, future_timestamp, job.to_json
     end
 
-    def fetch_due_jobs(current_time = Time.local) : Array(JoobQ::Job)
+    def fetch_due_jobs(current_time = Time.local) : Array(String)
       score = current_time.to_unix_ms
       jobs = redis.zrangebyscore(DELAYED_SET, "-inf", score, with_scores: false, limit: [0, 50])
       redis.zremrangebyscore(DELAYED_SET, "-inf", score)
-      jobs.map &.as(JoobQ::Job)
+      jobs.map &.as(String)
     end
 
-    def get_queue_size(queue_name : String) : Int64
+    def queue_size(queue_name : String) : Int64
       redis.llen(queue_name)
     end
 
-    def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(JoobQ::Job)
+    def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
       start_index = (page_number - 1) * page_size
       end_index = start_index + page_size - 1
-      redis.lrange(queue_name, start_index, end_index).map &.as(JoobQ::Job)
+      redis.lrange(queue_name, start_index, end_index).map &.as(String)
     end
   end
 end

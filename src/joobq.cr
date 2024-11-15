@@ -76,7 +76,7 @@ module JoobQ
   end
 
   def add(job)
-    store.add(job)
+    store.enqueue(job)
   end
 
   def scheduler
@@ -85,10 +85,6 @@ module JoobQ
 
   def [](name : String)
     queues[name]
-  end
-
-  def reset
-    config.store.reset
   end
 
   def forge

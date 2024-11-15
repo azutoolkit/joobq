@@ -15,7 +15,7 @@ module JoobQ
     private class_getter store : Store = JoobQ.config.store
 
     def self.add(job)
-      store.dead(job, expires)
+      store.mark_as_dead(job, expires)
     end
   end
 end

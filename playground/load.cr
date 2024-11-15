@@ -3,7 +3,7 @@ require "./jobs/*"
 require "./config"
 
 1_000_000.times do |i|
-  TestJob.perform(x: i)
+  TestJob.enqueue(x: i)
   # FailJob.perform
   # ExpireJob.perform
 end

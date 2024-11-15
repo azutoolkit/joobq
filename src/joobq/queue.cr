@@ -9,10 +9,10 @@ module JoobQ
     getter total_workers : Int32
     getter jobs : String = T.to_s
 
-    property completed : Atomic(Int64) = Atomic.new(0_i64)
-    property retried : Atomic(Int64) = Atomic.new(0_i64)
-    property dead : Atomic(Int64) = Atomic.new(0_i64)
-    property busy : Atomic(Int64) = Atomic.new(0_i64)
+    property completed : Atomic(Int64) = Atomic(Int64).new(0)
+    property retried : Atomic(Int64) = Atomic(Int64).new(0)
+    property dead : Atomic(Int64) = Atomic(Int64).new(0)
+    property busy : Atomic(Int64) = Atomic(Int64).new(0)
     property start_time : Time::Span = Time.monotonic
     property throttle_limit : Int32? = nil
 
@@ -35,7 +35,7 @@ module JoobQ
     end
 
     def add(job : String)
-      push T.from_json(job)
+      add T.from_json(job)
     end
 
     def add(job : T)
@@ -116,6 +116,7 @@ module JoobQ
         errors_per_second:   errors_per_second,
         enqueued_per_second: enqueued_per_second,
         jobs_latency:        jobs_latency,
+        elapsed_time:        Time.monotonic - start_time,
       }
     end
 
@@ -144,11 +145,7 @@ module JoobQ
     end
 
     private def reprocess_busy_jobs!
-      spawn do
-        loop do
-          @store.put_back(name) unless status == "Awaiting"
-        end
-      end
+      @store.put_back(name)
     end
 
     private def create_workers

@@ -70,6 +70,8 @@ This section will help you get started with JoobQ. Follow the instructions below
 - Job expiration
 - Throttle (Rate limit)
 - Rest API
+- Throttle (Rate limit)
+- Graceful Termination
 
 ## Installation
 
@@ -111,7 +113,7 @@ Queues are of type Hash(String, Queue(T)) where the name of the key matches the 
 
 ```crystal
 JoobQ.configure do
-  queue "single", 10, Job1
+  queue name: "single", workers: 10, job: Job1, throttle_limit: nil
   queue "example", 10, ExampleJob | FailJob
   # Scheduling Recurring Jobs
   scheduler do

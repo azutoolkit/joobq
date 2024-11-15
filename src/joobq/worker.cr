@@ -31,8 +31,11 @@ module JoobQ
               break
             else
               if job = @queue.next_job
+                job.running!
+
                 if job.expires && Time.utc.to_unix_ms > job.expires
-                  @queue.store.dead(job, job.expires)
+                  job.expired!
+                  DeadLetterManager.add(job)
                   next
                 end
 
@@ -51,21 +54,22 @@ module JoobQ
     end
 
     private def throttle
-      min_interval = (1000.0 / @queue.throttle_limit.not_nil!) # milliseconds
-      now = Time.utc.to_unix_ms
-      elapsed = now - @last_job_time
-      sleep_time = min_interval - elapsed
-      if sleep_time > 0
-        sleep (sleep_time / 1000.0).seconds
-        @last_job_time = Time.utc.to_unix_ms
-      else
-        @last_job_time = now
+      if throttle_limit = @queue.throttle_limit
+        min_interval = (1000.0 / throttle_limit) # milliseconds
+        now = Time.utc.to_unix_ms
+        elapsed = now - @last_job_time
+        sleep_time = min_interval - elapsed
+        if sleep_time > 0
+          sleep (sleep_time / 1000.0).seconds
+          @last_job_time = Time.utc.to_unix_ms
+        else
+          @last_job_time = now
+        end
       end
     end
 
     private def execute(job : T)
       start = Time.monotonic
-      job.running!
       job.perform
       job.completed!
       @queue.completed.add(1)

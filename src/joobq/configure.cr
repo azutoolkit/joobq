@@ -63,10 +63,10 @@ module JoobQ
     property dead_letter_ttl : Time::Span = 7.days
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
 
-    macro queue(name, workers, job_kind, throttle_limit = nil)
+    macro queue(name, workers, job, throttle_limit = nil)
       {% begin %}
-      queues[{{name}}] = JoobQ::Queue({{job_kind.id}}).new({{name}}, {{workers}}, {{throttle_limit}})
-      job_registry.register({{job_kind.id}})
+      queues[{{name}}] = JoobQ::Queue({{job.id}}).new({{name}}, {{workers}}, {{throttle_limit}})
+      job_registry.register({{job.id}})
       {% end %}
     end
 

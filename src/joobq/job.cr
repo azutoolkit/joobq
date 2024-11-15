@@ -117,13 +117,13 @@ module JoobQ
   #
   module Job
     enum Status
-      Pending
-      Scheduled
-      Running
       Completed
-      Retrying
-      Failed
+      Enqueued
       Expired
+      Failed
+      Retrying
+      Running
+      Scheduled
     end
 
     macro included
@@ -137,7 +137,6 @@ module JoobQ
       property expires : Int64 = JoobQ.config.expires.from_now.to_unix_ms
       property at : Time? = nil
       property status : Status = Status::Enqueued
-      property timeout : Time::Span = JoobQ.config.timeout
 
 
       {% for status in Status.constants %}
@@ -158,7 +157,7 @@ module JoobQ
       # ```
       def self.batch_enqueue(jobs : Array({{@type}}))
         jobs.each do |job|
-          job.enqueue
+          JoobQ.add job
         end
       end
 
@@ -168,7 +167,7 @@ module JoobQ
       # TestJob.enqueue(x: 1)
       # ```
       def self.enqueue(**args)
-        JoobQ.push new(**args)
+        JoobQ.add new(**args)
       end
 
       # Execute the job immediately does not enqueue the job
@@ -236,8 +235,8 @@ module JoobQ
     #   puts e.message # => "execution expired after 5 seconds"
     # end
     # ```
-    def with_timeout(&block : ->)
-      Timeout.run(@timeout) do
+    def with_timeout(timeout : Time::Span = JoobQ.config.timeout, &block : ->)
+      Timeout.run(timeout) do
         block.call
       end
     end

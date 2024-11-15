@@ -23,7 +23,7 @@ module JoobQ
       end
 
       # Start a timer fiber to enforce the timeout
-      timer_fiber = spawn do
+      spawn do
         sleep timeout
         timeout_channel.close # Close the channel if timeout is reached
       end

@@ -75,6 +75,10 @@ module JoobQ
     store.reset
   end
 
+  def statistics
+    JoobQ::GlobalStats.new(queues)
+  end
+
   def queues
     config.queues
   end

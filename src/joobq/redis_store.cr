@@ -56,11 +56,11 @@ module JoobQ
       redis.set FAILED_SET, {job: job, error: error_details}.to_json
     end
 
-    def mark_as_dead(job : JoobQ::Job, expiration_time : String) : Nil
+    def mark_as_dead(job : Job, expiration_time : String) : Nil
       redis.zadd DEAD_LETTER, expiration_time, job.to_json
     end
 
-    def schedule(job : JoobQ::Job, delay_in_ms : Int64) : Nil
+    def schedule(job : Job, delay_in_ms : Int64) : Nil
       redis.zadd DELAYED_SET, delay_in_ms, job.to_json
     end
 

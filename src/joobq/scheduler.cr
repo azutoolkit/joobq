@@ -117,11 +117,11 @@ module JoobQ
       @periodic_jobs.clear
     end
 
-    def delay(job : JoobQ::Job, for till : Time::Span)
+    def delay(job : Job, for till : Time::Span)
       store.schedule(job, delay_in_ms: till.from_now.to_unix_ms)
     end
 
-    def every(interval : Time::Span, job : JoobQ::Job.class, **args)
+    def every(interval : Time::Span, job : Job.class, **args)
       job_instance = job.new **args
       @jobs[job.name] = RecurringJobs.new job_instance, job_instance.queue, interval
 
@@ -170,7 +170,7 @@ module JoobQ
         next unless data.is_a?(String)
         job_json = JSON.parse(data.as(String))
         queue_name = job_json["queue"].as_s
-        queue = JoobQ.queues[queue_name]
+        queue = ::JoobQ.queues[queue_name]
         queue.add data.as(String)
       end
     end

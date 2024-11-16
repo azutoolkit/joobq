@@ -169,11 +169,11 @@ module JoobQ
 
     private def global_metrics(context)
       context.response.content_type = "application/json"
-      context.response.print(JoobQ.global_stats.to_json)
+      context.response.print(::JoobQ.statistics.to_json)
     end
 
     private def queue_metrics(context)
-      metrics = JoobQ.queues.map do |_, queue|
+      metrics = ::JoobQ.queues.map do |_, queue|
         {queue.name => {
           :total_workers => queue.info[:total_workers],
           :status        => queue.info[:status],
@@ -200,7 +200,7 @@ module JoobQ
 
     private def job_registry(context)
       context.response.content_type = "application/json"
-      context.response.print(JoobQ.config.job_registry.json)
+      context.response.print(::JoobQ.config.job_registry.json)
     end
 
     private def enqueue_job(context)
@@ -218,7 +218,7 @@ module JoobQ
     private def enqueue(raw_payload)
       payload = JSON.parse(raw_payload)
       queue_name = payload["queue"].to_s
-      queue = JoobQ.queues[queue_name]
+      queue = ::JoobQ.queues[queue_name]
 
       return {error: "Invalid queue name"}.to_json unless queue
 

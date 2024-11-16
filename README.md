@@ -4,7 +4,8 @@
 
 [![Crystal CI](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml/badge.svg)](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml)
 
-JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler library. Jobs are submitted to a job queue, where they reside until they are scheduled to run in a compute environment.
+JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler library. Jobs are submitted to a job queue,
+where they reside until they are scheduled to run in a compute environment.
 
 ## Table of Contents
 
@@ -18,6 +19,10 @@ JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler librar
   - [Usage](#usage)
     - [Environment Variables](#environment-variables)
     - [Defining Queues](#defining-queues)
+  - [Queue Throttling](#queue-throttling)
+    - [Queue Throttle Limit Property](#queue-throttle-limit-property)
+    - [How They Work Together](#how-they-work-together)
+      - [Summary](#summary)
   - [Configuration](#configuration)
   - [JoobQ Rest API](#joobq-rest-api)
     - [HTTP Serer](#http-serer)
@@ -117,8 +122,9 @@ Queues are of type Hash(String, Queue(T)) where the name of the key matches the 
 
 ```crystal
 JoobQ.configure do
-  queue name: "single", workers: 10, job: Job1, throttle_limit: nil
+  queue name: "single", workers: 10, job: Job1, throttle: { limit: 20, period: 1.minute }
   queue "example", 10, ExampleJob | FailJob
+
   # Scheduling Recurring Jobs
   scheduler do
     cron("*/1 * * * *") { # Do Something }
@@ -127,6 +133,47 @@ JoobQ.configure do
   end
 end
 ```
+
+## Queue Throttling
+
+The worker throttle mechanism in JoobQ works in conjunction with the Queue Throttle Limit property to manage the rate at
+which jobs are processed. Here's how it works:
+
+### Queue Throttle Limit Property
+
+The Queue Throttle limit property sets a maximum number of jobs that can be processed within a specific time frame. This
+helps to control the load on the system and ensures that the job processing rate does not exceed a certain threshold.
+
+### How They Work Together
+
+- **Job Availability and Throttle Limit:** The worker checks the queue for available jobs. If the number of jobs processed
+  within the specified time frame reaches the throttle limit, the worker will wait until it is allowed to process more
+  jobs. This prevents the system from being overwhelmed by too many jobs at once.
+
+- **Job Expiration:** Before processing a job, the worker checks if the job has expired. If the job has expired, it is
+  marked as expired and not processed. This ensures that only valid jobs are processed, reducing unnecessary work.
+
+- **Controlled Shutdown:** The worker can be stopped gracefully by sending a termination signal. This allows for a
+  controlled shutdown, ensuring that no jobs are abruptly terminated.
+
+**Example:**
+
+Here is an example of how you might configure the Queue Throttle limit property:
+
+```crystal
+JoobQ.configure do
+  queue "default", 10, EmailJob, throttle: { limit: 100, period: 60.seconds }
+end
+```
+
+In this example, the throttle limit is set to 100 jobs per 60 seconds. This means that the worker will process up to 100
+jobs every 60 seconds. If the limit is reached, the worker will wait until the next period to continue processing jobs.
+
+#### Summary
+
+The worker throttle mechanism, combined with the Queue Throttle limit property, ensures that job processing is controlled
+and efficient. By managing job availability, expiration, and processing rate, JoobQ provides a robust system for
+handling job queues without overwhelming the system.
 
 **Jobs:**
 

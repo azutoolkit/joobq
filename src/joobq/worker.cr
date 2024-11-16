@@ -186,9 +186,20 @@ module JoobQ
       end
     end
 
+
+    # Throttles the worker based on the throttle limit set on the queue. The worker sleeps for the required time to
+    # ensure that the throttle limit is not exceeded. The throttle limit is the maximum number of jobs that can be
+    # processed per second. The worker calculates the minimum interval between jobs based on the throttle limit and
+    # sleeps for the required time if necessary. The worker keeps track of the last job execution time to calculate
+    # the elapsed time between jobs.
+    #
+    # The throttle method is called before executing each job to ensure that the worker does not exceed the throttle
+    # limit.
     private def throttle
-      if throttle_limit = @queue.throttle_limit
-        min_interval = (1000.0 / throttle_limit) # milliseconds
+      if throttle_config = @queue.throttle_limit
+        limit = throttle_config[:limit]
+        period = throttle_config[:period].total_milliseconds
+        min_interval = period / limit # milliseconds
         now = Time.utc.to_unix_ms
         elapsed = now - @last_job_time
         sleep_time = min_interval - elapsed

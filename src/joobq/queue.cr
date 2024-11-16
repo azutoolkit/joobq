@@ -18,7 +18,7 @@ module JoobQ
   # - `dead : Atomic(Int64)` - Counter for dead jobs.
   # - `busy : Atomic(Int64)` - Counter for busy jobs.
   # - `start_time : Time::Span` - The start time of the queue.
-  # - `throttle_limit : Int32?` - Optional throttle limit for job processing.
+  # - `throttle: Int32?` - Optional throttle limit for job processing.
   # - `terminate_channel : Channel(Nil)` - Channel used for terminating workers.
   # - `workers : Array(Worker(T))` - Array of workers assigned to this queue.
   # - `workers_mutex : Mutex` - Mutex for synchronizing worker operations.
@@ -27,7 +27,7 @@ module JoobQ
   #
   # 1. **Initialization**:
   # - When a `Queue` instance is created, it initializes with a name, total number of workers, and an optional
-  #   throttle limit.
+  #   throttle config.
   # - The `create_workers` method is called to create the specified number of worker instances.
   #
   # 2. **Adding Jobs**:
@@ -190,14 +190,14 @@ module JoobQ
     property dead : Atomic(Int64) = Atomic(Int64).new(0)
     property busy : Atomic(Int64) = Atomic(Int64).new(0)
     property start_time : Time::Span = Time.monotonic
-    property throttle_limit : Int32? = nil
+    property throttle_limit : NamedTuple(limit: Int32, period: Time::Span)?
 
     # Use a Channel for job distribution
     private getter terminate_channel : Channel(Nil) = Channel(Nil).new
     private getter workers : Array(Worker(T)) = Array(Worker(T)).new
     private getter workers_mutex = Mutex.new
 
-    def initialize(@name : String, @total_workers : Int32, @throttle_limit : Int32? = nil)
+    def initialize(@name : String, @total_workers : Int32, @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
       create_workers
     end
 

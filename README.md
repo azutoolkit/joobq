@@ -1,6 +1,6 @@
 # JoobQ
 
-<img src="./joobq-logo.png" alt="JoobQ Logo">
+![JoobQ Logo](./joobq-logo.png)
 
 [![Crystal CI](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml/badge.svg)](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml)
 
@@ -111,7 +111,7 @@ REDIS_TIMEOUT=0.2
 
 Queues are of type Hash(String, Queue(T)) where the name of the key matches the name of the Queue.
 
-**Example**
+**Example:**
 
 ```crystal
 JoobQ.configure do
@@ -126,7 +126,7 @@ JoobQ.configure do
 end
 ```
 
-**Jobs**
+**Jobs:**
 
 To define Jobs, include the JoobQ::Job module, and implement the perform method.
 
@@ -201,7 +201,7 @@ This endpoint returns all available registered jobs and their JSON schemas that 
 
 **Request:**
 
-```httpie
+```http
 GET /jobs/registry HTTP/1.1
 Host: localhost:8080
 ```
@@ -228,7 +228,7 @@ This endpoint allows users to enqueue jobs.
 
 **Request:**
 
-```httpie
+```http
 POST /enqueue HTTP/1.1
 Host: localhost:8080
 Content-Type: application/json

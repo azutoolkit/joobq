@@ -19,11 +19,11 @@ JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler librar
     - [Environment Variables](#environment-variables)
     - [Defining Queues](#defining-queues)
   - [Configuration](#configuration)
-  - [APIServer](#apiserver)
+  - [JoobQ Rest API](#joobq-rest-api)
+    - [HTTP Serer](#http-serer)
     - [Methods](#methods)
       - [`self.start`](#selfstart)
-    - [APIHandler](#apihandler)
-  - [API Documentation](#api-documentation)
+    - [Rest API](#rest-api)
     - [GET /joobq/jobs/registry](#get-joobqjobsregistry)
     - [POST /joobq/jobs](#post-joobqjobs)
     - [GET /joob/metrics](#get-joobmetrics)
@@ -206,7 +206,9 @@ JoobQ.configure do
 end
 ```
 
-## APIServer
+## JoobQ Rest API
+
+### HTTP Serer
 
 The `APIServer` class provides a REST API to interact with the JoobQ job queue system. It listens for HTTP requests and handles job enqueuing, job registry retrieval, and queue metrics.
 
@@ -220,11 +222,7 @@ Starts the API server.
 APIServer.start
 ```
 
-### APIHandler
-
-Extend your
-
-## API Documentation
+### Rest API
 
 JoobQ provides a REST API to interact with the job queue. Below are the available endpoints:
 

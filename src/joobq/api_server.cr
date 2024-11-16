@@ -38,7 +38,7 @@ module JoobQ
         context.response.print(JoobQ.config.job_registry.json)
       elsif context.request.method == "GET" && context.request.path == "/joobq/metrics"
         metrics = JoobQ.queues.map do |_, queue|
-          {:name => {
+          { queue.name => {
             :total_workers => queue.info[:total_workers],
             :status        => queue.info[:status],
             :metrics       => {

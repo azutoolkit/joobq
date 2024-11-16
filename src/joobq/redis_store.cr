@@ -67,7 +67,6 @@ module JoobQ
     def fetch_due_jobs(current_time = Time.local) : Array(String)
       score = current_time.to_unix_ms
       jobs = redis.zrangebyscore(DELAYED_SET, 0, score, with_scores: false, limit: [0, 50])
-      puts "Fetched #{jobs.size} jobs from delayed set current time #{current_time}"
       redis.zremrangebyscore(DELAYED_SET, "-inf", score)
       jobs.map &.as(String)
     end

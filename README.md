@@ -20,12 +20,14 @@ JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler librar
     - [Defining Queues](#defining-queues)
   - [Configuration](#configuration)
   - [API Documentation](#api-documentation)
-    - [GET /jobs/registry](#get-jobsregistry)
-    - [POST /enqueue](#post-enqueue)
+    - [GET /joobq/jobs/registry](#get-joobqjobsregistry)
+    - [POST /joobq/jobs](#post-joobqjobs)
+    - [GET /joob/metrics](#get-joobmetrics)
   - [Contributing](#contributing)
   - [Testing](#testing)
   - [Deployment](#deployment)
   - [Roadmap](#roadmap)
+  - [License](#license)
   - [Acknowledgments](#acknowledgments)
 
 ## Getting Started
@@ -149,20 +151,25 @@ end
 **Executing Job**
 
 ```crystal
+# Enqueue the job (Async)
+EmailJob.enqueue(email_address: "john.doe@example.com")
+
+# Batch enqueue jobs
+EmailJob.batch_enqueue([job1, job2, job3])
+
 # Perform Immediately
 EmailJob.new(email_address: "john.doe@example.com").perform
 
-# Async - Adds to Queue
-EmailJob.perform(email_address: "john.doe@example.com")
-
 # Delayed
 EmailJob.delay(for: 1.hour, email_address: "john.doe@example.com")
+
+EmailJob.enqueue_at(time: 3.minutes.from_now, email_address: "john.doe@example.com")
 
 # Recurring at given interval
 EmailJob.schedule(every: 1.second, email_address: "john.doe@example.com")
 ```
 
-**Running JoobQ**
+**Running JoobQ:**
 
 Starts JoobQ server and listens for jobs
 
@@ -188,7 +195,7 @@ end
 
 JoobQ provides a REST API to interact with the job queue. Below are the available endpoints:
 
-### GET /jobs/registry
+### GET /joobq/jobs/registry
 
 This endpoint returns all available registered jobs and their JSON schemas that can be enqueued via the REST API.
 
@@ -215,7 +222,7 @@ Host: localhost:8080
 }
 ```
 
-### POST /enqueue
+### POST /joobq/jobs
 
 This endpoint allows users to enqueue jobs.
 
@@ -235,7 +242,7 @@ Content-Type: application/json
 }
 ```
 
-**Response**
+**Response:**
 
 ```json
 {
@@ -245,9 +252,39 @@ Content-Type: application/json
 }
 ```
 
+### GET /joob/metrics
+
+This endmpoint returns metrics about the queue
+
+**Response:**
+
+```json
+[
+  {
+    "queue:test": {
+      "total_workers": 5,
+      "status": "Running",
+      "metrics": {
+        "enqueued": 394775,
+        "completed": 171446,
+        "retried": 1757,
+        "dead": 0,
+        "processing": 3,
+        "running_workers": 5,
+        "jobs_per_second": 24624.079804538018,
+        "errors_per_second": 252.17920194481889,
+        "enqueued_per_second": 56652.61565975511,
+        "jobs_latency": "00:00:00.000040613",
+        "elapsed_time": "00:00:06.970125250"
+      }
+    }
+  }
+]
+```
+
 ## Contributing
 
-1. Fork it (https://github.com/azutoolkit/joobq/fork)
+1. Fork it (<https://github.com/azutoolkit/joobq/fork>)
 2. Create your feature branch (git checkout -b my-new-feature)
 3. Commit your changes (git commit -am 'Add some feature')
 4. Push to the branch (git push origin my-new-feature)
@@ -274,8 +311,10 @@ docker-compose up -d
 - [ ] CLI to manage queues and monitor server
 - [ ] Extend the REST API for more functionality
 - [ ] Approve Queue: Jobs have to be manually approved to execute
-      License
-      The MIT License (MIT). Please see License File for more information.
+
+## License
+
+The MIT License (MIT). Please see License File for more information.
 
 ## Acknowledgments
 

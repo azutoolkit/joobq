@@ -28,15 +28,18 @@ JoobQ is more than just a job queue scheduler; it's a robust framework that ensu
 - **REST API**: Interact with JoobQ through a comprehensive REST API for job management and metrics.
 - **Graceful Termination**: Stop workers gracefully without losing jobs in progress.
 
-### Get Started
+### Get Started!
 
 Ready to dive in? Follow our [Getting Started](#getting-started) guide to set up JoobQ in your project and start processing jobs like a pro!
+
+### Table of Contents
 
 - [JoobQ](#joobq)
   - [Overview](#overview)
     - [Why JoobQ?](#why-joobq)
     - [Key Features](#key-features)
-    - [Get Started](#get-started)
+    - [Get Started!](#get-started)
+    - [Table of Contents](#table-of-contents)
   - [Getting Started](#getting-started)
     - [Prerequisites](#prerequisites)
     - [Setting Up](#setting-up)

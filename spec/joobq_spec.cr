@@ -2,11 +2,11 @@ require "./spec_helper"
 
 describe JoobQ do
   it "registers a queue" do
-    JoobQ.queues.size.should eq 2
+    JoobQ.queues.size.should eq 3
   end
 
   it "gets queue by name" do
-    JoobQ["example"].should be_a JoobQ::Queue(ExampleJob | FailJob)
+    JoobQ["example"].should be_a JoobQ::Queue(ExampleJob)
     JoobQ["single"].should be_a JoobQ::Queue(Job1)
   end
 

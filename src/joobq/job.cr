@@ -129,7 +129,7 @@ module JoobQ
     macro included
       include Comparable({{@type}})
       include JSON::Serializable
-
+      extend JSON::Schema
       # The Unique identifier for this job
       getter jid : UUID = UUID.random
       property queue : String = JoobQ.config.default_queue
@@ -203,7 +203,7 @@ module JoobQ
       def self.delay(for wait_time : Time::Span, **args)
         ts = Time.local + wait_time
         job = new(**args)
-        job.delayed!
+        job.scheduled!
         job.at = ts if ts > Time.local
         JoobQ.scheduler.delay(job, wait_time)
         job.jid

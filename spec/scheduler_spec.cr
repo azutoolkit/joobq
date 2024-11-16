@@ -17,15 +17,14 @@ module JoobQ
 
     describe "#delay" do
       it "delays job to a time in the future" do
-        JoobQ.store.del Sets::Delayed.to_s
-        JoobQ.store.del job.queue
+        JoobQ.store.clear_queue "joobq:delayed_jobs"
+        JoobQ.store.clear_queue job.queue
 
-        scheduler.delay job, 2.seconds
-        JoobQ.store.delay_size.should eq 1
+        scheduler.delay job, for: 2.seconds
+        JoobQ.store.set_size("joobq:delayed_jobs").should eq 1
 
-        scheduler.enqueue 5.seconds.from_now
-
-        JoobQ.store.delay_size.should eq 0
+        scheduler.enqueue 10.seconds.from_now
+        JoobQ.store.set_size("joobq:delayed_jobs").should eq 0
       end
     end
 
@@ -38,7 +37,7 @@ module JoobQ
         x = 0
         scheduler.cron "* * * * * *" { x = job.perform }
 
-        sleep 2.5
+        sleep 2.5.seconds
 
         x.should be >= 2
         x.should be <= 3

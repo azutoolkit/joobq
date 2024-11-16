@@ -71,6 +71,10 @@ module JoobQ
     config.store
   end
 
+  def reset
+    store.reset
+  end
+
   def queues
     config.queues
   end

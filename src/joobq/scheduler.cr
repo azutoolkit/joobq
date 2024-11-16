@@ -2,7 +2,7 @@ module JoobQ
   class Scheduler
     record RecurringJobs, job : Job, queue : String, interval : Time::Span | CronParser
 
-    private getter jobs = {} of String => RecurringJobs | CronParser
+    getter jobs = {} of String => RecurringJobs | CronParser
     private getter store : Store = JoobQ.store
 
     def self.instance
@@ -14,7 +14,7 @@ module JoobQ
     end
 
     def delay(job : JoobQ::Job, for till : Time::Span)
-      store.add_delayed(job, till)
+      store.schedule(job, delay_in_ms: till.from_now.to_unix_ms)
     end
 
     def every(interval : Time::Span, job : JoobQ::Job.class, **args)
@@ -23,7 +23,7 @@ module JoobQ
 
       spawn do
         loop do
-          sleep interval.total_seconds
+          sleep interval
           spawn { job_instance.perform }
         end
       end
@@ -60,8 +60,8 @@ module JoobQ
       run
     end
 
-    def enqueue(now = Time.local)
-      results = store.fetch_due_jobs(now)
+    def enqueue(current_time = Time.local)
+      results = store.fetch_due_jobs(current_time)
       results.as(Array).each do |data|
         next unless data.is_a?(String)
         job_json = JSON.parse(data.as(String))

@@ -5,7 +5,7 @@ module JoobQ
     job = ExampleJob.new(1)
     queue = Queue(ExampleJob | FailJob).new("example", 1)
     done = Channel(Nil).new
-    worker = queue.workers.first
+    worker = Worker(ExampleJob | FailJob).new(1, done, queue)
 
     before_each do
       JoobQ.reset
@@ -35,16 +35,16 @@ module JoobQ
     end
 
     it "runs the worker" do
-      REDIS.llen(job.queue).should eq 0
+      queue.store.queue_size(job.queue).should eq 0
 
       JoobQ.add job
-      REDIS.llen(job.queue).should eq 1
+      queue.store.queue_size(job.queue).should eq 1
 
       worker.run
-      sleep 1
+      sleep 1.seconds
 
       worker.active?.should be_true
-      REDIS.llen(job.queue).should eq 0
+      queue.store.queue_size(job.queue).should eq 0
     end
   end
 end

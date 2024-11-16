@@ -22,6 +22,10 @@ module JoobQ
       )
     end
 
+    def reset : Nil
+      redis.flushdb
+    end
+
     def clear_queue(queue_name : String) : Nil
       redis.del(queue_name)
     end
@@ -57,19 +61,23 @@ module JoobQ
     end
 
     def schedule(job : JoobQ::Job, delay_in_ms : Int64) : Nil
-      future_timestamp = (Time.local.to_unix_ms + delay_in_ms)
-      redis.zadd DELAYED_SET, future_timestamp, job.to_json
+      redis.zadd DELAYED_SET, delay_in_ms, job.to_json
     end
 
     def fetch_due_jobs(current_time = Time.local) : Array(String)
       score = current_time.to_unix_ms
-      jobs = redis.zrangebyscore(DELAYED_SET, "-inf", score, with_scores: false, limit: [0, 50])
+      jobs = redis.zrangebyscore(DELAYED_SET, 0, score, with_scores: false, limit: [0, 50])
+      puts "Fetched #{jobs.size} jobs from delayed set current time #{current_time}"
       redis.zremrangebyscore(DELAYED_SET, "-inf", score)
       jobs.map &.as(String)
     end
 
     def queue_size(queue_name : String) : Int64
       redis.llen(queue_name)
+    end
+
+    def set_size(set_name : String) : Int64
+      redis.zcard(set_name)
     end
 
     def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)

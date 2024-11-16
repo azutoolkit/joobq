@@ -14,7 +14,7 @@ module JoobQ
         single_queue = Queue(Job1).new("single", 10)
 
         single_queue.start
-        sleep 1
+        sleep 1.seconds
 
         single_queue.running?.should be_true
         single_queue.stop!

@@ -333,7 +333,8 @@ crystal spec
 
 ## Deployment
 
-To deploy JoobQ, ensure that you have a running Redis instance with the TimeSeries module. You can use the provided docker-compose.yml to set up Redis.
+To deploy JoobQ, ensure that you have a running Redis instance. You can use the provided docker-compose.yml to set
+up Redis.
 
 ```bash
 docker-compose up -d

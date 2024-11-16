@@ -135,22 +135,25 @@ To define Jobs, include the JoobQ::Job module, and implement the perform method.
 ```crystal
 struct EmailJob
   include JoobQ::Job
+
   # Name of the queue to be processed by
   @queue   = "default"
   # Number Of Retries for this job
   @retries = 0
   # Job Expiration
   @expires = 1.days.total_seconds.to_i
+
   # Initialize as normal with or without named tuple arguments
   def initialize(@email_address : String)
   end
+
   def perform
     # Logic to handle job execution
   end
 end
 ```
 
-**Executing Job**
+**Executing Job:**
 
 ```crystal
 # Enqueue the job (Async)
@@ -164,7 +167,6 @@ EmailJob.new(email_address: "john.doe@example.com").perform
 
 # Delayed
 EmailJob.delay(for: 1.hour, email_address: "john.doe@example.com")
-
 EmailJob.enqueue_at(time: 3.minutes.from_now, email_address: "john.doe@example.com")
 
 # Recurring at given interval
@@ -197,6 +199,7 @@ JoobQ can be configured using the JoobQ.configure method. Here is an example con
 ```crystal
 JoobQ.configure do
   queue "default", 10, EmailJob
+
   scheduler do
     cron("*/1 * * * *") { # Do Something }
     every 1.hour, EmailJob, email_address: "john.doe@example.com"
@@ -257,11 +260,15 @@ This endpoint allows users to enqueue jobs.
 POST /joobq/jobs HTTP/1.1
 Host: localhost:8080
 Content-Type: application/json
+Content-Length: 175
 
 {
-  "queue": "default",
-  "job": "EmailJob",
-  "email_address": "john.doe@example.com"
+    "jid": "a13324f4-bdd8-4cf5-b566-c0c9c312f68b",
+    "queue": "queue:test",
+    "retries": 3,
+    "expires": {{timestamp_plus_30}},
+    "status": "enqueued",
+    "x": 10
 }
 ```
 
@@ -277,7 +284,7 @@ Content-Type: application/json
 
 ### GET /joob/metrics
 
-This endmpoint returns metrics about the queue
+This endpoint returns metrics about the queue
 
 **Rquest:**
 

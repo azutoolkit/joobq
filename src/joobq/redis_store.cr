@@ -30,16 +30,16 @@ module JoobQ
       redis.del(queue_name)
     end
 
-    def delete_job(job : JoobQ::Job) : Nil
+    def delete_job(job : Job) : Nil
       redis.rpop PROCESSING_QUEUE
     end
 
-    def enqueue(job : JoobQ::Job) : String
+    def enqueue(job : Job) : String
       redis.rpush job.queue, job.to_json
       job.jid.to_s
     end
 
-    def dequeue(queue_name : String, klass : Class) : JoobQ::Job?
+    def dequeue(queue_name : String, klass : Class) : Job?
       if job_data = redis.brpoplpush(queue_name, PROCESSING_QUEUE, BLOCKING_TIMEOUT)
         return klass.from_json(job_data.as(String))
       end

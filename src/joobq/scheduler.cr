@@ -107,7 +107,7 @@ module JoobQ
     record RecurringJobs, job : Job, queue : String, interval : Time::Span | CronParser
 
     getter jobs = {} of String => RecurringJobs | CronParser
-    private getter store : Store = JoobQ.store
+    private getter store : Store = ::JoobQ.store
 
     def self.instance
       @@instance ||= new

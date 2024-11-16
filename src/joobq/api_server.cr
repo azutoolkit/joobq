@@ -154,45 +154,64 @@ module JoobQ
     Log = ::Log.for("API")
 
     def call(context : HTTP::Server::Context)
-      if context.request.method == "POST" && context.request.path == "/joobq/jobs"
-        if request_body = context.request.body.try(&.gets_to_end)
-          response = enqueue(request_body)
-          context.response.content_type = "application/json"
-          context.response.status = HTTP::Status::CREATED
-          context.response.print(response)
-        else
-          context.response.status_code = 400
-          context.response.print("Invalid request")
-        end
-      elsif context.request.method == "GET" && context.request.path == "/joobq/jobs/registry"
-        context.response.content_type = "application/json"
-        context.response.print(JoobQ.config.job_registry.json)
-      elsif context.request.method == "GET" && context.request.path == "/joobq/metrics"
-        metrics = JoobQ.queues.map do |_, queue|
-          {queue.name => {
-            :total_workers => queue.info[:total_workers],
-            :status        => queue.info[:status],
-            :metrics       => {
-              :enqueued            => queue.info[:enqueued],
-              :completed           => queue.info[:completed],
-              :retried             => queue.info[:retried],
-              :dead                => queue.info[:dead],
-              :processing          => queue.info[:processing],
-              :running_workers     => queue.info[:running_workers],
-              :jobs_per_second     => queue.info[:jobs_per_second],
-              :errors_per_second   => queue.info[:errors_per_second],
-              :enqueued_per_second => queue.info[:enqueued_per_second],
-              :jobs_latency        => queue.info[:jobs_latency].to_s,
-              :elapsed_time        => queue.info[:elapsed_time].to_s,
-            },
-          }}
-        end
+      method = context.request.method
+      path = context.request.path
 
-        context.response.headers["Refresh"] = "5"
-        context.response.content_type = "application/json"
-        context.response.print(metrics.to_json)
+      case {method: method, path: path}
+      when {method: "POST", path: "/joobq/jobs"}         then enqueue_job(context)
+      when {method: "GET", path: "/joobq/jobs/registry"} then job_registry(context)
+      when {method: "GET", path: "/joobq/queue/metrics"} then queue_metrics(context)
+      when {method: "GET", path: "/joobq/metrics"}       then global_metrics(context)
       else
         call_next(context)
+      end
+    end
+
+    private def global_metrics(context)
+      context.response.content_type = "application/json"
+      context.response.print(JoobQ.global_stats.to_json)
+    end
+
+    private def queue_metrics(context)
+      metrics = JoobQ.queues.map do |_, queue|
+        {queue.name => {
+          :total_workers => queue.info[:total_workers],
+          :status        => queue.info[:status],
+          :metrics       => {
+            :enqueued            => queue.info[:enqueued],
+            :completed           => queue.info[:completed],
+            :retried             => queue.info[:retried],
+            :dead                => queue.info[:dead],
+            :processing          => queue.info[:processing],
+            :running_workers     => queue.info[:running_workers],
+            :jobs_per_second     => queue.info[:jobs_per_second],
+            :errors_per_second   => queue.info[:errors_per_second],
+            :enqueued_per_second => queue.info[:enqueued_per_second],
+            :jobs_latency        => queue.info[:jobs_latency].to_s,
+            :elapsed_time        => queue.info[:elapsed_time].to_s,
+          },
+        }}
+      end
+
+      context.response.headers["Refresh"] = "5"
+      context.response.content_type = "application/json"
+      context.response.print(metrics.to_json)
+    end
+
+    private def job_registry(context)
+      context.response.content_type = "application/json"
+      context.response.print(JoobQ.config.job_registry.json)
+    end
+
+    private def enqueue_job(context)
+      if request_body = context.request.body.try(&.gets_to_end)
+        response = enqueue(request_body)
+        context.response.content_type = "application/json"
+        context.response.status = HTTP::Status::CREATED
+        context.response.print(response)
+      else
+        context.response.status_code = 400
+        context.response.print("Invalid request")
       end
     end
 

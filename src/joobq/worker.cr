@@ -186,7 +186,6 @@ module JoobQ
       end
     end
 
-
     # Throttles the worker based on the throttle limit set on the queue. The worker sleeps for the required time to
     # ensure that the throttle limit is not exceeded. The throttle limit is the maximum number of jobs that can be
     # processed per second. The worker calculates the minimum interval between jobs based on the throttle limit and

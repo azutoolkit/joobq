@@ -180,7 +180,7 @@ module JoobQ
   #
   # This example sets up a queue named "example" with 10 workers, adds 10 jobs to the queue, and starts processing the jobs.
   class Queue(T) < BaseQueue
-    getter store : Store = JoobQ.config.store
+    getter store : Store = ::JoobQ.config.store
     getter name : String
     getter total_workers : Int32
     getter jobs : String = T.to_s

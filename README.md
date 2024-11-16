@@ -19,6 +19,9 @@ JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler librar
     - [Environment Variables](#environment-variables)
     - [Defining Queues](#defining-queues)
   - [Configuration](#configuration)
+  - [APIServer](#apiserver)
+    - [Methods](#methods)
+      - [`self.start`](#selfstart)
   - [API Documentation](#api-documentation)
     - [GET /joobq/jobs/registry](#get-joobqjobsregistry)
     - [POST /joobq/jobs](#post-joobqjobs)
@@ -191,6 +194,20 @@ JoobQ.configure do
 end
 ```
 
+## APIServer
+
+The `APIServer` class provides a REST API to interact with the JoobQ job queue system. It listens for HTTP requests and handles job enqueuing, job registry retrieval, and queue metrics.
+
+### Methods
+
+#### `self.start`
+
+Starts the API server.
+
+```crystal
+APIServer.start
+```
+
 ## API Documentation
 
 JoobQ provides a REST API to interact with the job queue. Below are the available endpoints:
@@ -202,7 +219,7 @@ This endpoint returns all available registered jobs and their JSON schemas that 
 **Request:**
 
 ```http
-GET /jobs/registry HTTP/1.1
+GET /joobq/jobs/registry HTTP/1.1
 Host: localhost:8080
 ```
 
@@ -229,16 +246,14 @@ This endpoint allows users to enqueue jobs.
 **Request:**
 
 ```http
-POST /enqueue HTTP/1.1
+POST /joobq/jobs HTTP/1.1
 Host: localhost:8080
 Content-Type: application/json
 
 {
   "queue": "default",
   "job": "EmailJob",
-  "args": {
-    "email_address": "john.doe@example.com"
-  }
+  "email_address": "john.doe@example.com"
 }
 ```
 
@@ -248,13 +263,20 @@ Content-Type: application/json
 {
   "status": "Job enqueued",
   "queue": "default",
-  "job": "EmailJob"
+  "job_id": "some-unique-job-id"
 }
 ```
 
 ### GET /joob/metrics
 
 This endmpoint returns metrics about the queue
+
+**Rquest:**
+
+```http
+GET /joobq/metrics HTTP/1.1
+Host: localhost:8080
+```
 
 **Response:**
 

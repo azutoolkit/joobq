@@ -21,8 +21,6 @@ JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler librar
   - [Configuration](#configuration)
   - [JoobQ Rest API](#joobq-rest-api)
     - [HTTP Serer](#http-serer)
-    - [Methods](#methods)
-      - [`self.start`](#selfstart)
     - [Rest API](#rest-api)
     - [GET /joobq/jobs/registry](#get-joobqjobsregistry)
     - [POST /joobq/jobs](#post-joobqjobs)
@@ -212,11 +210,7 @@ end
 
 The `APIServer` class provides a REST API to interact with the JoobQ job queue system. It listens for HTTP requests and handles job enqueuing, job registry retrieval, and queue metrics.
 
-### Methods
-
-#### `self.start`
-
-Starts the API server.
+To start the API server.
 
 ```crystal
 APIServer.start

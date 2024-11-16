@@ -1,6 +1,4 @@
 module JoobQ
-  # ### Overview
-  #
   # The `Scheduler` class is responsible for managing job scheduling. It supports scheduling jobs to run at specific
   # intervals, delaying jobs, and running jobs based on cron patterns. The `Scheduler` ensures that jobs are executed
   # at the right time and provides mechanisms for recurring and delayed job execution.
@@ -10,48 +8,6 @@ module JoobQ
   # - `jobs : Hash(String, RecurringJobs | CronParser)` - A hash that stores scheduled jobs and their intervals or cron
   #   patterns.
   # - `store : Store` - The store instance used for job storage and retrieval.
-  #
-  # ### Methods
-  #
-  # #### `instance`
-  #
-  # ```
-  # def self.instance
-  # ```
-  #
-  # Returns the singleton instance of the `Scheduler`.
-  #
-  # #### `clear`
-  #
-  # ```
-  # def clear
-  # ```
-  #
-  # Clears all periodic jobs from the scheduler.
-  #
-  # #### `delay`
-  #
-  # ```
-  # def delay(job : JoobQ::Job, for till : Time::Span)
-  # ```
-  #
-  # Delays a job to be executed after a specified timespan.
-  #
-  # #### `every`
-  #
-  # ```
-  # def every(interval : Time::Span, job : JoobQ::Job.class, **args)
-  # ```
-  #
-  # Schedules a job to run at a specified interval.
-  #
-  # #### `cron`
-  #
-  # ```
-  # def cron(pattern, &block : ->)
-  # ```
-  #
-  # Schedules a job to run based on a cron pattern.
   #
   # ### Usage
   #
@@ -78,7 +34,7 @@ module JoobQ
   #
   # To schedule a job based on a cron pattern, use the `cron` method:
   #
-  # ` ``crystal
+  # ```
   # scheduler = JoobQ.scheduler
   # scheduler.cron("*/5 * * * *") do
   #   ExampleJob.new(x: 1).perform

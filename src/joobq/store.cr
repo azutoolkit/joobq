@@ -1,13 +1,13 @@
 module JoobQ
-  # # Overview
-  #
-  # The `Store` class in the [`JoobQ`](JoobQ ) module defines a generic interface for job storage and retrieval. It provides methods for managing job queues, including enqueuing, dequeuing, scheduling, and marking jobs as failed or dead. This abstract class must be implemented by concrete storage backends.
+  # The `Store` class in the [`JoobQ`](JoobQ ) module defines a generic interface for job storage and retrieval. It
+  # provides methods for managing job queues, including enqueuing, dequeuing, scheduling, and marking jobs as failed or
+  # dead. This abstract class must be implemented by concrete storage backends.
   #
   # ### Methods
   #
   # #### `clear_queue`
   #
-  # ```crystal
+  # ```
   # abstract def clear_queue(queue_name : String) : Nil
   # ```
   #
@@ -15,7 +15,7 @@ module JoobQ
   #
   # #### `delete_job`
   #
-  # ```crystal
+  # ```
   # abstract def delete_job(job : JoobQ::Job) : Nil
   # ```
   #
@@ -23,7 +23,7 @@ module JoobQ
   #
   # #### `enqueue`
   #
-  # ```crystal
+  # ```
   # abstract def enqueue(job : JoobQ::Job) : String
   # ```
   #
@@ -31,7 +31,7 @@ module JoobQ
   #
   # #### `dequeue`
   #
-  # ```crystal
+  # ```
   # abstract def dequeue(queue_name : String, klass : Class) : Job?
   # ```
   #
@@ -39,7 +39,7 @@ module JoobQ
   #
   # #### `move_job_back_to_queue`
   #
-  # ```crystal
+  # ```
   # abstract def move_job_back_to_queue(queue_name : String) : Bool
   # ```
   #
@@ -47,7 +47,7 @@ module JoobQ
   #
   # #### `mark_as_failed`
   #
-  # ```crystal
+  # ```
   # abstract def mark_as_failed(job : JoobQ::Job, error_details : Hash) : Nil
   # ```
   #
@@ -55,7 +55,7 @@ module JoobQ
   #
   # #### `mark_as_dead`
   #
-  # ```crystal
+  # ```
   # abstract def mark_as_dead(job : JoobQ::Job, expiration_time : String) : Nil
   # ```
   #
@@ -63,7 +63,7 @@ module JoobQ
   #
   # #### `schedule`
   #
-  # ```crystal
+  # ```
   # abstract def schedule(job : JoobQ::Job, delay_in_ms : Int64) : Nil
   # ```
   #
@@ -71,7 +71,7 @@ module JoobQ
   #
   # #### `fetch_due_jobs`
   #
-  # ```crystal
+  # ```
   # abstract def fetch_due_jobs(current_time : Time) : Array(String)
   # ```
   #
@@ -79,7 +79,7 @@ module JoobQ
   #
   # #### `queue_size`
   #
-  # ```crystal
+  # ```
   # abstract def queue_size(queue_name : String) : Int64
   # ```
   #
@@ -87,7 +87,7 @@ module JoobQ
   #
   # #### `list_jobs`
   #
-  # ```crystal
+  # ```
   # abstract def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
   # ```
   #
@@ -95,9 +95,10 @@ module JoobQ
   #
   # ### Usage
   #
-  # To use the `Store` class, you need to implement it in a concrete storage backend. Here is an example implementation using an in-memory store:
+  # To use the `Store` class, you need to implement it in a concrete storage backend. Here is an example implementation
+  # using an in-memory store:
   #
-  # ```crystal
+  # ```
   # class InMemoryStore < JoobQ::Store
   #   def initialize
   #     @queues = Hash(String, Array(JoobQ::Job)).new { |h, k| h[k] = [] }
@@ -149,111 +150,111 @@ module JoobQ
   #   end
   # end
   # ```
-
+  #
   # ### Workflow
-
+  #
   # 1. **Initialization**:
   #    - Implement the `Store` class in a concrete storage backend.
   #    - Initialize the store instance.
-
+  #
   # 2. **Managing Jobs**:
   #    - Use `enqueue` to add jobs to the queue.
   #    - Use `dequeue` to fetch and remove the next job from the queue.
   #    - Use `schedule` to delay job execution.
   #    - Use `mark_as_failed` and `mark_as_dead` to handle job failures and expirations.
   #    - Use `clear_queue` and `delete_job` to manage job cleanup.
-
+  #
   # 3. **Fetching Jobs**:
   #    - Use `fetch_due_jobs` to retrieve jobs that are due for execution.
   #    - Use `queue_size` and `list_jobs` to monitor and list jobs in the queue.
-
+  #
   # ### Example
-
+  #
   # Here is a complete example demonstrating how to implement and use the `Store` class:
-
-  # ```crystal
+  #
+  # ```
   # require "joobq"
-
+  #
   # # Define a job
   # struct ExampleJob
   #   include JoobQ::Job
   #   property x : Int32
-
+  #
   #   def initialize(@x : Int32)
   #   end
-
+  #
   #   def perform
   #     puts "Performing job with x = #{x}"
   #   end
   # end
-
+  #
   # # Implement an in-memory store
   # class InMemoryStore < JoobQ::Store
   #   def initialize
   #     @queues = Hash(String, Array(JoobQ::Job)).new { |h, k| h[k] = [] }
   #   end
-
+  #
   #   def clear_queue(queue_name : String) : Nil
   #     @queues[queue_name].clear
   #   end
-
+  #
   #   def delete_job(job : JoobQ::Job) : Nil
   #     @queues[job.queue_name].delete(job)
   #   end
-
+  #
   #   def enqueue(job : JoobQ::Job) : String
   #     @queues[job.queue_name] << job
   #     job.id
   #   end
-
+  #
   #   def dequeue(queue_name : String, klass : Class) : JoobQ::Job?
   #     @queues[queue_name].shift
   #   end
-
+  #
   #   def move_job_back_to_queue(queue_name : String) : Bool
   #     # Implementation here
   #   end
-
+  #
   #   def mark_as_failed(job : JoobQ::Job, error_details : Hash) : Nil
   #     # Implementation here
   #   end
-
+  #
   #   def mark_as_dead(job : JoobQ::Job, expiration_time : String) : Nil
   #     # Implementation here
   #   end
-
+  #
   #   def schedule(job : JoobQ::Job, delay_in_ms : Int64) : Nil
   #     # Implementation here
   #   end
-
+  #
   #   def fetch_due_jobs(current_time : Time) : Array(String)
   #     # Implementation here
   #   end
-
+  #
   #   def queue_size(queue_name : String) : Int64
   #     @queues[queue_name].size
   #   end
-
+  #
   #   def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
   #     @queues[queue_name].map(&.to_json)
   #   end
   # end
-
+  #
   # # Initialize the store
   # store = InMemoryStore.new
-
+  #
   # # Create a job
   # job = ExampleJob.new(x: 1)
-
+  #
   # # Enqueue the job
   # store.enqueue(job)
-
+  #
   # # Dequeue and perform the job
   # if job = store.dequeue("example", ExampleJob)
   #   job.perform
   # end
   # ```
-
+  #
   # This example demonstrates how to implement an in-memory store, enqueue a job, and dequeue and perform the job.
   abstract class Store
     abstract def clear_queue(queue_name : String) : Nil

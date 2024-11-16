@@ -22,6 +22,7 @@ JoobQ is a fast, efficient, and reliable asynchronous job queue scheduler librar
   - [APIServer](#apiserver)
     - [Methods](#methods)
       - [`self.start`](#selfstart)
+    - [APIHandler](#apihandler)
   - [API Documentation](#api-documentation)
     - [GET /joobq/jobs/registry](#get-joobqjobsregistry)
     - [POST /joobq/jobs](#post-joobqjobs)
@@ -218,6 +219,10 @@ Starts the API server.
 ```crystal
 APIServer.start
 ```
+
+### APIHandler
+
+Extend your
 
 ## API Documentation
 

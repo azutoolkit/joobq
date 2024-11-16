@@ -1,6 +1,4 @@
 module JoobQ
-  # Document the job in the dead letter queue
-  #
   # The dead letter queue is a sorted set of job ids that have failed to be
   # processed. The score of the job id is the time at which the job was added
   # to the dead letter queue. The dead letter queue is used to track jobs that

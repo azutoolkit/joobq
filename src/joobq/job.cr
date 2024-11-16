@@ -1,6 +1,4 @@
 module JoobQ
-  # JoobQ::Job Module
-  #
   # The `JoobQ::Job` module provides an abstract structure for defining jobs
   # within the JoobQ asynchronous job processing framework. This module includes
   # functionality for managing job statuses, scheduling, retries, timeouts, and more.
@@ -23,6 +21,7 @@ module JoobQ
   # You can then enqueue, delay, or schedule the job using provided methods.
   #
   # ### Job Status
+  #
   # The `JoobQ::Job::Status` enum defines the possible states for a job:
   # - `Pending`: The job has been created but not scheduled.
   # - `Scheduled`: The job is scheduled to run at a specific time.
@@ -51,7 +50,7 @@ module JoobQ
   # The module automatically defines predicate and setter methods for each job
   # status:
   #
-  # ```crystal
+  # ```
   # job = ExampleJob.new
   # job.running! # Sets the job's status to Running
   # job.running? # Checks if the job's status is Running
@@ -61,48 +60,48 @@ module JoobQ
   #
   # - `batch_enqueue(jobs : Array({{type}}))`: Enqueues an array of jobs.
   #
-  #   ```crystal
-  #     ExampleJob.batch_enqueue([job1, job2, job3])
-  #   ```
+  # ```
+  # ExampleJob.batch_enqueue([job1, job2, job3])
+  # ```
   #
   # - `enqueue(**args)`: Enqueues a single job to the queue.
   #
-  #   ```crystal
-  #     ExampleJob.enqueue(param: "value")
-  #   ```
+  # ```
+  # ExampleJob.enqueue(param: "value")
+  # ```
   #
   # - `perform`: Executes the job immediately without enqueuing.
   #
-  #   ```crystal
-  #     ExampleJob.perform(param: "value")
-  #   ```
+  # ```
+  # ExampleJob.perform(param: "value")
+  # ```
   #
   # #### Delay and Scheduling
   #
   # - `enqueue_at(time : Time::Span, **args)`: Enqueues a job to be processed after a specified delay.
   #
-  #   ```crystal
-  #     ExampleJob.enqueue_at(1.minute, param: "value")
-  #   ```
+  # ```
+  # ExampleJob.enqueue_at(1.minute, param: "value")
+  # ```
   #
   # - `delay(for wait_time : Time::Span, **args)`: Delays job execution by a specified timespan.
   #
-  #   ```crystal
-  #     ExampleJob.delay(2.minutes, param: "value")
-  #   ```
+  # ```
+  # ExampleJob.delay(2.minutes, param: "value")
+  # ```
   #
   # - `schedule(every : Time::Span, **args)`: Schedules a recurring job to run at a specified interval.
   #
-  #   ```crystal
-  #     ExampleJob.schedule(5.seconds, param: "value")
-  #   ```
+  # ```
+  # ExampleJob.schedule(5.seconds, param: "value")
+  # ```
   #
   # #### Timeout Handling
   #
   # `with_timeout` provides a way to enforce a timeout on the job's execution.
   # If the block takes longer than the specified `@timeout`, it raises a `Timeout::TimeoutError`.
   #
-  # ```crystal
+  # ```
   # def perform
   #   with_timeout do
   #     # Simulate a long-running task
@@ -113,7 +112,6 @@ module JoobQ
   #   end
   # end
   # ```
-  #
   module Job
     enum Status
       Completed

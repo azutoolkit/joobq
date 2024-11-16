@@ -1,7 +1,4 @@
 module JoobQ
-  #   # JoobQ - Fail Handler Improvement
-  #
-  # ## Overview
   # The `FailHandler` module in JoobQ is responsible for managing jobs that encounter errors during execution.
   # This fail handler provides robust retry logic with exponential backoff, detailed logging, and dead letter queue
   # management to ensure reliability and traceability of job failures.
@@ -72,11 +69,11 @@ module JoobQ
   #   method if you need different retry behavior.
   #
   # ## Future Improvements
+  #
   # - **Customizable Backoff Strategy**: Allow developers to choose different backoff strategies (e.g., linear,
   #   exponential with jitter).
   # - **Notification Mechanism**: Add support for sending notifications (e.g., email, Slack) when jobs are
   #   moved to the dead letter queue.
-
   module FailHandler
     def self.call(job, latency, ex : Exception, queue)
       job.failed!

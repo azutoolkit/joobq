@@ -1,6 +1,4 @@
 module JoobQ
-  # ### Struct `JoobQ::Configure`
-  #
   # This struct is responsible for configuring and managing settings for the `JoobQ` job queue system.
   #
   # #### Properties and Getters
@@ -23,7 +21,8 @@ module JoobQ
   #
   # #### Method `scheduler`
   #
-  # - `scheduler`: A method that yields the singleton instance of the `Scheduler`. This is useful for accessing the scheduler within the scope of the `Configure` struct.
+  # - `scheduler`: A method that yields the singleton instance of the `Scheduler`. This is useful for accessing the
+  #   scheduler within the scope of the `Configure` struct.
   #
   # ### Usage Example
   #

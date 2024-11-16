@@ -1,6 +1,4 @@
 module JoobQ
-  # # Overview
-  #
   # The `Worker` class is responsible for executing jobs from a queue. Each worker runs in a separate fiber, fetching
   # jobs from the queue, executing them, and handling job completion or failure. Workers can be started, stopped,
   # and monitored for activity.

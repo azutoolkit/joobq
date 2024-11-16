@@ -1,7 +1,5 @@
 module JoobQ
   class Timeout
-    # # Overview
-    #
     # The `Timeout` class in the [`JoobQ`](JoobQ ) module provides a mechanism to execute a block of code with a
     # specified timeout. If the block takes longer than the specified timeout to complete, it
     # raises a `Timeout::TimeoutError`.
@@ -14,7 +12,7 @@ module JoobQ
     #
     # #### `run`
     #
-    # ```crystal
+    # ```
     # def self.run(timeout : Time::Span, &block : ->)
     # ```
     #
@@ -33,7 +31,7 @@ module JoobQ
     #
     # To execute a block of code with a timeout, use the `run` method:
     #
-    # ```crystal
+    # ```
     # begin
     #   JoobQ::Timeout.run(5.seconds) do
     #     # Your code here
@@ -68,7 +66,7 @@ module JoobQ
     #
     # Here is a complete example demonstrating how to use the `Timeout` class:
     #
-    # ```crystal
+    # ```
     # require "joobq"
     #
     # begin

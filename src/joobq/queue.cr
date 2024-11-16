@@ -3,8 +3,6 @@ module JoobQ
     abstract def add(job : String)
   end
 
-  # # JoobQ
-  #
   #  module is responsible for managing job queues. It handles job enqueuing, worker management,
   # job processing, and provides various metrics related to job execution. This class is generic and can
   # be instantiated with any job type.

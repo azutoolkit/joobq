@@ -180,6 +180,17 @@ Starts JoobQ server and listens for jobs
 JoobQ.forge
 ```
 
+Output
+
+```console
+~/Workspaces/joobq · (master±)
+⟩ ./joobq
+2024-11-16T11:32:19.020231Z   INFO - JoobQ starting...
+2024-11-16T11:32:19.020242Z   INFO - JoobQ starting queue:test queue...
+2024-11-16T11:32:24.123613Z   INFO - JoobQ initialized and waiting for Jobs...
+Listening on http://0.0.0.0:8080
+```
+
 ## Configuration
 
 JoobQ can be configured using the JoobQ.configure method. Here is an example configuration:

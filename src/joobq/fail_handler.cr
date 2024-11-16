@@ -9,18 +9,21 @@ module JoobQ
   # ## Key Features
   #
   # ### 1. Enhanced Logging
+  #
   # The `FailHandler` includes more detailed logging capabilities:
   # - Logs error details when a job is dead, including job ID, queue name, start time, error message, and stack trace.
   # - Logs retry attempts with job ID and retry delay information.
   # - Logs when a job is moved to the dead letter queue after exhausting retry attempts.
   #
   # ### 2. Retry Logic with Exponential Backoff
+  #
   # The `FailHandler` will retry jobs up to a specified maximum number of retries (`job.retries`). The retry
   # delay is calculated using an exponential backoff strategy to avoid overwhelming the system:
   # - Base delay starts at 2 seconds.
   # - Retry delay increases exponentially, with a maximum cap of 5 minutes to avoid excessively long delays.
   #
   # ### 3. Dead Letter Queue Handling
+  #
   # When a job exhausts its retry attempts, it is moved to a "dead letter" queue for further inspection and
   # manual intervention:
   #
@@ -28,6 +31,7 @@ module JoobQ
   # - This ensures that problematic jobs are not lost and can be debugged later.
   #
   # ## Usage
+  #
   # The `FailHandler` is automatically invoked when a job execution fails:
   # ```
   # JoobQ::FailHandler.call(job, start_time, exception, queue)

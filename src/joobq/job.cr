@@ -41,7 +41,6 @@ module JoobQ
   # - `queue`: The queue to which the job is assigned.
   # - `retries`: The maximum number of retries allowed.
   # - `expires`: The expiration time of the job in Unix milliseconds.
-  # - `at`: Optional time for delayed job execution.
   # - `status`: The current status of the job.
   # - `timeout`: The maximum execution time allowed for the job.
   #
@@ -52,7 +51,7 @@ module JoobQ
   # The module automatically defines predicate and setter methods for each job
   # status:
   #
-  # ```
+  # ```crystal
   # job = ExampleJob.new
   # job.running! # Sets the job's status to Running
   # job.running? # Checks if the job's status is Running
@@ -62,40 +61,40 @@ module JoobQ
   #
   # - `batch_enqueue(jobs : Array({{type}}))`: Enqueues an array of jobs.
   #
-  #   ```
-  # ExampleJob.batch_enqueue([job1, job2, job3])
+  #   ```crystal
+  #     ExampleJob.batch_enqueue([job1, job2, job3])
   #   ```
   #
   # - `enqueue(**args)`: Enqueues a single job to the queue.
   #
-  #   ```
-  # ExampleJob.enqueue(param: "value")
+  #   ```crystal
+  #     ExampleJob.enqueue(param: "value")
   #   ```
   #
   # - `perform`: Executes the job immediately without enqueuing.
   #
-  #   ```
-  # ExampleJob.perform(param: "value")
+  #   ```crystal
+  #     ExampleJob.perform(param: "value")
   #   ```
   #
   # #### Delay and Scheduling
   #
   # - `enqueue_at(time : Time::Span, **args)`: Enqueues a job to be processed after a specified delay.
   #
-  #   ```
-  # ExampleJob.enqueue_at(1.minute, param: "value")
+  #   ```crystal
+  #     ExampleJob.enqueue_at(1.minute, param: "value")
   #   ```
   #
   # - `delay(for wait_time : Time::Span, **args)`: Delays job execution by a specified timespan.
   #
-  #   ```
-  # ExampleJob.delay(2.minutes, param: "value")
+  #   ```crystal
+  #     ExampleJob.delay(2.minutes, param: "value")
   #   ```
   #
   # - `schedule(every : Time::Span, **args)`: Schedules a recurring job to run at a specified interval.
   #
-  #   ```
-  # ExampleJob.schedule(5.seconds, param: "value")
+  #   ```crystal
+  #     ExampleJob.schedule(5.seconds, param: "value")
   #   ```
   #
   # #### Timeout Handling
@@ -103,7 +102,7 @@ module JoobQ
   # `with_timeout` provides a way to enforce a timeout on the job's execution.
   # If the block takes longer than the specified `@timeout`, it raises a `Timeout::TimeoutError`.
   #
-  # ```
+  # ```crystal
   # def perform
   #   with_timeout do
   #     # Simulate a long-running task
@@ -204,7 +203,6 @@ module JoobQ
         ts = Time.local + wait_time
         job = new(**args)
         job.scheduled!
-        job.at = ts if ts > Time.local
         JoobQ.scheduler.delay(job, wait_time)
         job.jid
       end

@@ -450,14 +450,12 @@ JoobQ Hardware benchmarks performed
 
 ```info
 Hardware Overview:
-  Model Name:	MacBook Pro
-  Model Identifier:	Mac15,10
-  Model Number:	MRX53LL/A
-  Chip:	Apple M3 Max
-  Total Number of Cores:	14 (10 performance and 4 efficiency)
-  Memory:	36 GB
-  System Firmware Version:	10151.140.19
-  OS Loader Version:	10151.140.19
+  Model Name:             MacBook Pro
+  Model Identifier:       Mac15,10
+  Model Number:           MRX53LL/A
+  Chip:                   Apple M3 Max
+  Total Number of Cores: 14 (10 performance and 4 efficiency)
+  Memory:                 36 GB
 ```
 
 As shown in the table, JoobQ outperforms many of the popular job queue processing tools, making it an excellent

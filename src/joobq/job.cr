@@ -132,7 +132,6 @@ module JoobQ
       property queue : String = JoobQ.config.default_queue
       property retries : Int32 = JoobQ.config.retries
       property expires : Int64 = JoobQ.config.expires.from_now.to_unix_ms
-      property at : Time? = nil
       property status : Status = Status::Enqueued
 
 

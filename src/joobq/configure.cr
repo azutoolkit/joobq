@@ -61,6 +61,7 @@ module JoobQ
     property failed_ttl : Time::Span = 3.milliseconds
     property dead_letter_ttl : Time::Span = 7.days
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
+    property? rest_api_enabled : Bool = false
 
     macro queue(name, workers, job, throttle = nil)
       {% begin %}

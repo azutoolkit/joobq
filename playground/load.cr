@@ -1,5 +1,3 @@
-require "../src/joobq"
-require "./jobs/*"
 require "./config"
 
 1_000_000.times do |i|

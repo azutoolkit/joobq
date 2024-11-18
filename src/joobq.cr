@@ -76,7 +76,7 @@ module JoobQ
   end
 
   def statistics
-    JoobQ::GlobalStats.new(queues)
+    JoobQ::GlobalStats.calculate_stats(queues)
   end
 
   def queues
@@ -106,9 +106,8 @@ module JoobQ
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }
 
-    spawn do
-      APIServer.start
-    end
+    Log.info { "Rest API Enabled: #{config.rest_api_enabled?}" }
+    APIServer.start
 
     sleep
   end

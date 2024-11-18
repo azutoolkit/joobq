@@ -162,9 +162,14 @@ module JoobQ
       when {method: "GET", path: "/joobq/jobs/registry"} then job_registry(context)
       when {method: "GET", path: "/joobq/queue/metrics"} then queue_metrics(context)
       when {method: "GET", path: "/joobq/metrics"}       then global_metrics(context)
-      else
-        call_next(context)
+      when {method: "GET", path: "/joobq/metrics/series"}then overtime_series(context)
+      else call_next(context)
       end
+    end
+
+    private def overtime_series(context)
+      context.response.content_type = "application/json"
+      context.response.print(::JoobQ.statistics["overtime_series"].to_json)
     end
 
     private def global_metrics(context)

@@ -206,6 +206,7 @@ module JoobQ
     end
 
     def start
+      @start_time = Time.monotonic
       reprocess_busy_jobs!
       workers.each &.run
     end
@@ -220,7 +221,7 @@ module JoobQ
       Log.error &.emit("Error Enqueuing", queue: name, error: ex.message)
     end
 
-    def size
+    def size : Int64
       store.queue_size name
     end
 
@@ -288,36 +289,31 @@ module JoobQ
         dead:                dead.get,
         processing:          busy.get,
         running_workers:     running_workers,
-        jobs_per_second:     jobs_per_second,
-        errors_per_second:   errors_per_second,
-        enqueued_per_second: enqueued_per_second,
+        jobs_per_second:     per_second(completed.get).round(2),
+        errors_per_second:   per_second(retried.get).round(2),
+        enqueued_per_second: per_second(size).round(2),
         jobs_latency:        jobs_latency,
         elapsed_time:        Time.monotonic - start_time,
       }
     end
 
-    def jobs_per_second
+    private def jobs_latency : String
       elapsed_time = Time.monotonic - @start_time
-      return 0.0 if status == "Awaiting" || elapsed_time == 0
-      (completed.get.to_f / elapsed_time.to_f)
+      return "0" if status == "Awaiting" || completed.get == 0
+      format_time_span(elapsed_time / completed.get)
     end
 
-    def errors_per_second
+    private def per_second(value) : Float64
       elapsed_time = Time.monotonic - @start_time
       return 0.0 if status == "Awaiting" || elapsed_time == 0
-      (retried.get.to_f / elapsed_time.to_f)
+      elapsed_time.to_f == 0 ? 0.0 : value.to_f / elapsed_time.to_f
     end
 
-    def enqueued_per_second
-      elapsed_time = Time.monotonic - @start_time
-      return 0.0 if status == "Awaiting" || elapsed_time == 0
-      (size.to_f / elapsed_time.to_f)
-    end
-
-    def jobs_latency
-      elapsed_time = Time.monotonic - @start_time
-      return 0 if status == "Awaiting" || completed.get == 0
-      elapsed_time / completed.get
+    private def format_time_span(span : Time::Span) : String
+      hours = span.total_hours.to_i
+      minutes = (span.total_minutes % 60).to_i
+      seconds = (span.total_seconds % 60).to_i
+      "%02d:%02d:%02d" % {hours, minutes, seconds}
     end
 
     private def reprocess_busy_jobs!

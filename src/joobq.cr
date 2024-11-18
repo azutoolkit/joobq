@@ -107,7 +107,10 @@ module JoobQ
     Log.info { "JoobQ initialized and waiting for Jobs..." }
 
     Log.info { "Rest API Enabled: #{config.rest_api_enabled?}" }
-    APIServer.start
+
+    if config.rest_api_enabled?
+      APIServer.start
+    end
 
     sleep
   end

@@ -13,7 +13,7 @@ struct TestJob
   def perform
     random = Random.rand(100)
 
-    if random > 99
+    if random > 92
       raise "Bad"
     end
 

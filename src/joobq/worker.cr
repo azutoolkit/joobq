@@ -1,4 +1,11 @@
 module JoobQ
+  # Define an interface for Workers
+  module IWorker(T)
+    abstract def run
+    abstract def terminate
+    abstract def active? : Bool
+  end
+
   # The `Worker` class is responsible for executing jobs from a queue. Each worker runs in a separate fiber, fetching
   # jobs from the queue, executing them, and handling job completion or failure. Workers can be started, stopped,
   # and monitored for activity.
@@ -29,10 +36,10 @@ module JoobQ
   #
   # Returns the name of the queue the worker is associated with.
   #
-  # #### `stop!`
+  # #### `terminate`
   #
   # ```
-  # def stop!
+  # def terminate
   # ```
   #
   # Signals the worker to stop by sending a message through the termination channel.
@@ -60,10 +67,10 @@ module JoobQ
   #
   # #### Stopping a Worker
   #
-  # To stop a worker, call the `stop!` method:
+  # To stop a worker, call the `terminate` method:
   #
   # ```
-  # worker.stop!
+  # worker.terminate
   # ```
   #
   # ### Workflow
@@ -127,101 +134,112 @@ module JoobQ
   #
   # # Stop the worker after some time
   # sleep 10
-  # worker.stop!
+  # worker.terminate
   # ```
   #
   # This example sets up a queue, adds jobs to the queue, creates a worker, starts the worker, and stops the
   # worker after 10 seconds.
+  # The Worker class is responsible for fetching and executing jobs from the queue.
+  # It adheres to the Single Responsibility Principle by focusing solely on job execution.
   class Worker(T)
+    include IWorker(T)
     Log = ::Log.for("WORKER")
 
     getter wid : Int32
-    property? active : Bool = false
+    getter active : Atomic(Bool) = Atomic(Bool).new(false)
 
-    @last_job_time : Int64
+    @terminate_channel : Channel(Nil)
+    @queue : BaseQueue
+    @metrics : Metrics
+    @throttler : Throttler?
+    @fail_handler : FailHandler(T)
 
-    def initialize(@wid : Int32, @terminate : Channel(Nil), @queue : Queue(T))
-      @last_job_time = Time.utc.to_unix_ms
+    def initialize(@wid : Int32, @terminate_channel : Channel(Nil), @queue : BaseQueue, @metrics : Metrics)
+      @queue = queue
+      @metrics = metrics
+      @terminate_channel = terminate_channel
+      @fail_handler = FailHandler(T).new(@queue, @metrics)
+      if throttle_limit = @queue.throttle_limit
+        @throttler = Throttler.new(throttle_limit)
+      end
     end
 
     def name
       @queue.name
     end
 
-    def stop!
-      @terminate.send nil
+    def active? : Bool
+      active.get
+    end
+
+    def terminate
+      active.set(false)
+      @terminate_channel.send nil
     end
 
     def run
       return if active?
-      @active = true
+      active.set(true)
       spawn do
         begin
           loop do
             select
-            when @terminate.receive?
-              @active = false
+            when @terminate_channel.receive?
+              active.set(false)
               break
             else
               if job = @queue.next_job
-                job.running!
-
-                if job.expires && Time.utc.to_unix_ms > job.expires
-                  job.expired!
-                  DeadLetterManager.add(job, @queue)
-                  next
-                end
-
-                throttle if @queue.throttle_limit
-                @queue.busy.add(1)
-                execute job
-                @queue.busy.sub(1)
+                handle_job job
+              else
+                # No job available, sleep briefly to prevent tight loop
+                sleep 0.1.seconds
               end
             end
           end
         rescue ex : Exception
-          Log.error &.emit("Fetch", worker_id: wid, reason: ex.message)
-          @queue.restart self, ex
+          Log.error &.emit("Worker Error", worker_id: wid, reason: ex.message)
+          @queue.worker_manager.restart self, ex
         end
       end
     end
 
-    # Throttles the worker based on the throttle limit set on the queue. The worker sleeps for the required time to
-    # ensure that the throttle limit is not exceeded. The throttle limit is the maximum number of jobs that can be
-    # processed per second. The worker calculates the minimum interval between jobs based on the throttle limit and
-    # sleeps for the required time if necessary. The worker keeps track of the last job execution time to calculate
-    # the elapsed time between jobs.
-    #
-    # The throttle method is called before executing each job to ensure that the worker does not exceed the throttle
-    # limit.
-    private def throttle
-      if throttle_config = @queue.throttle_limit
-        limit = throttle_config[:limit]
-        period = throttle_config[:period].total_milliseconds
-        min_interval = period / limit # milliseconds
-        now = Time.utc.to_unix_ms
-        elapsed = now - @last_job_time
-        sleep_time = min_interval - elapsed
-        if sleep_time > 0
-          sleep (sleep_time / 1000.0).seconds
-          @last_job_time = Time.utc.to_unix_ms
-        else
-          @last_job_time = now
-        end
+    private def handle_job(job : T)
+      job.running!
+
+      if job.expired?
+        job.expired!
+        DeadLetterManager.add(job, @queue)
+        return
       end
+
+      throttle if @throttler
+
+      @metrics.increment_busy
+      execute job
+      @metrics.decrement_busy
+    end
+
+    private def throttle
+      @throttler.try &.throttle
     end
 
     private def execute(job : T)
       wait_time = Time.monotonic - job.enqueue_time
-      @queue.total_job_wait_time += wait_time
-      start = Time.monotonic
-      job.perform
-      job.completed!
-      @queue.total_job_execution_time = Time.monotonic - start
-      @queue.completed.add(1)
-      @queue.store.delete_job job
-    rescue ex : Exception
-      FailHandler.call job, start, ex, @queue
+      @metrics.add_job_wait_time(wait_time)
+
+      start_time = Time.monotonic
+      begin
+        job.perform
+        job.completed!
+        execution_time = Time.monotonic - start_time
+        @metrics.add_job_execution_time(execution_time)
+        @metrics.increment_completed
+        @queue.delete_job job
+      rescue ex : Exception
+        execution_time = Time.monotonic - start_time
+        @metrics.add_job_execution_time(execution_time)
+        @fail_handler.handle_failure(job, ex)
+      end
     end
   end
 end

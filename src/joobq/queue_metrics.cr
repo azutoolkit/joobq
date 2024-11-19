@@ -4,6 +4,11 @@ require "process"
 require "system"
 
 module JoobQ
+  # Interface for metrics providers
+  module MetricsProvider
+    abstract def global_metrics : Hash(String, Int64 | Float64)
+  end
+
   # Represents a class to handle queue metrics
   class QueueMetrics
     include MetricsProvider
@@ -76,7 +81,7 @@ module JoobQ
       if queue_count > 0
         ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
          "job_wait_time", "job_execution_time", "worker_utilization",
-         "error_rate_trend", "failed_job_rate", "jobs_per_worker_per_second"].each do |metric|
+         "error_rate_trend", "failed_job_rate"].each do |metric|
           data[metric] /= queue_count
         end
       end
@@ -118,7 +123,7 @@ module JoobQ
       if count > 0
         ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
          "job_wait_time", "job_execution_time", "worker_utilization",
-         "error_rate_trend", "failed_job_rate", "jobs_per_worker_per_second"].each do |metric|
+         "error_rate_trend", "failed_job_rate"].each do |metric|
           aggregated_metrics[metric] /= count
         end
       end
@@ -160,13 +165,12 @@ module JoobQ
       {
         "total_workers"              => 0_i64,
         "current_size"               => 0_i64,
-        "total_jobs"                   => 0_i64,
         "completed"                  => 0_i64,
         "retried"                    => 0_i64,
         "dead"                       => 0_i64,
-        "processing"                 => 0_i64,
         "running_workers"            => 0_i64,
         "jobs_completed_per_second"  => 0.0,
+        "queue_reduction_rate"       => 0.0,
         "errors_per_second"          => 0.0,
         "enqueued_per_second"        => 0.0,
         "job_wait_time"              => 0.0,
@@ -174,7 +178,7 @@ module JoobQ
         "worker_utilization"         => 0.0,
         "error_rate_trend"           => 0.0,
         "failed_job_rate"            => 0.0,
-        "jobs_per_worker_per_second" => 0.0,
+        "average_jobs_in_flight" => 0.0,
       } of String => Float64 | Int64
     end
   end

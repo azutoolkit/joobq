@@ -74,16 +74,20 @@ module JoobQ
   #   exponential with jitter).
   # - **Notification Mechanism**: Add support for sending notifications (e.g., email, Slack) when jobs are
   #   moved to the dead letter queue.
-  module FailHandler
-    def self.call(job, latency, ex : Exception, queue)
-      job.failed!
+  #
+  class FailHandler(T)
+    def initialize(@queue : BaseQueue, @metrics : Metrics)
+    end
 
-      if job.expires && Time.local.to_unix_ms > job.expires
-        job.expired!
-        DeadLetterManager.add(job, queue)
-      elsif job.retries > 0
+    def handle_failure(job : T, ex : Exception)
+      Log.error &.emit("Job Failure", job_id: job.jid.to_s, error: ex.message)
+      job.failed!
+      job.retries -= 1
+
+      if job.retries > 0
+        @metrics.increment_retried
         job.retrying!
-        ExponentialBackoff.retry(job, queue)
+        ExponentialBackoff.retry(job, @queue)
       else
         error = {
           job:       job.to_json,
@@ -93,23 +97,18 @@ module JoobQ
           backtrace: ex.inspect_with_backtrace[0..10],
           cause:     ex.cause.to_s,
         }
-
-        DeadLetterManager.add(job, queue, error)
+        @metrics.increment_dead
+        DeadLetterManager.add(job, @queue, error)
       end
     end
   end
 
   class ExponentialBackoff
     def self.retry(job, queue)
-      original_retries = job.retries
-      retry_left = original_retries - 1
-      job.retries = retry_left
-
-      if retry_left > 0
-        delay = (2 ** (original_retries - retry_left)) * 1000 # Delay in ms
+      if job.retries > 0
+        delay = (2 ** (job.retries)) * 1000 # Delay in ms
         # Logic to add the job back to the queue after a delay
         queue.store.schedule(job, delay)
-        queue.retried.add(1)
         # Log.warn &.emit("Job moved to Retry Queue", job_id: job.jid.to_s)
       end
     end

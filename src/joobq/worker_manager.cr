@@ -1,7 +1,7 @@
 module JoobQ
   # WorkerManager handles all worker-related operations
   class WorkerManager(T)
-    getter workers : Array(IWorker(T)) = [] of IWorker(T)
+    getter workers : Array(Worker(T)) = [] of Worker(T)
     getter workers_mutex = Mutex.new
     getter terminate_channel : Channel(Nil) = Channel(Nil).new
     getter total_workers : Int32
@@ -26,11 +26,11 @@ module JoobQ
       workers.all? &.active?
     end
 
-    def terminate(worker : IWorker(T))
+    def terminate(worker)
       workers_mutex.synchronize { workers.delete(worker) }
     end
 
-    def restart(worker : IWorker(T), ex : Exception)
+    def restart(worker, ex : Exception)
       terminate worker
       return unless running?
       worker = create_worker

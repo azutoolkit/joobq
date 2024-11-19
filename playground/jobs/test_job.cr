@@ -11,11 +11,13 @@ struct TestJob
   end
 
   def perform
-    random = Random.rand(100)
+    # random = Random.rand(100)
 
-    if random > 92
-      raise "Bad"
-    end
+    # if random > 92
+    #   raise "Bad"
+    # else
+    #   sleep Random.rand(5).seconds
+    # end
 
     x + 1
   end

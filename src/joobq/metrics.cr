@@ -57,6 +57,14 @@ module JoobQ
     end
 
     # Calculate the rate at which the queue is being reduced in size per second
+    #
+    # ## Understanding the queue_reduction_rate Method
+    #
+    # Definition: The rate at which the queue size is decreasing over time.
+    # Purpose: To measure how quickly jobs are being processed and removed from the queue.
+    #
+    # Positive Reduction Rate: Indicates the queue size is decreasing.
+    # Negative Reduction Rate: Indicates the queue size is increasing.
     def queue_reduction_rate(current_queue_size : Int64) : Float64
       current_time = Time.monotonic
       time_delta = current_time - last_queue_time
@@ -81,9 +89,15 @@ module JoobQ
     end
 
     # Calculate the utilization of workers in the queue based on the total time spent processing jobs
-    # This is used to determine how efficiently workers are being utilized in the queue
-    # Utilization is calculated as the percentage of time spent processing jobs compared to the total time workers have
-    # been active in the queue since the start
+    # TWorker Utilization measures how effectively your workers are being used over time.
+    # In your system, it's calculated as
+    #
+    # Total Job Execution Time: The cumulative time all workers have spent executing jobs.
+    # Total Worker Time: The total time all workers have been available to process jobs
+    #
+    # E.g. A worker utilization of 0.14% indicates that your workers are idle 99.86% of the time.
+    #
+    # Possible Reasons for Low Worker Utilization
     def worker_utilization(total_workers : Int32) : Float64
       total_worker_time = total_workers.to_f * elapsed_time.total_seconds
       return 0.0 if total_worker_time == 0.0
@@ -108,10 +122,11 @@ module JoobQ
     end
 
     # Calculate the average number of jobs in flight in the queue
+    # This is used to determine the average number of jobs that are being processed concurrently in the queue
     def average_jobs_in_flight : Float64
       elapsed = elapsed_time.total_seconds
       return 0.0 if elapsed == 0.0
-      avg_in_flight = total_job_execution_time.total_seconds / elapsed
+      avg_in_flight = total_job_execution_time.total_seconds / elapsed * 100
       avg_in_flight.round(2)
     end
 

@@ -112,7 +112,7 @@ module JoobQ
           key = key_value[0].to_s
           value = key_value[1].to_s
           unless ["instance_id", "process_id", "last_updated"].includes?(key)
-            aggregated_metrics[key] = value.includes?(".") ? value.to_f64 : value.to_i64
+            aggregated_metrics[key] += value.includes?(".") ? value.to_f64 : value.to_i64
           end
         end
 

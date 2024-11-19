@@ -2,7 +2,7 @@ require "../../src/joobq"
 
 struct ExpireJob
   include JoobQ::Job
-  @queue = "queue:fail"
+  @queue = "queue:expire"
   @retries = 2
 
   def initialize

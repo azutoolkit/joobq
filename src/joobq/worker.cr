@@ -1,11 +1,4 @@
 module JoobQ
-  # Define an interface for Workers
-  module IWorker(T)
-    abstract def run
-    abstract def terminate
-    abstract def active? : Bool
-  end
-
   # The `Worker` class is responsible for executing jobs from a queue. Each worker runs in a separate fiber, fetching
   # jobs from the queue, executing them, and handling job completion or failure. Workers can be started, stopped,
   # and monitored for activity.
@@ -142,7 +135,6 @@ module JoobQ
   # The Worker class is responsible for fetching and executing jobs from the queue.
   # It adheres to the Single Responsibility Principle by focusing solely on job execution.
   class Worker(T)
-    include IWorker(T)
     Log = ::Log.for("WORKER")
 
     getter wid : Int32
@@ -189,7 +181,7 @@ module JoobQ
               break
             else
               if job = @queue.next_job
-                handle_job job
+                handle_job job.as(T)
               else
                 # No job available, sleep briefly to prevent tight loop
                 sleep 0.1.seconds

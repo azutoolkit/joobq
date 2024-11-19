@@ -27,16 +27,18 @@ module JoobQ
 
     def add(job : String)
       add T.from_json(job)
+    rescue ex
+      Log.error &.emit("Error Enqueuing", queue: name, error: ex.message, job: job)
     end
 
     def add(job : T)
       store.enqueue job
     rescue ex
-      Log.error &.emit("Error Enqueuing", queue: name, error: ex.message)
+      Log.error &.emit("Error Enqueuing", queue: name, error: ex.message, job: job.to_s)
     end
 
-    def delete_job(job : T)
-      store.delete_job job
+    def delete_job(job : Job)
+      store.delete_job job.as(Job)
     end
 
     def size : Int64

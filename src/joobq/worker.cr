@@ -212,9 +212,12 @@ module JoobQ
     end
 
     private def execute(job : T)
+      wait_time = Time.monotonic - job.enqueue_time
+      @queue.total_job_wait_time += wait_time
       start = Time.monotonic
       job.perform
       job.completed!
+      @queue.total_job_execution_time = Time.monotonic - start
       @queue.completed.add(1)
       @queue.store.delete_job job
     rescue ex : Exception

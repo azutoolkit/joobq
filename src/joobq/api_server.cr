@@ -3,6 +3,8 @@ require "json"
 
 module JoobQ
   class APIServer
+    Log = ::Log.for("API SERVER")
+
     def self.start
       new.start
     end
@@ -11,7 +13,7 @@ module JoobQ
       server = HTTP::Server.new([APIHandler.new])
       address = "0.0.0.0"
       port = 8080
-      puts "Listening on http://#{address}:#{port}"
+      Log.info &.emit("Listening on http://#{address}:#{port}")
       server.bind_tcp(address, port)
       server.listen
     end
@@ -158,45 +160,29 @@ module JoobQ
       path = context.request.path
 
       case {method: method, path: path}
-      when {method: "POST", path: "/joobq/jobs"}         then enqueue_job(context)
-      when {method: "GET", path: "/joobq/jobs/registry"} then job_registry(context)
-      when {method: "GET", path: "/joobq/queue/metrics"} then queue_metrics(context)
-      when {method: "GET", path: "/joobq/metrics"}       then global_metrics(context)
-      when {method: "GET", path: "/joobq/metrics/series"}then overtime_series(context)
-      else call_next(context)
+      when {method: "POST", path: "/joobq/jobs"}          then enqueue_job(context)
+      when {method: "GET", path: "/joobq/jobs/registry"}  then job_registry(context)
+      when {method: "GET", path: "/joobq/queue/metrics"}  then queue_metrics(context)
+      when {method: "GET", path: "/joobq/metrics"}        then global_metrics(context)
+      when {method: "GET", path: "/joobq/metrics/series"} then overtime_series(context)
+      else                                                     call_next(context)
       end
     end
 
     private def overtime_series(context)
       context.response.content_type = "application/json"
-      context.response.print(::JoobQ.statistics["overtime_series"].to_json)
+      metrics = GlobalStats.instance.calculate_stats
+      context.response.print(metrics["overtime_series"].to_json)
     end
 
     private def global_metrics(context)
       context.response.content_type = "application/json"
-      context.response.print(::JoobQ.statistics.to_json)
+      metrics = GlobalStats.instance.calculate_stats
+      context.response.print(metrics.to_json)
     end
 
     private def queue_metrics(context)
-      metrics = ::JoobQ.queues.map do |_, queue|
-        {queue.name => {
-          :total_workers => queue.info[:total_workers],
-          :status        => queue.info[:status],
-          :metrics       => {
-            :enqueued            => queue.info[:enqueued],
-            :completed           => queue.info[:completed],
-            :retried             => queue.info[:retried],
-            :dead                => queue.info[:dead],
-            :processing          => queue.info[:processing],
-            :running_workers     => queue.info[:running_workers],
-            :jobs_per_second     => queue.info[:jobs_per_second],
-            :errors_per_second   => queue.info[:errors_per_second],
-            :enqueued_per_second => queue.info[:enqueued_per_second],
-            :jobs_latency        => queue.info[:jobs_latency].to_s,
-            :elapsed_time        => queue.info[:elapsed_time].to_s,
-          },
-        }}
-      end
+      metrics = QueueMetrics.new.all_queue_metrics
 
       context.response.headers["Refresh"] = "5"
       context.response.content_type = "application/json"

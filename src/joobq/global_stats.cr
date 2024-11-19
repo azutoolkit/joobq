@@ -1,110 +1,166 @@
 module JoobQ
-  module JoobQ
-    class GlobalStats
-      property total_enqueued : Int64 = 0
-      property total_completed : Int64 = 0
-      property total_retried : Int64 = 0
-      property total_dead : Int64 = 0
-      property total_processing : Int64 = 0
-      property total_workers : Int32 = 0
-      property total_running_workers : Int32 = 0
-      property jobs_per_second : Float64 = 0.0
-      property errors_per_second : Float64 = 0.0
-      property enqueued_per_second : Float64 = 0.0
-      property jobs_latency : String = "0s"
-      @start_time = Time.monotonic
+  # Interface for metrics providers
+  module MetricsProvider
+    abstract def global_metrics : Hash(String, Int64 | Float64)
+  end
 
-      property overtime_series : Array(NamedTuple(name: String, type: String, data: Array(NamedTuple(x: String, y: Float64 | Int64)))) =
-        [] of NamedTuple(name: String, type: String, data: Array(NamedTuple(x: String, y: Float64 | Int64)))
-
-      def initialize
-        @overtime_series << { name: "Enqueued", type: "column", data: [] of NamedTuple(x: String, y: Float64 | Int64) }
-        @overtime_series << { name: "Completed", type: "line", data: [] of NamedTuple(x: String, y: Float64 | Int64) }
+  # Utility module for common statistical calculations
+  module StatsUtils
+    def self.percent_of(value : Number, total : Number) : Float64
+      if total.to_f == 0 || value.to_f <= 0
+        0.0
+      else
+        percentage = (value.to_f / total.to_f * 100)
+        percentage = 100.0 if percentage > 100.0 # Optional: Cap at 100%
+        percentage.round(2)
       end
+    end
 
-      def self.calculate_stats(queues)
-        @@stats ||= new
-        @@stats.not_nil!.calculate_stats(queues)
+    def self.format_latency(latency_in_seconds : Float64) : String
+      if latency_in_seconds >= 1
+        "#{latency_in_seconds.round(2)}s"
+      else
+        "#{(latency_in_seconds * 1000).round(2)}ms"
       end
+    end
+  end
 
-      def calculate_stats(queues)
-        reset
-        queues.each do |_, queue|
-          info = queue.info
-          @total_enqueued += info[:enqueued]
-          @total_completed += info[:completed]
-          @total_retried += info[:retried]
-          @total_dead += info[:dead]
-          @total_processing += info[:processing]
-          @total_workers += info[:total_workers]
-          @total_running_workers += info[:running_workers]
-          @jobs_per_second += info[:jobs_per_second]
-          @errors_per_second += info[:errors_per_second]
-          @enqueued_per_second += info[:enqueued_per_second]
-          @jobs_latency += info[:jobs_latency]
-        end
+  # Class to handle overtime series data
+  class OvertimeSeries
+    alias SeriesData = Array(NamedTuple(x: String, y: Float64 | Int64))
+    alias Series = NamedTuple(name: String, type: String, data: SeriesData)
 
-        stats
-      end
+    property overtime_series : Array(Series) = [] of Series
 
-      def reset
-        @total_enqueued = 0
-        @total_completed = 0
-        @total_retried = 0
-        @total_dead = 0
-        @total_processing = 0
-        @total_workers = 0
-        @total_running_workers = 0
-        @jobs_per_second = 0.0
-        @errors_per_second = 0.0
-        @enqueued_per_second = 0.0
-        @jobs_latency = "0s"
-      end
+    def initialize
+      @overtime_series << {name: "Enqueued", type: "column", data: SeriesData.new(10)}
+      @overtime_series << {name: "Completed", type: "line", data: SeriesData.new(10)}
+    end
 
-      def stats
-        {
-          "total_enqueued"        => @total_enqueued,
-          "total_completed"       => @total_completed,
-          "total_retried"         => @total_retried,
-          "total_dead"            => @total_dead,
-          "total_processing"      => @total_processing,
-          "total_workers"         => @total_workers,
-          "total_running_workers" => @total_running_workers,
-          "jobs_per_second"       => @jobs_per_second.round(2),
-          "errors_per_second"     => @errors_per_second.round(2),
-          "enqueued_per_second"   => @enqueued_per_second.round(2),
-          "percent_pending"       => percent_of(@total_enqueued-@total_completed, @total_enqueued),
-          "percent_processing"    => percent_of(@total_processing, @total_enqueued),
-          "percent_completed"     => percent_of(@total_completed, @total_enqueued),
-          "percent_retried"       => percent_of(@total_retried, @total_enqueued),
-          "percent_dead"          => percent_of(@total_dead, @total_enqueued),
-          "overtime_series"       => overtime_series,
-        }
-      end
+    def update(enqueued : Float64, jobs_completed_per_second : Float64)
+      current_time = Time.local.to_rfc3339
+      enqueued_series = @overtime_series.first
+      completed_series = @overtime_series.last
 
-      def overtime_series
-        enqueued_series =  @overtime_series.first
-        completed_series = @overtime_series.last
+      enqueued_series[:data] << {x: current_time, y: enqueued}
+      completed_series[:data] << {x: current_time, y: jobs_completed_per_second}
 
-        current_time = Time.local
-        elapsed = Time.monotonic - @start_time
-        enqueued_series[:data] << { x: current_time.to_rfc3339, y:  @total_enqueued}
-        completed_series[:data] << { x: current_time.to_rfc3339, y: @jobs_per_second.round(2)}
+      enqueued_series[:data].shift if enqueued_series[:data].size > 10
+      completed_series[:data].shift if completed_series[:data].size > 10
+    end
+  end
 
-        enqueued_series[:data].shift if enqueued_series[:data].size > 10
-        completed_series[:data].shift if completed_series[:data].size > 10
+  # Class to aggregate global statistics
+  class GlobalStats
+    include StatsUtils
 
-        @start_time = Time.monotonic
-        @overtime_series
-      end
+    def self.instance
+      @@instance ||= new
+    end
 
-      def per_second(value, elapsed)
-        elapsed.to_f == 0 ? 0.0 : value.to_f / elapsed.to_f
-      end
+    # Define properties for all the stats
+    property total_workers : Int64 = 0
+    property current_size : Int64 = 0
+    property total_jobs : Int64 = 0
+    property completed : Int64 = 0
+    property retried : Int64 = 0
+    property dead : Int64 = 0
+    property processing : Int64 = 0
+    property running_workers : Int64 = 0
+    property jobs_completed_per_second : Float64 = 0.0
+    property errors_per_second : Float64 = 0.0
+    property enqueued_per_second : Float64 = 0.0
+    property job_wait_time : Float64 = 0.0
+    property job_execution_time : Float64 = 0.0
+    property worker_utilization : Float64 = 0.0
+    property error_rate_trend : Float64 = 0.0
+    property failed_job_rate : Float64 = 0.0
+    property jobs_per_worker_per_second : Float64 = 0.0
 
-      def percent_of(value, total)
-        total.to_f == 0 ? 0.0 : (value.to_f / total.to_f * 100).round(2)
-      end
+    property overtime_series : OvertimeSeries
+
+    def initialize(@metrics_provider : MetricsProvider = QueueMetrics.instance)
+      reset
+      @overtime_series = OvertimeSeries.new
+    end
+
+    # Calculate global statistics using a metrics provider
+    def calculate_stats
+      reset
+      global_metrics = @metrics_provider.global_metrics
+
+      @total_workers = global_metrics["total_workers"].to_i64
+      @current_size = global_metrics["current_size"].to_i64
+      @total_jobs = global_metrics["total_jobs"].to_i64
+      @completed = global_metrics["completed"].to_i64
+      @retried = global_metrics["retried"].to_i64
+      @dead = global_metrics["dead"].to_i64
+      @processing = global_metrics["processing"].to_i64
+      @running_workers = global_metrics["running_workers"].to_i64
+      @jobs_completed_per_second = global_metrics["jobs_completed_per_second"].to_f64
+      @errors_per_second = global_metrics["errors_per_second"].to_f64
+      @enqueued_per_second = global_metrics["enqueued_per_second"].to_f64
+      @job_wait_time = global_metrics["job_wait_time"].to_f64
+      @job_execution_time = global_metrics["job_execution_time"].to_f64
+      @worker_utilization = global_metrics["worker_utilization"].to_f64
+      @error_rate_trend = global_metrics["error_rate_trend"].to_f64
+      @failed_job_rate = global_metrics["failed_job_rate"].to_f64
+      @jobs_per_worker_per_second = global_metrics["jobs_per_worker_per_second"].to_f64
+
+      update_overtime_series
+      stats
+    end
+
+    private def reset
+      @total_workers = 0
+      @current_size = 0
+      @total_jobs = 0
+      @completed = 0
+      @retried = 0
+      @dead = 0
+      @processing = 0
+      @running_workers = 0
+      @jobs_completed_per_second = 0.0
+      @errors_per_second = 0.0
+      @enqueued_per_second = 0.0
+      @job_wait_time = 0.0
+      @job_execution_time = 0.0
+      @worker_utilization = 0.0
+      @error_rate_trend = 0.0
+      @failed_job_rate = 0.0
+      @jobs_per_worker_per_second = 0.0
+    end
+
+    private def update_overtime_series
+      @overtime_series.update(@enqueued_per_second, @jobs_completed_per_second)
+    end
+
+    def stats
+      {
+        "total_workers"              => @total_workers,
+        "current_size"               => @current_size,
+        "total_jobs"                 => @total_jobs,
+        "completed"                  => @completed,
+        "retried"                    => @retried,
+        "dead"                       => @dead,
+        "processing"                 => @processing,
+        "running_workers"            => @running_workers,
+        "jobs_completed_per_second"  => @jobs_completed_per_second.round(2),
+        "errors_per_second"          => @errors_per_second.round(2),
+        "enqueued_per_second"        => @enqueued_per_second.round(2),
+        "job_wait_time"              => @job_wait_time,
+        "job_execution_time"         => @job_execution_time,
+        "worker_utilization"         => @worker_utilization.round(2),
+        "error_rate_trend"           => @error_rate_trend.round(2),
+        "failed_job_rate"            => @failed_job_rate.round(2),
+        "jobs_per_worker_per_second" => @jobs_per_worker_per_second.round(2),
+        "percent_pending"            => StatsUtils.percent_of(@total_jobs - @completed, @total_jobs),
+        "percent_processing"         => StatsUtils.percent_of(@processing, @total_jobs),
+        "percent_completed"          => StatsUtils.percent_of(@completed, @total_jobs),
+        "percent_retried"            => StatsUtils.percent_of(@retried, @total_jobs),
+        "percent_dead"               => StatsUtils.percent_of(@dead, @total_jobs),
+        "overtime_series"            => @overtime_series.overtime_series,
+      }
     end
   end
 end

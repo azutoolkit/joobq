@@ -43,17 +43,15 @@ module JoobQ
   # in different environments.
   # - The `queue` macro simplifies the process of setting up different types of queues, making the `JoobQ` system
   # adaptable to various job processing requirements.
-  struct Configure
+  class Configure
     # Loads the logger configuration from the environment variables
     # and sets the default log level to `:trace`.
     Log.setup_from_env(default_level: :trace)
-
-    class_getter instance : Configure = new
-
     getter queues = {} of String => BaseQueue
 
     property store : Store = RedisStore.new
-    property? stats_enabled : Bool = false
+    property? rest_api_enabled : Bool = false
+    property? stats_enabled : Bool = true
     property default_queue : String = "default"
     property retries : Int32 = 3
     property expires : Time::Span = 3.days
@@ -61,7 +59,6 @@ module JoobQ
     property failed_ttl : Time::Span = 3.milliseconds
     property dead_letter_ttl : Time::Span = 7.days
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
-    property? rest_api_enabled : Bool = false
 
     macro queue(name, workers, job, throttle = nil)
       {% begin %}

@@ -110,7 +110,7 @@ module JoobQ
         # Logic to add the job back to the queue after a delay
         queue.store.schedule(job, delay)
         queue.retried.add(1)
-        Log.warn &.emit("Job moved to Retry Queue", job_id: job.jid.to_s)
+        # Log.warn &.emit("Job moved to Retry Queue", job_id: job.jid.to_s)
       end
     end
   end
@@ -118,7 +118,7 @@ module JoobQ
   module DeadLetterManager
     def self.add(job, queue, error = nil)
       DeadLetter.add job
-      Log.error &.emit("Job moved to Dead Letter Queue", error: error)
+      # Log.error &.emit("Job moved to Dead Letter Queue", error: error)
     end
   end
 end

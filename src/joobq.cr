@@ -57,45 +57,45 @@ require "./joobq/**"
 # - Logging and statistics creation are integral parts of the module, facilitating monitoring and debugging.
 # - The module's design allows for flexible configuration and easy management of job queues.
 module JoobQ
-  extend self
+  CONFIG = Configure.new
 
-  def config
-    Configure.instance
+  def self.config
+    CONFIG
   end
 
-  def configure(&)
-    with config yield config
+  def self.configure(&)
+    with CONFIG yield CONFIG
   end
 
-  def store
+  def self.store
     config.store
   end
 
-  def reset
+  def self.reset
     store.reset
   end
 
-  def statistics
-    JoobQ::GlobalStats.calculate_stats(queues)
+  def self.statistics
+    JoobQ::GlobalStats.instance.calculate_stats
   end
 
-  def queues
+  def self.queues
     config.queues
   end
 
-  def add(job)
+  def self.add(job)
     store.enqueue(job)
   end
 
-  def scheduler
+  def self.scheduler
     Scheduler.instance
   end
 
-  def [](name : String)
+  def self.[](name : String)
     queues[name]
   end
 
-  def forge
+  def self.forge
     Log.info { "JoobQ starting..." }
     scheduler.run
 
@@ -104,10 +104,17 @@ module JoobQ
       queue.start
     end
 
+    spawn do
+      QueueMetrics.instance.collect_and_store_metrics
+      loop do
+        QueueMetrics.instance.collect_and_store_metrics
+        sleep 5.seconds
+      end
+    end
+
     Log.info { "JoobQ initialized and waiting for Jobs..." }
 
     Log.info { "Rest API Enabled: #{config.rest_api_enabled?}" }
-
     if config.rest_api_enabled?
       APIServer.start
     end

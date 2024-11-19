@@ -12,7 +12,7 @@ module JoobQ
                    @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
                    @password : String? = ENV["REDIS_PASS"]?,
                    @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "100").to_i,
-                   @pool_timeout : Time::Span = 0.5.seconds)
+                   @pool_timeout : Float64 = 0.5)
       @redis = Redis::PooledClient.new(
         host: @host,
         port: @port,

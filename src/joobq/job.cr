@@ -133,6 +133,8 @@ module JoobQ
       property retries : Int32 = JoobQ.config.retries
       property expires : Int64 = JoobQ.config.expires.from_now.to_unix_ms
       property status : Status = Status::Enqueued
+      @[JSON::Field(ignore: true)]
+      property enqueue_time = Time.monotonic
 
 
       {% for status in Status.constants %}

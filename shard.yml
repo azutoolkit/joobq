@@ -15,7 +15,6 @@ license: MIT
 dependencies:
   redis:
     github: stefanwille/crystal-redis
-    version: ~> 2.8.0
 
   cron_parser:
     github: kostya/cron_parser

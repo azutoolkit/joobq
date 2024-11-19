@@ -197,6 +197,77 @@ module JoobQ
     private getter workers : Array(Worker(T)) = Array(Worker(T)).new
     private getter workers_mutex = Mutex.new
 
+    property total_job_wait_time : Time::Span = Time.monotonic
+    property total_job_execution_time : Time::Span = Time.monotonic
+
+    getter jobs_completed_per_second : Float64 do
+      per_second(completed.get).round(2)
+    end
+
+    getter errors_per_second : Float64 do
+      per_second(retried.get).round(2)
+    end
+
+    getter enqueued_per_second : Float64 do
+      per_second(total_jobs).round(2)
+    end
+
+    # Calculates the average wait time for jobs in the queue.
+    # Measure the time that jobs spend waiting in the queue before being picked up by a worker.
+    getter job_wait_time : Float64 do
+      return 0.0 if completed.get.zero?
+      avg_time = (total_job_wait_time / completed.get.to_f)
+      # convert the time to seconds if it's greater than 1 second
+      avg_time.total_seconds > 1 ? avg_time.total_seconds.round(2) : avg_time.total_milliseconds.round(2)
+    end
+
+    # Calculates the average execution time for jobs in the queue.
+    # Measure the time that jobs take to complete once they are picked up by a worker.
+    # This metric can help identify bottlenecks in job processing.
+    # A high execution time may indicate that jobs are taking too long to complete, which can impact the overall
+    # throughput of the system.
+    # A low execution time indicates that jobs are being processed quickly, which is desirable for high-performance
+    # systems.
+    # The average execution time is calculated by dividing the total execution time by the number of completed jobs.
+    getter job_execution_time : Float64 do
+      return 0.0 if completed.get.zero?
+      avg_time = (total_job_execution_time / completed.get.to_f)
+      avg_time.total_seconds > 1 ? avg_time.total_seconds.round(2) : avg_time.total_milliseconds.round(2)
+    end
+
+    getter worker_utilization : Float64 do
+      elapsed_time = Time.monotonic - @start_time
+      return 0.0 if elapsed_time.to_f == 0.0 || @total_workers == 0
+
+      total_worker_time = @total_workers.to_f * elapsed_time.total_seconds
+      return 0.0 if total_worker_time == 0.0
+
+      utilization = (@total_job_execution_time.total_seconds / total_worker_time) * 100.0
+      utilization = utilization.clamp(0.0, 100.0)
+      utilization.round(2)
+    end
+
+    # Calculates the error rate trend for the queue.
+    getter error_rate_trend : Float64 do
+      total_attempts = completed.get + retried.get + dead.get
+      return 0.0 if total_attempts == 0
+      (retried.get.to_f / total_attempts.to_f).round(2)
+    end
+
+    # Calculates the failed job rate for the queue.
+    getter failed_job_rate : Float64 do
+      total_processed = completed.get + dead.get
+      return 0.0 if total_processed == 0
+      (dead.get.to_f / total_processed.to_f).round(2)
+    end
+
+    # Updated throughput_rate
+    # Calculates the average number of jobs processed per worker per second.
+    getter jobs_per_worker_per_second : Float64 do
+      return 0.0 if total_workers.zero?
+      (jobs_completed_per_second / total_workers.to_f).round(2)
+    end
+
     def initialize(@name : String, @total_workers : Int32, @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
       create_workers
     end
@@ -280,40 +351,36 @@ module JoobQ
 
     def info
       {
-        name:                name,
-        total_workers:       total_workers,
-        status:              status,
-        enqueued:            size,
-        completed:           completed.get,
-        retried:             retried.get,
-        dead:                dead.get,
-        processing:          busy.get,
-        running_workers:     running_workers,
-        jobs_per_second:     per_second(completed.get).round(2),
-        errors_per_second:   per_second(retried.get).round(2),
-        enqueued_per_second: per_second(size).round(2),
-        jobs_latency:        jobs_latency,
-        elapsed_time:        Time.monotonic - start_time,
+        name:                       name,
+        total_workers:              total_workers,
+        status:                     status,
+        current_size:               size,
+        total_jobs:                 total_jobs,
+        completed:                  completed.get,
+        retried:                    retried.get,
+        dead:                       dead.get,
+        processing:                 busy.get,
+        running_workers:            running_workers,
+        jobs_completed_per_second:  jobs_completed_per_second,
+        errors_per_second:          errors_per_second,
+        enqueued_per_second:        enqueued_per_second,
+        job_wait_time:              job_wait_time,
+        job_execution_time:         job_execution_time,
+        worker_utilization:         worker_utilization,
+        error_rate_trend:           error_rate_trend,
+        failed_job_rate:            failed_job_rate,
+        jobs_per_worker_per_second: jobs_per_worker_per_second,
       }
     end
 
-    private def jobs_latency : String
-      elapsed_time = Time.monotonic - @start_time
-      return "0" if status == "Awaiting" || completed.get == 0
-      format_time_span(elapsed_time / completed.get)
+    private def total_jobs
+      size + completed.get + busy.get + retried.get + dead.get
     end
 
     private def per_second(value) : Float64
       elapsed_time = Time.monotonic - @start_time
       return 0.0 if status == "Awaiting" || elapsed_time == 0
       elapsed_time.to_f == 0 ? 0.0 : value.to_f / elapsed_time.to_f
-    end
-
-    private def format_time_span(span : Time::Span) : String
-      hours = span.total_hours.to_i
-      minutes = (span.total_minutes % 60).to_i
-      seconds = (span.total_seconds % 60).to_i
-      "%02d:%02d:%02d" % {hours, minutes, seconds}
     end
 
     private def reprocess_busy_jobs!

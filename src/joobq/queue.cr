@@ -3,277 +3,75 @@ module JoobQ
     abstract def add(job : String)
   end
 
-  #  module is responsible for managing job queues. It handles job enqueuing, worker management,
-  # job processing, and provides various metrics related to job execution. This class is generic and can
-  # be instantiated with any job type.
-  #
-  # ### Properties
-  #
-  # - `store : Store` - The store instance used for job storage and retrieval.
-  # - `name : String` - The name of the queue.
-  # - `total_workers : Int32` - The total number of workers assigned to this queue.
-  # - `jobs : String` - The job type as a string.
-  # - `completed : Atomic(Int64)` - Counter for completed jobs.
-  # - `retried : Atomic(Int64)` - Counter for retried jobs.
-  # - `dead : Atomic(Int64)` - Counter for dead jobs.
-  # - `busy : Atomic(Int64)` - Counter for busy jobs.
-  # - `start_time : Time::Span` - The start time of the queue.
-  # - `throttle: Int32?` - Optional throttle limit for job processing.
-  # - `terminate_channel : Channel(Nil)` - Channel used for terminating workers.
-  # - `workers : Array(Worker(T))` - Array of workers assigned to this queue.
-  # - `workers_mutex : Mutex` - Mutex for synchronizing worker operations.
-  #
-  # ## Job Execution Workflow
-  #
-  # 1. **Initialization**:
-  # - When a `Queue` instance is created, it initializes with a name, total number of workers, and an optional
-  #   throttle config.
-  # - The `create_workers` method is called to create the specified number of worker instances.
-  #
-  # 2. **Adding Jobs**:
-  # - The `add` method is used to add jobs to the queue. It takes a JSON string representation of the job, parses
-  #   it into the job type `T`, and enqueues it using the `store`.
-  #
-  # 3. **Starting the Queue**:
-  # - The `start` method is called to start processing jobs in the queue.
-  # - It first calls `reprocess_busy_jobs!` to move any jobs that were being processed but not completed back to
-  #   the queue.
-  # - Then, it iterates over the workers and calls their `run` method to start them.
-  #
-  # 4. **Worker Execution**:
-  # - Each worker runs in a loop, fetching jobs from the queue and executing them.
-  # - The worker marks the job as running, performs the job, and then marks it as completed.
-  # - If the job has expired, it is moved to the dead letter queue.
-  # - If an exception occurs during job execution, the job is retried or moved to the dead letter queue based on the
-  #   retry logic.
-  #
-  # 5. **Job Metrics**:
-  # - The queue maintains various metrics such as the number of completed, retried, dead, and busy jobs using atomic
-  # counters.
-  # - These metrics are updated as jobs are processed.
-  #
-  # ### Example Flow
-  #
-  # 1. **Initialize Queue**:
-  # ```
-  # queue = JoobQ::Queue(ExampleJob).new("example", 10)
-  # ```
-  #
-  # 2. **Add Job**:
-  # ```
-  # queue.add(ExampleJob.new(x: 1).to_json)
-  # ```
-  #
-  # 3. **Start Queue**:
-  # ```
-  # queue.start
-  # ```
-  #
-  # 4. **Worker Fetches and Executes Job**:
-  # - Worker fetches a job from the queue.
-  # - Marks the job as running.
-  # - Executes the job's `perform` method.
-  # - Marks the job as completed or handles retries/dead letter queue if an error occurs.
-  #
-  # This flow ensures that jobs are processed asynchronously and reliably, with metrics tracking and error
-  # handling in place.
-  #
-  # ### Methods
-  #
-  # #### `initialize`
-  #
-  # ```
-  # def initialize(@name : String, @total_workers : Int32, @throttle_limit : Int32? = nil)
-  # ```
-  #
-  # Initializes the queue with the given name, number of workers, and optional throttle limit.
-  #
-  # #### `parse_job`
-  #
-  # ```
-  # def parse_job(job_data : JSON::Any)
-  # ```
-  #
-  # Parses a job from JSON data.
-  #
-  # #### `start`
-  #
-  # ```
-  # def start
-  # ```
-  #
-  # Starts the queue by reprocessing busy jobs and running all workers.
-  #
-  # #### `add`
-  #
-  # ```
-  # def add(job : String)
-  # ```
-  #
-  # Adds a job to the queue by parsing it from a JSON string.
-  #
-  # ### Usage
-  #
-  # #### Defining a Queue
-  #
-  # To define a queue, you need to configure it using the `JoobQ.configure` method. Here is an example:
-  #
-  # ```
-  # JoobQ.configure do
-  #   queue "example", 10, ExampleJob
-  # end
-  # ```
-  #
-  # #### Adding Jobs to the Queue
-  #
-  # You can add jobs to the queue using the `add` method:
-  #
-  # ```
-  # queue = JoobQ["example"]
-  # queue.add(ExampleJob.new(x: 1).to_json)
-  # ```
-  #
-  # #### Starting the Queue
-  #
-  # To start processing jobs in the queue, call the `start` method:
-  #
-  # ```
-  # queue.start
-  # ```
-  #
-  # ### Example
-  #
-  # Here is a complete example demonstrating how to define a queue, add jobs, and start the queue:
-  #
-  # ```
-  # require "joobq"
-  #
-  # # Define a job
-  # struct ExampleJob
-  #   include JoobQ::Job
-  #   property x : Int32
-  #
-  #   def initialize(@x : Int32)
-  #   end
-  #
-  #   def perform
-  #     puts "Performing job with x = #{x}"
-  #   end
-  # end
-  #
-  # # Configure the queue
-  # JoobQ.configure do
-  #   queue "example", 10, ExampleJob
-  # end
-  #
-  # # Get the queue instance
-  # queue = JoobQ["example"]
-  #
-  # # Add jobs to the queue
-  # 10.times do |i|
-  #   queue.add(ExampleJob.new(x: i).to_json)
-  # end
-  #
-  # # Start the queue
-  # queue.start
-  # ```
-  #
-  # This example sets up a queue named "example" with 10 workers, adds 10 jobs to the queue, and starts processing the jobs.
   class Queue(T) < BaseQueue
     getter store : Store = ::JoobQ.config.store
     getter name : String
     getter total_workers : Int32
     getter jobs : String = T.to_s
+    getter throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil
+
 
     property completed : Atomic(Int64) = Atomic(Int64).new(0)
     property retried : Atomic(Int64) = Atomic(Int64).new(0)
-    property dead : Atomic(Int64) = Atomic(Int64).new(0)
     property busy : Atomic(Int64) = Atomic(Int64).new(0)
+    property dead : Atomic(Int64) = Atomic(Int64).new(0)
+    property total_jobs_enqueued : Int64 { size }
+    property total_job_wait_time : Time::Span = Time::Span.zero
+    property total_job_execution_time : Time::Span = Time::Span.zero
+    property last_queue_size : Int64 = 0_i64
+    property last_queue_time : Time::Span = Time.monotonic
     property start_time : Time::Span = Time.monotonic
-    property throttle_limit : NamedTuple(limit: Int32, period: Time::Span)?
 
-    # Use a Channel for job distribution
     private getter terminate_channel : Channel(Nil) = Channel(Nil).new
     private getter workers : Array(Worker(T)) = Array(Worker(T)).new
     private getter workers_mutex = Mutex.new
 
-    property total_job_wait_time : Time::Span = Time.monotonic
-    property total_job_execution_time : Time::Span = Time.monotonic
+    getter jobs_completed_per_second : Float64 { per_second_rate(completed.get) }
+    getter errors_per_second : Float64 { per_second_rate(retried.get) }
+    getter enqueued_per_second : Float64 { per_second_rate(total_jobs_enqueued) }
+    getter percent_completed : Float64 { percentage_rate(completed.get, total_jobs_enqueued) }
 
-    getter jobs_completed_per_second : Float64 do
-      per_second(completed.get).round(2)
+
+    getter queue_reduction_rate : Float64 do
+      current_time = Time.monotonic
+      time_delta = current_time - last_queue_time
+      return 0.0 if time_delta.total_seconds == 0.0
+
+      current_queue_size = size
+      size_delta = last_queue_size - current_queue_size
+
+      reduction_rate = size_delta.to_f / time_delta.total_seconds
+
+      @last_queue_size = current_queue_size
+      @last_queue_time = current_time
+
+      reduction_rate.round(2)
     end
 
-    getter errors_per_second : Float64 do
-      per_second(retried.get).round(2)
-    end
-
-    getter enqueued_per_second : Float64 do
-      per_second(total_jobs).round(2)
-    end
-
-    # Calculates the average wait time for jobs in the queue.
-    # Measure the time that jobs spend waiting in the queue before being picked up by a worker.
-    getter job_wait_time : Float64 do
-      return 0.0 if completed.get.zero?
-      avg_time = (total_job_wait_time / completed.get.to_f)
-      # convert the time to seconds if it's greater than 1 second
-      avg_time.total_seconds > 1 ? avg_time.total_seconds.round(2) : avg_time.total_milliseconds.round(2)
-    end
-
-    # Calculates the average execution time for jobs in the queue.
-    # Measure the time that jobs take to complete once they are picked up by a worker.
-    # This metric can help identify bottlenecks in job processing.
-    # A high execution time may indicate that jobs are taking too long to complete, which can impact the overall
-    # throughput of the system.
-    # A low execution time indicates that jobs are being processed quickly, which is desirable for high-performance
-    # systems.
-    # The average execution time is calculated by dividing the total execution time by the number of completed jobs.
-    getter job_execution_time : Float64 do
-      return 0.0 if completed.get.zero?
-      avg_time = (total_job_execution_time / completed.get.to_f)
-      avg_time.total_seconds > 1 ? avg_time.total_seconds.round(2) : avg_time.total_milliseconds.round(2)
-    end
+    getter job_wait_time : Float64 { average_time(total_job_wait_time, completed.get) }
+    getter job_execution_time : Float64 { average_time(total_job_execution_time, completed.get) }
 
     getter worker_utilization : Float64 do
-      elapsed_time = Time.monotonic - @start_time
-      return 0.0 if elapsed_time.to_f == 0.0 || @total_workers == 0
-
-      total_worker_time = @total_workers.to_f * elapsed_time.total_seconds
+      total_worker_time = total_workers.to_f * elapsed_time.total_seconds
       return 0.0 if total_worker_time == 0.0
-
-      utilization = (@total_job_execution_time.total_seconds / total_worker_time) * 100.0
-      utilization = utilization.clamp(0.0, 100.0)
-      utilization.round(2)
+      utilization = (total_job_execution_time.total_seconds / total_worker_time) * 100.0
+      utilization.clamp(0.0, 100.0).round(2)
     end
 
-    # Calculates the error rate trend for the queue.
     getter error_rate_trend : Float64 do
-      total_attempts = completed.get + retried.get + dead.get
-      return 0.0 if total_attempts == 0
-      (retried.get.to_f / total_attempts.to_f).round(2)
+      total_attempted_jobs = completed.get + retried.get + dead.get
+      percentage_rate(retried.get, total_attempted_jobs)
     end
 
-    # Calculates the failed job rate for the queue.
     getter failed_job_rate : Float64 do
-      total_processed = completed.get + dead.get
-      return 0.0 if total_processed == 0
-      (dead.get.to_f / total_processed.to_f).round(2)
-    end
-
-    # Updated throughput_rate
-    # Calculates the average number of jobs processed per worker per second.
-    getter jobs_per_worker_per_second : Float64 do
-      return 0.0 if total_workers.zero?
-      (jobs_completed_per_second / total_workers.to_f).round(2)
+      total_processed_jobs = completed.get + dead.get
+      percentage_rate(dead.get, total_processed_jobs)
     end
 
     def initialize(@name : String, @total_workers : Int32, @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
+      @last_queue_size = size
+      @last_queue_time = Time.monotonic
       create_workers
-    end
-
-    def parse_job(job_data : JSON::Any)
-      T.from_json job_data.as(String)
     end
 
     def start
@@ -296,11 +94,11 @@ module JoobQ
       store.queue_size name
     end
 
-    def running?
+    def running? : Bool
       workers.all? &.active?
     end
 
-    def running_workers
+    def running_workers : Int32
       workers.count &.active?
     end
 
@@ -309,59 +107,47 @@ module JoobQ
     end
 
     def stop!
-      total_workers.times do
-        terminate_channel.send(nil)
-      end
+      total_workers.times { terminate_channel.send(nil) }
     end
 
     def next_job
-      # Try to get a job from the store
       store.dequeue(name, T)
     rescue ex
       Log.error &.emit("Error Dequeuing", queue: name, error: ex.message)
     end
 
-    def status
-      case {size.zero?, running?}
-      when {true, true}  then "Awaiting"
-      when {false, true} then "Running"
-      else                    "Done"
+    def status : String
+      if size.zero? && running?
+        return "Awaiting"
       end
+      running? ? "Running" : "Done"
     end
 
     def terminate(worker : Worker(T))
       Log.warn &.emit("Terminating Worker", queue: name, worker_id: worker.wid)
-      @workers_mutex.synchronize do
-        workers.delete worker
-      end
+      @workers_mutex.synchronize { workers.delete(worker) }
     end
 
     def restart(worker : Worker(T), ex : Exception)
       terminate worker
       return unless running?
-
-      Log.warn &.emit("Restarting Worker!", queue: name, worker_id: worker.wid)
       worker = create_worker
-      @workers_mutex.synchronize do
-        workers << worker
-      end
+      @workers_mutex.synchronize { workers << worker }
       worker.run
-      worker
     end
 
     def info
-      {
+      result = {
         name:                       name,
         total_workers:              total_workers,
         status:                     status,
         current_size:               size,
-        total_jobs:                 total_jobs,
         completed:                  completed.get,
         retried:                    retried.get,
         dead:                       dead.get,
-        processing:                 busy.get,
         running_workers:            running_workers,
         jobs_completed_per_second:  jobs_completed_per_second,
+        queue_reduction_rate:       queue_reduction_rate,
         errors_per_second:          errors_per_second,
         enqueued_per_second:        enqueued_per_second,
         job_wait_time:              job_wait_time,
@@ -369,18 +155,29 @@ module JoobQ
         worker_utilization:         worker_utilization,
         error_rate_trend:           error_rate_trend,
         failed_job_rate:            failed_job_rate,
-        jobs_per_worker_per_second: jobs_per_worker_per_second,
       }
+      result
     end
 
-    private def total_jobs
-      size + completed.get + busy.get + retried.get + dead.get
+    private def per_second_rate(count : Int64) : Float64
+      total_time = elapsed_time.total_seconds
+      return 0.0 if total_time == 0.0
+      (count.to_f / total_time).round(2)
     end
 
-    private def per_second(value) : Float64
-      elapsed_time = Time.monotonic - @start_time
-      return 0.0 if status == "Awaiting" || elapsed_time == 0
-      elapsed_time.to_f == 0 ? 0.0 : value.to_f / elapsed_time.to_f
+    private def percentage_rate(part : Int64, total : Int64) : Float64
+      return 0.0 if total == 0
+      (part.to_f / total.to_f * 100.0).round(2)
+    end
+
+    def elapsed_time : Time::Span
+      Time.monotonic - start_time
+    end
+
+    private def average_time(total_time : Time::Span, count : Int64) : Float64
+      return 0.0 if count.zero?
+      avg_time = (total_time / count.to_f)
+      avg_time.total_seconds > 1 ? avg_time.total_seconds.round(2) : avg_time.total_milliseconds.round(2)
     end
 
     private def reprocess_busy_jobs!
@@ -388,9 +185,7 @@ module JoobQ
     end
 
     private def create_workers
-      total_workers.times do
-        workers << create_worker
-      end
+      total_workers.times { workers << create_worker }
     end
 
     private def create_worker

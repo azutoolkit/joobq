@@ -74,7 +74,7 @@ module JoobQ
       # Calculate averages for specific metrics
       queue_count = @queues.size
       if queue_count > 0
-        ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
+        ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second", "queue_reduction_rate",
          "job_wait_time", "job_execution_time", "worker_utilization",
          "error_rate_trend", "failed_job_rate", "jobs_per_worker_per_second"].each do |metric|
           data[metric] /= queue_count
@@ -116,7 +116,7 @@ module JoobQ
 
       # Calculate average metrics where applicable
       if count > 0
-        ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
+        ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second", "queue_reduction_rate",
          "job_wait_time", "job_execution_time", "worker_utilization",
          "error_rate_trend", "failed_job_rate", "jobs_per_worker_per_second"].each do |metric|
           aggregated_metrics[metric] /= count
@@ -160,7 +160,6 @@ module JoobQ
       {
         "total_workers"              => 0_i64,
         "current_size"               => 0_i64,
-        "total_jobs"                   => 0_i64,
         "completed"                  => 0_i64,
         "retried"                    => 0_i64,
         "dead"                       => 0_i64,
@@ -168,6 +167,7 @@ module JoobQ
         "running_workers"            => 0_i64,
         "jobs_completed_per_second"  => 0.0,
         "errors_per_second"          => 0.0,
+        "queue_reduction_rate"       => 0.0,
         "enqueued_per_second"        => 0.0,
         "job_wait_time"              => 0.0,
         "job_execution_time"         => 0.0,

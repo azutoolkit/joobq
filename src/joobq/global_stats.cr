@@ -34,10 +34,10 @@ module JoobQ
 
     def initialize
       @overtime_series << {name: "Enqueued", type: "column", data: SeriesData.new(10)}
-      @overtime_series << {name: "Completed", type: "line", data: SeriesData.new(10)}
+      @overtime_series << {name: "Processed", type: "line", data: SeriesData.new(10)}
     end
 
-    def update(enqueued : Float64, jobs_completed_per_second : Float64)
+    def update(enqueued : Float64 | Int64, jobs_completed_per_second : Float64 | Int64)
       current_time = Time.local.to_rfc3339
       enqueued_series = @overtime_series.first
       completed_series = @overtime_series.last
@@ -70,6 +70,7 @@ module JoobQ
     property jobs_completed_per_second : Float64 = 0.0
     property errors_per_second : Float64 = 0.0
     property enqueued_per_second : Float64 = 0.0
+    property queue_reduction_rate : Float64 = 0.0
     property job_wait_time : Float64 = 0.0
     property job_execution_time : Float64 = 0.0
     property worker_utilization : Float64 = 0.0
@@ -91,12 +92,12 @@ module JoobQ
 
       @total_workers = global_metrics["total_workers"].to_i64
       @current_size = global_metrics["current_size"].to_i64
-      @total_jobs = global_metrics["total_jobs"].to_i64
       @completed = global_metrics["completed"].to_i64
       @retried = global_metrics["retried"].to_i64
       @dead = global_metrics["dead"].to_i64
       @processing = global_metrics["processing"].to_i64
       @running_workers = global_metrics["running_workers"].to_i64
+      @queue_reduction_rate = global_metrics["queue_reduction_rate"].to_f64
       @jobs_completed_per_second = global_metrics["jobs_completed_per_second"].to_f64
       @errors_per_second = global_metrics["errors_per_second"].to_f64
       @enqueued_per_second = global_metrics["enqueued_per_second"].to_f64
@@ -123,6 +124,7 @@ module JoobQ
       @jobs_completed_per_second = 0.0
       @errors_per_second = 0.0
       @enqueued_per_second = 0.0
+      @enqueued_per_second = 0.0
       @job_wait_time = 0.0
       @job_execution_time = 0.0
       @worker_utilization = 0.0
@@ -132,14 +134,13 @@ module JoobQ
     end
 
     private def update_overtime_series
-      @overtime_series.update(@enqueued_per_second, @jobs_completed_per_second)
+      @overtime_series.update(@current_size, @queue_reduction_rate)
     end
 
     def stats
       {
         "total_workers"              => @total_workers,
         "current_size"               => @current_size,
-        "total_jobs"                 => @total_jobs,
         "completed"                  => @completed,
         "retried"                    => @retried,
         "dead"                       => @dead,
@@ -148,6 +149,7 @@ module JoobQ
         "jobs_completed_per_second"  => @jobs_completed_per_second.round(2),
         "errors_per_second"          => @errors_per_second.round(2),
         "enqueued_per_second"        => @enqueued_per_second.round(2),
+        "queue_reduction_rate"       => @queue_reduction_rate.round(2),
         "job_wait_time"              => @job_wait_time,
         "job_execution_time"         => @job_execution_time,
         "worker_utilization"         => @worker_utilization.round(2),

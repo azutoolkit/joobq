@@ -5,7 +5,7 @@ module JoobQ
     job = ExampleJob.new(1)
     queue = Queue(ExampleJob | FailJob).new("example", 1)
     done = Channel(Nil).new
-    worker = Worker(ExampleJob | FailJob).new(1, done, queue)
+    worker = Worker(ExampleJob | FailJob).new(1, done, queue, queue.metrics)
 
     before_each do
       JoobQ.reset
@@ -15,19 +15,19 @@ module JoobQ
       it "stops worker gracefully" do
         worker.run
         worker.active?.should be_true
-        worker.stop!
+        worker.terminate
         worker.active?.should be_false
       end
 
       it "stops and syncs multiple workers" do
-        w1 = Worker(ExampleJob | FailJob).new(1, done, queue)
-        w2 = Worker(ExampleJob | FailJob).new(2, done, queue)
+        w1 = Worker(ExampleJob | FailJob).new(1, done, queue, queue.metrics)
+        w2 = Worker(ExampleJob | FailJob).new(2, done, queue, queue.metrics)
 
         w1.run
         w2.run
 
-        w1.stop!
-        w2.stop!
+        w1.terminate
+        w2.terminate
 
         w1.active?.should be_false
         w2.active?.should be_false

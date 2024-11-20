@@ -10,6 +10,7 @@ module JoobQ
   class Queue(T) < BaseQueue
     getter store : Store = ::JoobQ.config.store
     getter name : String
+    getter job_type : String = T.name
     getter total_workers : Int32
     getter metrics : Metrics
     getter worker_manager : WorkerManager(T) { WorkerManager(T).new(total_workers, self, metrics) }
@@ -78,6 +79,7 @@ module JoobQ
       current_queue_size = size
       result = {
         name:                      name,
+        job_type:                  job_type,
         total_workers:             total_workers,
         status:                    status,
         current_size:              current_queue_size,

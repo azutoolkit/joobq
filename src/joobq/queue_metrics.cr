@@ -35,13 +35,11 @@ module JoobQ
       timestamp = Time.utc.to_unix
 
       @queues.values.each do |queue|
-        metrics_key = "joobq:metrics:#{@instance_id}:#{queue.name}"
+        metrics_key = "joobq:metrics:#{@instance_id}:#{@process_id}:#{queue.name}"
         queue_metrics = queue.info.to_h
         queue_metrics[:instance_id] = @instance_id
         queue_metrics[:process_id] = @process_id
         queue_metrics[:last_updated] = timestamp
-        queue_metrics.delete(:name)
-        queue_metrics.delete(:status)
 
         # Retrieve queue info and store in Redis
         @redis.hmset metrics_key, queue_metrics
@@ -61,7 +59,7 @@ module JoobQ
 
     # Retrieve metrics for a specific queue
     def queue_metrics(queue_name : String) : Hash(String, String)
-      metrics_key = "joobq:metrics:#{@instance_id}:#{queue_name}"
+      metrics_key = "joobq:metrics:#{@instance_id}:#{@process_id}:#{queue_name}"
       @redis.hgetall(metrics_key)
     end
 
@@ -112,6 +110,7 @@ module JoobQ
           key = key_value[0].to_s
           value = key_value[1].to_s
           unless ["instance_id", "process_id", "last_updated"].includes?(key)
+            next if %w[name job_type status].includes?(key)
             aggregated_metrics[key] += value.includes?(".") ? value.to_f64 : value.to_i64
           end
         end

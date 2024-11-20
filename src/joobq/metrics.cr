@@ -9,10 +9,12 @@ module JoobQ
     property last_queue_size : Int64 = 0_i64
     property last_queue_time : Time::Span = Time.monotonic
     property start_time : Time::Span = Time.monotonic
+    property current_completed : Atomic(Int64) = Atomic(Int64).new(0)
 
     # Provides thread-safe methods to update metrics
     def increment_completed
       completed.add(1)
+      current_completed.add(1)
     end
 
     def increment_retried
@@ -66,8 +68,10 @@ module JoobQ
     end
 
     # Metric calculations
-    def jobs_completed_per_second : Float64
-      per_second_rate(completed.get)
+    def jobs_completed_per_second : Int64
+      completed_in_interval = current_completed.get
+      current_completed.set(0) # Reset the counter
+      completed_in_interval
     end
 
     # Calculate the rate at which jobs are being enqueued per second for the queue

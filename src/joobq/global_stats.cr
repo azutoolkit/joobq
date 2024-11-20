@@ -29,7 +29,7 @@ module JoobQ
 
     def initialize
       @overtime_series << {name: "Enqueued", type: "column", data: SeriesData.new(10)}
-      @overtime_series << {name: "Processed", type: "line", data: SeriesData.new(10)}
+      @overtime_series << {name: "Completed", type: "line", data: SeriesData.new(10)}
     end
 
     def update(enqueued : Float64 | Int64, jobs_completed_per_second : Float64 | Int64)
@@ -69,6 +69,10 @@ module JoobQ
     property error_rate_trend : Float64 = 0.0
     property failed_job_rate : Float64 = 0.0
     property average_jobs_in_flight : Float64 = 0.0
+    property percent_completed : Float64 = 0.0
+    property percent_retried : Float64 = 0.0
+    property percent_dead : Float64 = 0.0
+    property percent_busy : Float64 = 0.0
 
     property overtime_series : OvertimeSeries
 
@@ -96,6 +100,10 @@ module JoobQ
       @error_rate_trend = global_metrics["error_rate_trend"].to_f64
       @failed_job_rate = global_metrics["failed_job_rate"].to_f64
       @average_jobs_in_flight = global_metrics["average_jobs_in_flight"].to_f64
+      @percent_completed =  global_metrics["percent_completed"].to_f64
+      @percent_retried =  global_metrics["percent_retried"].to_f64
+      @percent_dead = global_metrics["percent_dead"].to_f64
+      @percent_busy =  global_metrics["percent_busy"].to_f64
 
       update_overtime_series
       stats
@@ -118,30 +126,38 @@ module JoobQ
       @error_rate_trend = 0.0
       @failed_job_rate = 0.0
       @average_jobs_in_flight = 0.0
+      @percent_completed = 0.0
+      @percent_retried = 0.0
+      @percent_dead = 0.0
+      @percent_busy = 0.0
     end
 
     private def update_overtime_series
-      @overtime_series.update(@current_size, @queue_reduction_rate)
+      @overtime_series.update(@current_size, @jobs_completed_per_second)
     end
 
     def stats
       {
-        "total_workers"              => @total_workers,
-        "current_size"               => @current_size,
-        "completed"                  => @completed,
-        "retried"                    => @retried,
-        "dead"                       => @dead,
-        "running_workers"            => @running_workers,
-        "jobs_completed_per_second"  => @jobs_completed_per_second.round(2),
-        "queue_reduction_rate"        => @queue_reduction_rate.round(2),
-        "errors_per_second"          => @errors_per_second.round(2),
-        "job_wait_time"              => @job_wait_time,
-        "job_execution_time"         => @job_execution_time,
-        "worker_utilization"         => @worker_utilization.round(2),
-        "error_rate_trend"           => @error_rate_trend.round(2),
-        "failed_job_rate"            => @failed_job_rate.round(2),
-        "average_jobs_in_flight"     => @average_jobs_in_flight.round(2),
-        "overtime_series"            => @overtime_series.overtime_series,
+        "total_workers"             => @total_workers,
+        "current_size"              => @current_size,
+        "completed"                 => @completed,
+        "retried"                   => @retried,
+        "dead"                      => @dead,
+        "running_workers"           => @running_workers,
+        "jobs_completed_per_second" => @jobs_completed_per_second.round(2),
+        "queue_reduction_rate"      => @queue_reduction_rate.round(2),
+        "errors_per_second"         => @errors_per_second.round(2),
+        "job_wait_time"             => @job_wait_time,
+        "job_execution_time"        => @job_execution_time,
+        "worker_utilization"        => @worker_utilization.round(2),
+        "error_rate_trend"          => @error_rate_trend.round(2),
+        "failed_job_rate"           => @failed_job_rate.round(2),
+        "average_jobs_in_flight"    => @average_jobs_in_flight.round(2),
+        "overtime_series"           => @overtime_series.overtime_series,
+        "percent_completed"         => @percent_completed,
+        "percent_retried"           => @percent_retried,
+        "percent_dead"              => @percent_dead,
+        "percent_busy"              => @percent_busy,
       }
     end
   end

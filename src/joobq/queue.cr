@@ -94,6 +94,10 @@ module JoobQ
         error_rate_trend:          metrics.error_rate_trend,
         failed_job_rate:           metrics.failed_job_rate,
         average_jobs_in_flight:    metrics.average_jobs_in_flight,
+        percent_completed:         metrics.percent_completed,
+        percent_retried:           metrics.percent_retried,
+        percent_dead:              metrics.percent_dead,
+        percent_busy:              metrics.percent_busy,
       }
       result
     end

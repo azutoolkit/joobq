@@ -31,6 +31,26 @@ module JoobQ
       busy.sub(1)
     end
 
+    def percent_completed
+      percentage_rate(completed.get, total_jobs)
+    end
+
+    def percent_retried
+      percentage_rate(retried.get, total_jobs)
+    end
+
+    def percent_dead
+      percentage_rate(dead.get, total_jobs)
+    end
+
+    def percent_busy
+      percentage_rate(busy.get, total_jobs)
+    end
+
+    def total_jobs
+      completed.get + retried.get + dead.get
+    end
+
     def add_job_wait_time(wait_time : Time::Span)
       @total_job_wait_time += wait_time
     end
@@ -77,15 +97,17 @@ module JoobQ
       @last_queue_size = current_queue_size
       @last_queue_time = current_time
 
-      reduction_rate.round(2)
+      reduction_rate.round(2) * -1
     end
 
+    # Calculate the average time jobs spend waiting in the queue
     def job_wait_time : Float64
-      average_time(total_job_wait_time, completed.get)
+      average_time(total_job_wait_time, completed.get).round(2)
     end
 
+    # Calculate the average time jobs spend being executed
     def job_execution_time : Float64
-      average_time(total_job_execution_time, completed.get)
+      average_time(total_job_execution_time, completed.get).round(2)
     end
 
     # Calculate the utilization of workers in the queue based on the total time spent processing jobs
@@ -109,8 +131,7 @@ module JoobQ
     # This is used to determine the trend of errors in the queue over time
     # The error rate trend is calculated as the percentage of retried jobs compared to the total number of attempted jobs
     def error_rate_trend : Float64
-      total_attempted_jobs = completed.get + retried.get + dead.get
-      percentage_rate(retried.get, total_attempted_jobs)
+      percentage_rate(retried.get, total_jobs)
     end
 
     # Calculate the rate of failed jobs in the queue

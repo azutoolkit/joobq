@@ -24,7 +24,7 @@ module JoobQ
 
     # Initialize with a Redis client and unique instance ID
     def initialize(instance_id : String = System.hostname)
-      @redis = RedisStore.new.redis
+      @redis = RedisStore.instance.redis
       @instance_id = instance_id
       @process_id = Process.pid
       @queues = JoobQ.config.queues
@@ -82,7 +82,7 @@ module JoobQ
         ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
          "job_wait_time", "job_execution_time", "worker_utilization",
          "error_rate_trend", "failed_job_rate"].each do |metric|
-          data[metric] /= queue_count
+          (data[metric] /= queue_count).round(2)
         end
       end
 
@@ -124,7 +124,7 @@ module JoobQ
         ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
          "job_wait_time", "job_execution_time", "worker_utilization",
          "error_rate_trend", "failed_job_rate"].each do |metric|
-          aggregated_metrics[metric] /= count
+          (aggregated_metrics[metric] /= count).round(2)
         end
       end
 

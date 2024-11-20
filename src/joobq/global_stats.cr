@@ -100,10 +100,10 @@ module JoobQ
       @error_rate_trend = global_metrics["error_rate_trend"].to_f64
       @failed_job_rate = global_metrics["failed_job_rate"].to_f64
       @average_jobs_in_flight = global_metrics["average_jobs_in_flight"].to_f64
-      @percent_completed =  global_metrics["percent_completed"].to_f64
-      @percent_retried =  global_metrics["percent_retried"].to_f64
+      @percent_completed = global_metrics["percent_completed"].to_f64
+      @percent_retried = global_metrics["percent_retried"].to_f64
       @percent_dead = global_metrics["percent_dead"].to_f64
-      @percent_busy =  global_metrics["percent_busy"].to_f64
+      @percent_busy = global_metrics["percent_busy"].to_f64
 
       update_overtime_series
       stats
@@ -147,8 +147,8 @@ module JoobQ
         "jobs_completed_per_second" => @jobs_completed_per_second.round(2),
         "queue_reduction_rate"      => @queue_reduction_rate.round(2),
         "errors_per_second"         => @errors_per_second.round(2),
-        "job_wait_time"             => @job_wait_time,
-        "job_execution_time"        => @job_execution_time,
+        "job_wait_time"             => @job_wait_time.round(2),
+        "job_execution_time"        => @job_execution_time.round(2),
         "worker_utilization"        => @worker_utilization.round(2),
         "error_rate_trend"          => @error_rate_trend.round(2),
         "failed_job_rate"           => @failed_job_rate.round(2),
@@ -158,6 +158,7 @@ module JoobQ
         "percent_retried"           => @percent_retried,
         "percent_dead"              => @percent_dead,
         "percent_busy"              => @percent_busy,
+        "redis_info"                => RedisInfo.info,
       }
     end
   end

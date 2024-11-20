@@ -6,6 +6,10 @@ module JoobQ
     private PROCESSING_QUEUE = "joobq:processing"
     private BLOCKING_TIMEOUT = 5
 
+    def self.instance : RedisStore
+      @@instance ||= new
+    end
+
     getter redis : Redis::PooledClient
 
     def initialize(@host : String = ENV.fetch("REDIS_HOST", "localhost"),

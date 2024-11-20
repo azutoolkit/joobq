@@ -15,7 +15,10 @@ module JoobQ
     getter used_cpu_user : Float64
     getter instantaneous_input_kbps : Float64
     getter instantaneous_output_kbps : Float64
-    getter cpu_usage : Float64
+
+    @@prev_used_cpu_sys : Float64 =  0.0
+    @@prev_used_cpu_user : Float64 = 0.0
+    @@prev_timestamp = Time.local
 
     def self.info
       new.info
@@ -39,7 +42,6 @@ module JoobQ
       @used_cpu_user = info["used_cpu_user"].to_f64
       @instantaneous_input_kbps = info["instantaneous_input_kbps"].to_f64
       @instantaneous_output_kbps = info["instantaneous_output_kbps"].to_f64
-      @cpu_usage = ((@used_cpu_sys + @used_cpu_user)/@uptime_in_seconds * 100).round(2)
     end
 
     def info
@@ -59,8 +61,29 @@ module JoobQ
         "used_cpu_user" => @used_cpu_user,
         "instantaneous_input_kbps" => @instantaneous_input_kbps,
         "instantaneous_output_kbps" => @instantaneous_output_kbps,
-        "cpu_usage" => @cpu_usage,
+        "cpu_usage" => cpu_usage.round(2),
+        "average_cpu_usage" =>((@used_cpu_sys + @used_cpu_user) / (@uptime_in_seconds) * 100).round(2)
       }
+    end
+
+
+    def cpu_usage
+      current_timestamp = Time.local
+      delta_cpu_sys = @used_cpu_sys - @@prev_used_cpu_sys
+      delta_cpu_user = @used_cpu_user - @@prev_used_cpu_user
+      elapsed_time = (current_timestamp - @@prev_timestamp).total_seconds
+
+      # Update previous values
+      @@prev_used_cpu_sys = @used_cpu_sys
+      @@prev_used_cpu_user = @used_cpu_user
+      @@prev_timestamp = Time.local
+
+
+      if elapsed_time > 0
+        ((delta_cpu_sys + delta_cpu_user) / (elapsed_time) * 100).round(2)
+      else
+        0.0
+      end
     end
   end
 end

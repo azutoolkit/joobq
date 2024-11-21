@@ -162,9 +162,8 @@ module JoobQ
       case {method: method, path: path}
       when {method: "POST", path: "/joobq/jobs"}          then enqueue_job(context)
       when {method: "GET", path: "/joobq/jobs/registry"}  then job_registry(context)
-      when {method: "GET", path: "/joobq/queues"}  then queue_metrics(context)
+      when {method: "GET", path: "/joobq/queues"}         then queue_metrics(context)
       when {method: "GET", path: "/joobq/metrics"}        then global_metrics(context)
-      when {method: "GET", path: "/joobq/metrics"} then overtime_series(context)
       else                                                     call_next(context)
       end
     end

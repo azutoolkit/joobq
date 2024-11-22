@@ -1,8 +1,8 @@
 module JoobQ
   class InMemoryStore < Store
     record ScheduledJob, job : JoobQ::Job, execute_at : Time
-    record FailedJob, job : JoobQ::Job, error_details : Hash(String, String)
-    record DeadJob, job : JoobQ::Job, expiration_time : Time
+    record FailedJob, job : JoobQ::Job, error_details : Hash(Symbol, String | Nil)
+    record DeadJob, job : JoobQ::Job, expiration_time : Int64
 
     getter queues : Hash(String, Array(JoobQ::Job))
     getter scheduled_jobs : Array(ScheduledJob)
@@ -29,8 +29,8 @@ module JoobQ
     end
 
     # Deletes a specific job from the store
-    def delete_job(job : JoobQ::Job) : Nil
-      @queues[job.queue].delete(job)
+    def delete_job(job : String) : Nil
+      # @queues[job.queue].delete(job)
       @scheduled_jobs.reject! { |entry| entry.job == job }
     end
 
@@ -46,9 +46,9 @@ module JoobQ
     end
 
     # Dequeues the next job from the specified queue
-    def dequeue(queue_name : String, klass : Class) : JoobQ::Job?
+    def dequeue(queue_name : String, klass : Class) : String?
       return nil unless @queues.has_key?(queue_name)
-      @queues[queue_name].shift
+      @queues[queue_name].shift.to_s
     end
 
     # Moves a job back to the queue if it was being processed but not completed
@@ -61,14 +61,13 @@ module JoobQ
     end
 
     # Marks a job as failed with error details
-    def mark_as_failed(job : JoobQ::Job, error_details : Hash(String, String)) : Nil
+    def mark_as_failed(job : JoobQ::Job, error_details) : Nil
       @failed_jobs << FailedJob.new(job: job, error_details: error_details)
     end
 
     # Marks a job as dead with an expiration time
-    def mark_as_dead(job : JoobQ::Job, expiration_time : String) : Nil
-      expiration_time_parsed = Time.parse_rfc3339(expiration_time)
-      @dead_jobs << DeadJob.new(job: job, expiration_time: expiration_time_parsed)
+    def mark_as_dead(job : JoobQ::Job, expiration_time : Int64) : Nil
+      @dead_jobs << DeadJob.new(job: job, expiration_time: expiration_time)
     end
 
     # Schedules a job for execution after a specified delay

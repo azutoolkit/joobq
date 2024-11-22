@@ -38,8 +38,18 @@ module JoobQ
       Log.error &.emit("Error Enqueuing", queue: name, error: ex.message, job: job.to_s)
     end
 
-    def delete_job(job : Job)
-      store.delete_job job.as(Job)
+    def delete_job(job : String)
+      store.delete_job job
+    end
+
+    def mark_as_dead(job : String)
+      expires = JoobQ.config.dead_letter_ttl.total_seconds.to_i
+      store.mark_as_dead job, expires
+    end
+
+    def retry(job : String)
+      delay = (2 ** (job.retries)) * 1000 # Delay in ms
+      store.schedule(job, delay)
     end
 
     def size : Int64

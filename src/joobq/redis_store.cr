@@ -34,8 +34,8 @@ module JoobQ
       redis.del(queue_name)
     end
 
-    def delete_job(job : Job) : Nil
-      redis.rpop PROCESSING_QUEUE
+    def delete_job(job : String) : Nil
+      redis.lpop PROCESSING_QUEUE
     end
 
     def enqueue(job : Job) : String
@@ -53,9 +53,9 @@ module JoobQ
       end
     end
 
-    def dequeue(queue_name : String, klass : Class) : Job?
+    def dequeue(queue_name : String, klass : Class) : String?
       if job_data = redis.brpoplpush(queue_name, PROCESSING_QUEUE, BLOCKING_TIMEOUT)
-        return klass.from_json(job_data.as(String))
+        return job_data.as(String)
       end
     end
 
@@ -66,11 +66,11 @@ module JoobQ
       false
     end
 
-    def mark_as_failed(job : JoobQ::Job, error_details : Hash) : Nil
+    def mark_as_failed(job : JoobQ::Job, error_details) : Nil
       redis.set FAILED_SET, {job: job, error: error_details}.to_json
     end
 
-    def mark_as_dead(job : Job, expiration_time : String) : Nil
+    def mark_as_dead(job : Job, expiration_time : Int64) : Nil
       redis.zadd DEAD_LETTER, expiration_time, job.to_json
     end
 

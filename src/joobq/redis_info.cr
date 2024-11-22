@@ -27,21 +27,21 @@ module JoobQ
     def initialize(redis : Redis::PooledClient = RedisStore.instance.redis)
       info = redis.info
 
-      @uptime_in_seconds = info["uptime_in_seconds"].to_i64
-      @os = info["os"]
-      @uptime_in_days = info["uptime_in_days"].to_i32
-      @redis_version = info["redis_version"]
-      @maxclients = info["maxclients"].to_i32
-      @connected_clients = info["connected_clients"].to_i32
-      @used_memory_human = info["used_memory_human"]
-      @used_memory_peak_human = info["used_memory_peak_human"]
-      @used_memory_peak_perc = info["used_memory_peak_perc"]
-      @maxmemory_human = info["maxmemory_human"]
-      @total_system_memory_human = info["total_system_memory_human"]
-      @used_cpu_sys = info["used_cpu_sys"].to_f64
-      @used_cpu_user = info["used_cpu_user"].to_f64
-      @instantaneous_input_kbps = info["instantaneous_input_kbps"].to_f64
-      @instantaneous_output_kbps = info["instantaneous_output_kbps"].to_f64
+      @uptime_in_seconds = info.fetch("uptime_in_seconds", 0).to_i64
+      @os = info.fetch("os", "")
+      @uptime_in_days = info.fetch("uptime_in_days", 0).to_i32
+      @redis_version = info.fetch("redis_version", "")
+      @maxclients = info.fetch("maxclients", 0).to_i32
+      @connected_clients = info.fetch("connected_clients", 0).to_i32
+      @used_memory_human = info.fetch("used_memory_human", "")
+      @used_memory_peak_human = info.fetch("used_memory_peak_human", "")
+      @used_memory_peak_perc = info.fetch("used_memory_peak_perc", "")
+      @maxmemory_human = info.fetch("maxmemory_human", "")
+      @total_system_memory_human = info.fetch("total_system_memory_human", "")
+      @used_cpu_sys = info.fetch("used_cpu_sys", 0.0).to_f64
+      @used_cpu_user = info.fetch("used_cpu_user", 0.0).to_f64
+      @instantaneous_input_kbps = info.fetch("instantaneous_input_kbps", 0.0).to_f64
+      @instantaneous_output_kbps = info.fetch("instantaneous_output_kbps", 0.0).to_f64
     end
 
     def info

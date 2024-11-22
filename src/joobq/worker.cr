@@ -42,7 +42,7 @@ module JoobQ
               break
             else
               if job = @queue.next_job
-                handle_job job.as(T)
+                handle_job job
               end
             end
           end
@@ -53,14 +53,16 @@ module JoobQ
       end
     end
 
-    private def handle_job(job : T)
-      job.running!
+    private def handle_job(job : String)
+      parsed_job = T.from_json(job)
+      parsed_job.running!
 
-      middleware_pipeline.call(job, @queue) do
+      middleware_pipeline.call(parsed_job, @queue) do
         @metrics.increment_busy
-        execute job
+        execute parsed_job
       ensure
         @metrics.decrement_busy
+        @queue.delete_job job
       end
     end
 
@@ -75,7 +77,7 @@ module JoobQ
         execution_time = Time.monotonic - start_time
         @metrics.add_job_execution_time(execution_time)
         @metrics.increment_completed
-        @queue.delete_job job
+
       rescue ex : Exception
         execution_time = Time.monotonic - start_time
         @metrics.add_job_execution_time(execution_time)

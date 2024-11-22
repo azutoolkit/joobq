@@ -1,12 +1,11 @@
+require "simplog"
 require "redis"
 require "json"
 require "uuid"
 require "uuid/json"
 require "log"
 require "cron_parser"
-
 require "./joobq/store"
-
 require "./joobq/**"
 
 # ### Module `JoobQ`
@@ -100,7 +99,6 @@ module JoobQ
   def self.forge
     Log.info { "JoobQ starting..." }
 
-    puts "Scheduler count: #{config.schedulers.size}"
     config.schedulers.each do |scheduler|
       scheduler.run
     end

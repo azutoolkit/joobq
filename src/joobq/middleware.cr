@@ -5,11 +5,9 @@ module JoobQ
   end
 
   class MiddlewarePipeline
-
     @middlewares : Array(Middleware)
 
     def initialize(@middlewares : Array(Middleware) = [] of Middleware)
-      @middlewares = [] of Middleware
     end
 
     def call(job : Job, queue : BaseQueue, &block : ->)

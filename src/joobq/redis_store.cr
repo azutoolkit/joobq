@@ -43,6 +43,16 @@ module JoobQ
       job.jid.to_s
     end
 
+    def enqueue_batch(jobs : Array(Job)) : Array(String)
+      jobs.each_slice(1000) do
+        redis.pipelined do |pipe|
+          jobs.each do |job|
+            pipe.rpush job.queue, job.to_json
+          end
+        end
+      end
+    end
+
     def dequeue(queue_name : String, klass : Class) : Job?
       if job_data = redis.brpoplpush(queue_name, PROCESSING_QUEUE, BLOCKING_TIMEOUT)
         return klass.from_json(job_data.as(String))

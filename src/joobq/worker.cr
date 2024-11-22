@@ -43,14 +43,11 @@ module JoobQ
             else
               if job = @queue.next_job
                 handle_job job.as(T)
-              else
-                # No job available, sleep briefly to prevent tight loop
-                sleep 0.1.seconds
               end
             end
           end
         rescue ex : Exception
-          Log.error &.emit("Worker Error", worker_id: wid, reason: ex.message)
+          Log.error &.emit("Worker Error", queue: @queue.name, worker_id: wid, reason: ex.message)
           @queue.worker_manager.restart self, ex
         end
       end
@@ -62,6 +59,7 @@ module JoobQ
       middleware_pipeline.call(job, @queue) do
         @metrics.increment_busy
         execute job
+      ensure
         @metrics.decrement_busy
       end
     end

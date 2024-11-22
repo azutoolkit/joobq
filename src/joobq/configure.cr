@@ -1,55 +1,28 @@
 module JoobQ
   alias ThrottlerConfig = Hash(String, NamedTuple(limit: Int32, period: Time::Span))
 
-  # This struct is responsible for configuring and managing settings for the `JoobQ` job queue system.
+  # `Configure` is responsible for managing the settings for the `JoobQ` job queue system.
   #
-  # #### Properties and Getters
+  # ### Features
   #
-  # - `INSTANCE`: A constant that holds a singleton instance of the `Configure` struct.
-  # - `redis`: A getter that returns a `Redis::PooledClient` instance. The Redis client is configured using environment
-  #   variables, including host, port, password, pool size, and timeout settings.
-  # - `queues`: A getter returning a hash mapping queue names to their corresponding `BaseQueue` instances.
-  # - `stats_enabled`: A property indicating whether statistics tracking is enabled. Defaults to `false`.
-  # - `default_queue`: A property defining the name of the default queue. Defaults to `"default"`.
-  # - `retries`: A property indicating the number of retries for a job. Defaults to `3`.
-  # - `expires`: A property setting the expiration time for a job in seconds. Defaults to `3.days.total_seconds.to_i`.
-  # - `timeout`: A property indicating the timeout setting. Defaults to `2`.
-  #
-  # #### Macro `queue`
-  #
-  # - `queue(name, workers, kind)`: A macro for defining queues. It takes a queue name, the number of workers,
-  # and the kind of jobs the queue will handle. This macro creates and stores a new `JoobQ::Queue` instance in the
-  # `queues` hash.
-  #
-  # #### Method `scheduler`
-  #
-  # - `scheduler`: A method that yields the singleton instance of the `Scheduler`. This is useful for accessing the
-  #   scheduler within the scope of the `Configure` struct.
+  # - Centralizes job queue configurations, Redis connection setup, and queue properties.
+  # - Provides default settings and allows easy customization through environment variables.
+  # - Supports defining queues, middlewares, throttling, and scheduling jobs.
   #
   # ### Usage Example
   #
-  # To utilize the `Configure` struct for setting up queues, you can define them using the `queue` macro:
-  #
   # ```
-  # JoobQ::Configure.instance.queue "my_queue", 5, MyJob
+  # JoobQ::Configure.instance.queue "my_queue", 5, MyJob, { limit: 10, period: 1.minute }
   # ```
-  #
-  # This would create a new queue named "my_queue" with 5 workers that handle `MyJob` type jobs and store it in the
-  # `queues` hash.
-  #
-  # ### Notes
-  #
-  # - The `Configure` struct centralizes the configuration settings for the `JoobQ` system, including Redis connection
-  # parameters and queue properties.
-  # - It uses environment variables for configuring the Redis client, providing flexibility and ease of configuration
-  # in different environments.
-  # - The `queue` macro simplifies the process of setting up different types of queues, making the `JoobQ` system
-  # adaptable to various job processing requirements.
   class Configure
-    # Loads the logger configuration from the environment variables
-    # and sets the default log level to `:trace`.
     Log.setup_from_env(default_level: :trace)
+
+    # Constants
+    QUEUE_THROTTLE_LIMITS = ThrottlerConfig.new
+
+    # Properties and Getters
     getter queues = {} of String => BaseQueue
+    getter time_location : Time::Location = Time::Location.load("America/New_York")
 
     property store : Store = RedisStore.new
     property? rest_api_enabled : Bool = false
@@ -61,25 +34,39 @@ module JoobQ
     property failed_ttl : Time::Span = 3.milliseconds
     property dead_letter_ttl : Time::Span = 7.days
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
+
+    # Middlewares and Pipeline
     property middlewares : Array(Middleware) = [
       Middleware::Throttle.new,
       Middleware::Retry.new,
       Middleware::Timeout.new,
     ] of Middleware
 
-    QUEUE_THROTTLE_LIMITS = ThrottlerConfig.new
-
-    def use
-      yield middlewares
-    end
-
     getter middleware_pipeline : MiddlewarePipeline do
       MiddlewarePipeline.new(middlewares)
     end
 
+    # Schedulers
+    property schedulers : Array(Scheduler) = [] of Scheduler
+
+    # DSL: Add custom middlewares
+    def use(& : ->)
+      yield middlewares
+    end
+
+    # Set the time location globally
+    def time_location=(tz : String = "America/New_York") : Time::Location
+      timezone = Time::Location.load(tz)
+      Time::Location.local = timezone
+      timezone
+    end
+
+    # Macro: Define a queue
+    #
+    # Adds a queue configuration and optionally applies throttling limits.
     macro queue(name, workers, job, throttle = nil)
       {% begin %}
-      queues[{{name}}] = JoobQ::Queue({{job.id}}).new({{name}}, {{workers}}, )
+      queues[{{name}}] = JoobQ::Queue({{job.id}}).new({{name}}, {{workers}})
       {% if throttle %}
       JoobQ::Configure::QUEUE_THROTTLE_LIMITS[{{name}}] = {{throttle}}
       {% end %}
@@ -87,8 +74,11 @@ module JoobQ
       {% end %}
     end
 
-    def scheduler(&)
-      with Scheduler.instance yield
+    # Add a scheduler and execute within its context
+    def scheduler(tz : Time::Location = self.time_location)
+      scheduler = Scheduler.new(timezone: tz)
+      @schedulers << scheduler
+      with scheduler yield
     end
   end
 end

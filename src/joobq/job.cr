@@ -158,9 +158,7 @@ module JoobQ
       # TestJob.batch_enqueue([job1, job2, job3])
       # ```
       def self.batch_enqueue(jobs : Array({{@type}}))
-        jobs.each do |job|
-          JoobQ.add job
-        end
+        JoobQ.store.enqueue_batch(jobs)
       end
 
       # Enqueue a job to the queue for processing
@@ -203,10 +201,9 @@ module JoobQ
       # TestJob.delayed(time: 1.minute, x: 1)
       # ```
       def self.delay(for wait_time : Time::Span, **args)
-        ts = Time.local + wait_time
         job = new(**args)
         job.scheduled!
-        JoobQ.scheduler.delay(job, wait_time)
+        DelayJobScheduler.new.delay(job: job, delay_time: wait_time)
         job.jid
       end
 
@@ -216,7 +213,7 @@ module JoobQ
       # TestJob.run(every: 1.second, x: 1)
       # ```
       def self.schedule(every : Time::Span, **args)
-        JoobQ.scheduler.every every, self, **args
+        RecurringJobScheduler.instance.every(every, self, **args)
       end
     end
 
@@ -242,7 +239,7 @@ module JoobQ
       end
     end
 
-    def <=>(other : T)
+    def <=>(other)
       self.jid <=> other.jid
     end
   end

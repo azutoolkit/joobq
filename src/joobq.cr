@@ -4,7 +4,9 @@ require "uuid"
 require "uuid/json"
 require "log"
 require "cron_parser"
+
 require "./joobq/store"
+
 require "./joobq/**"
 
 # ### Module `JoobQ`
@@ -97,7 +99,11 @@ module JoobQ
 
   def self.forge
     Log.info { "JoobQ starting..." }
-    scheduler.run
+
+    puts "Scheduler count: #{config.schedulers.size}"
+    config.schedulers.each do |scheduler|
+      scheduler.run
+    end
 
     queues.each do |key, queue|
       Log.info { "JoobQ starting #{key} queue..." }

@@ -35,17 +35,17 @@ module JoobQ
       @limit = throttle_limit[:limit]
       @period = throttle_limit[:period].total_milliseconds
       @min_interval = @period / @limit # milliseconds
-      @last_job_time = Time.utc.to_unix_ms
+      @last_job_time = Time.local.to_unix_ms
     end
 
     def throttle
-      now = Time.utc.to_unix_ms
+      now = Time.local.to_unix_ms
       elapsed = now - @last_job_time
       sleep_time = @min_interval - elapsed
       if sleep_time > 0
         sleep (sleep_time / 1000.0).seconds
       end
-      @last_job_time = Time.utc.to_unix_ms
+      @last_job_time = Time.local.to_unix_ms
     end
   end
 end

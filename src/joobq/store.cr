@@ -262,7 +262,7 @@ module JoobQ
     abstract def enqueue(job : JoobQ::Job) : String
     abstract def dequeue(queue_name : String, klass : Class) : Job?
     abstract def move_job_back_to_queue(queue_name : String) : Bool
-    abstract def mark_as_failed(job : JoobQ::Job, error_details : Hash) : Nil
+    abstract def mark_as_failed(job : JoobQ::Job, error_details : Hash(String, String)) : Nil
     abstract def mark_as_dead(job : JoobQ::Job, expiration_time : String) : Nil
     abstract def schedule(job : JoobQ::Job, delay_in_ms : Int64) : Nil
     abstract def fetch_due_jobs(current_time : Time) : Array(String)

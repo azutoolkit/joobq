@@ -8,15 +8,12 @@ module JoobQ
       end
 
       def call(job : JoobQ::Job, queue : BaseQueue, next_middleware : ->) : Nil
-        begin
-          next_middleware.call
-        rescue ex : Exception
-          handle_failure(job, queue, ex)
-        end
+        next_middleware.call
+      rescue ex : Exception
+        handle_failure(job, queue, ex)
       end
 
       private def handle_failure(job : JoobQ::Job, queue : BaseQueue, ex : Exception)
-        Log.error &.emit("Job Failure", job_id: job.jid.to_s, error: ex.message)
         job.failed!
         job.retries -= 1
 
@@ -44,8 +41,6 @@ module JoobQ
       delay = (2 ** (job.retries)) * 1000 # Delay in ms
       # Logic to add the job back to the queue after a delay
       queue.store.schedule(job, delay)
-      # Log.warn &.emit("Job moved to Retry Queue", job_id: job.jid.to_s)
-      Log.warn &.emit("Retrying Job", job_id: job.jid.to_s, retries_left: job.retries)
     end
   end
 end

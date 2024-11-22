@@ -8,8 +8,8 @@ JoobQ.configure do
   queue "failed", 10, FailJob
 
   scheduler do
-    cron("*/1 * * * *") { }
-    cron("*/5 20-23 * * *") { }
-    every 1.second, ExampleJob, x: 1
+    cron(pattern: "*/30 * * * *") { puts "Every 30 seconds #{Time.local}" }
+    cron(pattern: "*/5 20-23 * * *") { }
+    every(1.minute, ExampleJob, x: 1)
   end
 end

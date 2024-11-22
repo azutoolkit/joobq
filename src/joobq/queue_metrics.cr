@@ -32,7 +32,7 @@ module JoobQ
 
     # Collect and store queue metrics into Redis
     def collect_and_store_metrics
-      timestamp = Time.utc.to_unix
+      timestamp = Time.local.to_unix
 
       @queues.values.each do |queue|
         metrics_key = "joobq:metrics:#{@instance_id}:#{@process_id}:#{queue.name}"

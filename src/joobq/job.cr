@@ -133,6 +133,10 @@ module JoobQ
       property retries : Int32 = JoobQ.config.retries
       property expires : Int64 = JoobQ.config.expires.from_now.to_unix_ms
       property status : Status = Status::Enqueued
+
+      @[JSON::Field(emit_null: true)]
+      property error : NamedTuple(failed_at: String, message: String | Nil, backtrace: String, cause: String)?
+
       @[JSON::Field(ignore: true)]
       property enqueue_time = Time.monotonic
 

@@ -8,12 +8,13 @@ module JoobQ
   # The dead letter queue is cleaned up by removing jobs that have been in the
   # queue for longer than the dead letter expiration time. The dead letter
   # expiration time is configurable and defaults to 7 days.
-  module DeadLetter
+  module DeadLetterManager
     private class_getter expires : String = ::JoobQ.config.dead_letter_ttl.to_s
     private class_getter store : Store = ::JoobQ.config.store
 
     def self.add(job)
       store.mark_as_dead(job, expires)
+      Log.error &.emit("Job Moved to Dead Letter Queue", job_id: job.jid.to_s)
     end
   end
 end

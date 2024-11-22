@@ -14,9 +14,9 @@ module JoobQ
     getter total_workers : Int32
     getter metrics : Metrics
     getter worker_manager : WorkerManager(T) { WorkerManager(T).new(total_workers, self, metrics) }
-    getter throttle_limit : NamedTuple(limit: Int32, period: Time::Span)?
+    getter throttle_limit : ThrottlerConfig?
 
-    def initialize(@name : String, @total_workers : Int32, @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
+    def initialize(@name : String, @total_workers : Int32, @throttle_limit : ThrottlerConfig? = nil)
       @metrics = Metrics.new
     end
 

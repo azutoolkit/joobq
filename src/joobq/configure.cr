@@ -1,4 +1,6 @@
 module JoobQ
+  alias ThrottlerConfig = Hash(String, NamedTuple(limit: Int32, period: Time::Span))
+
   # This struct is responsible for configuring and managing settings for the `JoobQ` job queue system.
   #
   # #### Properties and Getters
@@ -59,10 +61,28 @@ module JoobQ
     property failed_ttl : Time::Span = 3.milliseconds
     property dead_letter_ttl : Time::Span = 7.days
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
+    property middlewares : Array(Middleware) = [
+      Middleware::Throttle.new,
+      Middleware::Retry.new,
+      Middleware::Timeout.new,
+    ] of Middleware
+
+    QUEUE_THROTTLE_LIMITS = ThrottlerConfig.new
+
+    def use
+      yield middlewares
+    end
+
+    getter middleware_pipeline : MiddlewarePipeline do
+      MiddlewarePipeline.new(middlewares)
+    end
 
     macro queue(name, workers, job, throttle = nil)
       {% begin %}
-      queues[{{name}}] = JoobQ::Queue({{job.id}}).new({{name}}, {{workers}}, {{throttle}})
+      queues[{{name}}] = JoobQ::Queue({{job.id}}).new({{name}}, {{workers}}, )
+      {% if throttle %}
+      JoobQ::Configure::QUEUE_THROTTLE_LIMITS[{{name}}] = {{throttle}}
+      {% end %}
       job_registry.register({{job.id}})
       {% end %}
     end

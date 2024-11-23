@@ -80,24 +80,6 @@ describe JoobQ::InMemoryStore do
     end
   end
 
-  describe "#mark_as_failed" do
-    it "stores a failed job with error details" do
-      error = {
-        failed_at: Time.local.to_rfc3339,
-        message: "Something went wrong" || nil,
-        backtrace: ["line 1", "line 2"].join("\n"),
-        cause: "Unknown",
-      }
-      job1.error = error
-      store.mark_as_failed(job: job1)
-
-      failed_jobs = store.failed_jobs
-      failed_jobs.size.should eq(1)
-      failed_jobs.first.job.should eq(job1)
-      failed_jobs.first.job.error.should eq(error)
-    end
-  end
-
   describe "#mark_as_dead" do
     it "stores a dead job with an expiration time" do
       expiration_time = (Time.local.to_unix_ms + 3600).to_i64

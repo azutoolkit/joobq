@@ -8,14 +8,19 @@ module JoobQ
       end
     end
 
-    getter cron_scheduler : CronJobScheduler
+    private getter cron_scheduler : CronJobScheduler
     private getter delayed_scheduler : DelayedJobScheduler
     private getter recurring_scheduler : RecurringJobScheduler
     private getter store : Store
-    private getter time_location = JoobQ.config.time_location
+    private getter time_location : Time::Location
+    private getter delay_set : String
 
     # Singleton instance
-    def initialize(@timezone : Time::Location, @store : Store = RedisStore.instance)
+    def initialize(
+      @time_location : Time::Location = JoobQ.config.time_location,
+      @store : Store = RedisStore.instance,
+      @delay_set : String = RedisStore::DELAYED_SET)
+
       @delayed_scheduler = DelayedJobScheduler.new(store)
       @recurring_scheduler = RecurringJobScheduler.new
       @cron_scheduler = CronJobScheduler.new
@@ -35,7 +40,7 @@ module JoobQ
     end
 
     def cron(pattern : String, &block : ->)
-      cron_scheduler.cron(pattern, @timezone, &block)
+      cron_scheduler.cron(pattern, @time_location, &block)
     end
 
     def enqueue(time : Time::Span)

@@ -1,8 +1,8 @@
 module JoobQ
   class RedisStore < Store
-    private FAILED_SET       = "joobq:failed_jobs"
+    FAILED_SET       = "joobq:failed_jobs"
+    DELAYED_SET      = "joobq:delayed_jobs"
     private DEAD_LETTER      = "joobq:dead_letter"
-    private DELAYED_SET      = "joobq:delayed_jobs"
     private PROCESSING_QUEUE = "joobq:processing"
     private BLOCKING_TIMEOUT = 5
 
@@ -66,16 +66,12 @@ module JoobQ
       false
     end
 
-    def mark_as_failed(job : JoobQ::Job) : Nil
-      redis.set FAILED_SET, job.to_json
-    end
-
     def mark_as_dead(job : Job, expiration_time : Int64) : Nil
       redis.zadd DEAD_LETTER, expiration_time, job.to_json
     end
 
-    def schedule(job : Job, delay_in_ms : Int64) : Nil
-      redis.zadd DELAYED_SET, delay_in_ms, job.to_json
+    def schedule(job : Job, delay_in_ms : Int64, delay_set : String = DELAYED_SET) : Nil
+      redis.zadd delay_set, delay_in_ms, job.to_json
     end
 
     def fetch_due_jobs(current_time = Time.local) : Array(String)

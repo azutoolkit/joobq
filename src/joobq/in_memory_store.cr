@@ -65,11 +65,6 @@ module JoobQ
       true
     end
 
-    # Marks a job as failed with error details
-    def mark_as_failed(job : JoobQ::Job, ) : Nil
-      @failed_jobs << FailedJob.new(job: job)
-    end
-
     # Marks a job as dead with an expiration time
     def mark_as_dead(job : JoobQ::Job, expiration_time : Int64) : Nil
       @dead_jobs << DeadJob.new(job: job, expiration_time: expiration_time)

@@ -37,6 +37,7 @@ module JoobQ
       @store : Store = RedisStore.instance,
       @delay_set : String = RedisStore::DELAYED_SET)
 
+      Log.info &.emit("Initializing Scheduler for #{@delay_set}...")
       @delayed_scheduler = DelayedJobScheduler.new(store)
       @recurring_scheduler = RecurringJobScheduler.new
       @cron_scheduler = CronJobScheduler.new
@@ -68,7 +69,7 @@ module JoobQ
       spawn do
         loop do
           enqueue_due_jobs
-          sleep 120.seconds
+          sleep 2.seconds
         end
       end
     rescue ex : Exception
@@ -77,7 +78,7 @@ module JoobQ
     end
 
     def enqueue_due_jobs(current_time = Time.local)
-      results = store.fetch_due_jobs(current_time)
+      results = store.fetch_due_jobs(current_time, @delay_set)
 
       results.each do |job_data|
         begin

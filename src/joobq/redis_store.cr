@@ -35,7 +35,8 @@ module JoobQ
     end
 
     def delete_job(job : String) : Nil
-      redis.lpop PROCESSING_QUEUE
+      job = JSON.parse(job)
+      redis.lpop processing_queue(job["queue"].as_s)
     end
 
     def enqueue(job : Job) : String
@@ -54,13 +55,13 @@ module JoobQ
     end
 
     def dequeue(queue_name : String, klass : Class) : String?
-      if job_data = redis.brpoplpush(queue_name, PROCESSING_QUEUE, BLOCKING_TIMEOUT)
+      if job_data = redis.brpoplpush(queue_name, processing_queue(queue_name), BLOCKING_TIMEOUT)
         return job_data.as(String)
       end
     end
 
     def move_job_back_to_queue(queue_name : String) : Bool
-      redis.brpoplpush(PROCESSING_QUEUE, queue_name, BLOCKING_TIMEOUT)
+      redis.brpoplpush(processing_queue(queue_name), queue_name, BLOCKING_TIMEOUT)
       true
     rescue
       false
@@ -74,10 +75,14 @@ module JoobQ
       redis.zadd delay_set, delay_in_ms, job.to_json
     end
 
-    def fetch_due_jobs(current_time = Time.local) : Array(String)
+    def fetch_due_jobs(
+      current_time = Time.local,
+      delay_set : String = DELAYED_SET,
+      limit : Int32 = 50,
+      remove : Bool = true) : Array(String)
       score = current_time.to_unix_ms
-      jobs = redis.zrangebyscore(DELAYED_SET, 0, score, with_scores: false, limit: [0, 50])
-      redis.zremrangebyscore(DELAYED_SET, "-inf", score)
+      jobs = redis.zrangebyscore(delay_set, 0, score, with_scores: false, limit: [0, limit])
+      redis.zremrangebyscore(delay_set, "-inf", score) if remove
       jobs.map &.as(String)
     end
 
@@ -93,6 +98,26 @@ module JoobQ
       start_index = (page_number - 1) * page_size
       end_index = start_index + page_size - 1
       redis.lrange(queue_name, start_index, end_index).map &.as(String)
+    end
+
+    def processing_list(pattern : String = "#{PROCESSING_QUEUE}:*", limit : Int32 = 100) : Array(String)
+      jobs_collected = [] of String
+
+      # Step 2: Collect jobs from each queue until the limit is reached
+      JoobQ.queues.each do |key, _|
+        break if jobs_collected.size >= limit # Stop if we've collected enough jobs
+        # Calculate remaining jobs to fetch
+        remaining = limit - jobs_collected.size
+        # Fetch jobs from the current queue
+        queue_jobs = redis.lrange(key, 0, remaining - 1)
+        jobs_collected.concat(queue_jobs.map &.as(String))
+      end
+
+      jobs_collected
+    end
+
+    private def processing_queue(name : String)
+      "#{PROCESSING_QUEUE}:#{name}"
     end
   end
 end

@@ -71,15 +71,19 @@ module JoobQ
     end
 
     # Schedules a job for execution after a specified delay
-    def schedule(job : JoobQ::Job, delay_in_ms : Int64) : Nil
+    def schedule(job : JoobQ::Job, delay_in_ms : Int64, delay_set : String = "") : Nil
       execute_at = Time.local + (delay_in_ms / 1000).seconds
       @scheduled_jobs << ScheduledJob.new(job: job, execute_at: execute_at)
     end
 
     # Fetches jobs that are due for execution
-    def fetch_due_jobs(current_time : Time) : Array(String)
+    def fetch_due_jobs(
+      current_time = Time.local,
+      delay_set : String = "scheduled_jobs",
+      limit : Int32 = 50,
+      remove : Bool = true) : Array(String)
       due_jobs = @scheduled_jobs.select { |entry| entry.execute_at <= current_time }
-      due_jobs.each { |entry| @scheduled_jobs.delete(entry) }
+      due_jobs.each { |entry| @scheduled_jobs.delete(entry) } if remove
       due_jobs.map(&.job.to_json)
     end
 
@@ -99,6 +103,13 @@ module JoobQ
       start_index = (page_number - 1) * page_size
       return [] of String unless @queues.has_key?(queue_name)
       @queues[queue_name][start_index...(start_index + page_size)].map(&.to_json)
+    end
+
+    def processing_list(pattern : String = "", limit : Int32 = 100) : Array(String)
+      puts "Processing list called with pattern: #{pattern}"
+      @queues.select.map do |key, value|
+        value.map(&.to_json)
+      end.flatten[0...limit]
     end
   end
 end

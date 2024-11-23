@@ -263,8 +263,8 @@ module JoobQ
     abstract def dequeue(queue_name : String, klass : Class) : String?
     abstract def move_job_back_to_queue(queue_name : String) : Bool
     abstract def mark_as_dead(job : JoobQ::Job, expiration_time : Int64) : Nil
-    abstract def schedule(job : JoobQ::Job, delay_in_ms : Int64) : Nil
-    abstract def fetch_due_jobs(current_time : Time) : Array(String)
+    abstract def schedule(job : JoobQ::Job, delay_in_ms : Int64, delay_set : String) : Nil
+    abstract def fetch_due_jobs(current_time : Time, delay_set : String, limit : Int32, remove : Bool) : Array(String)
     abstract def queue_size(queue_name : String) : Int64
     abstract def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
   end

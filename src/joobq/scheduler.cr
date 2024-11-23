@@ -1,16 +1,32 @@
 module JoobQ
 
   class Scheduler
-    record RecurringJob, interval : Time::Span, job : String, args : String
+    record RecurringJob, interval : Time::Span, job : String, args : String do
+      def to_h
+        {
+          "interval" => @interval.to_s,
+          "job" => @job,
+          "args" => @args,
+        }
+      end
+    end
     record CronJob, pattern : String, timezone : Time::Location, next_run : String, block : Proc(Nil) do
       def next_run(next_time : Time)
        @next_run = next_time.to_rfc3339
       end
+
+      def to_h
+        {
+          "pattern" => @pattern,
+          "timezone" => @timezone.to_s,
+          "next_run" => @next_run.to_s,
+        }
+      end
     end
 
-    private getter cron_scheduler : CronJobScheduler
-    private getter delayed_scheduler : DelayedJobScheduler
-    private getter recurring_scheduler : RecurringJobScheduler
+     getter cron_scheduler : CronJobScheduler
+     getter delayed_scheduler : DelayedJobScheduler
+     getter recurring_scheduler : RecurringJobScheduler
     private getter store : Store
     private getter time_location : Time::Location
     private getter delay_set : String
@@ -52,7 +68,7 @@ module JoobQ
       spawn do
         loop do
           enqueue_due_jobs
-          sleep 3.seconds
+          sleep 120.seconds
         end
       end
     rescue ex : Exception

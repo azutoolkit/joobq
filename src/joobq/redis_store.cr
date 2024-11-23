@@ -66,8 +66,8 @@ module JoobQ
       false
     end
 
-    def mark_as_failed(job : JoobQ::Job, error_details) : Nil
-      redis.set FAILED_SET, {job: job, error: error_details}.to_json
+    def mark_as_failed(job : JoobQ::Job) : Nil
+      redis.set FAILED_SET, job.to_json
     end
 
     def mark_as_dead(job : Job, expiration_time : Int64) : Nil

@@ -40,6 +40,7 @@ module JoobQ
     def self.retry(job, queue)
       delay = (2 ** (job.retries)) * 1000 # Delay in ms
       # Logic to add the job back to the queue after a delay
+      queue.store.mark_as_failed(job)
       queue.store.schedule(job, delay)
     end
   end

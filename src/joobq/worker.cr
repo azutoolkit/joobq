@@ -69,8 +69,8 @@ module JoobQ
     private def execute(job : T)
       wait_time = Time.monotonic - job.enqueue_time
       @metrics.add_job_wait_time(wait_time)
-
       start_time = Time.monotonic
+
       begin
         job.perform
         job.completed!

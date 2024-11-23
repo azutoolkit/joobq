@@ -1,7 +1,7 @@
 module JoobQ
   class InMemoryStore < Store
     record ScheduledJob, job : JoobQ::Job, execute_at : Time
-    record FailedJob, job : JoobQ::Job, error_details : Hash(Symbol, String | Nil)
+    record FailedJob, job : JoobQ::Job
     record DeadJob, job : JoobQ::Job, expiration_time : Int64
 
     getter queues : Hash(String, Array(JoobQ::Job))
@@ -66,8 +66,8 @@ module JoobQ
     end
 
     # Marks a job as failed with error details
-    def mark_as_failed(job : JoobQ::Job, error_details) : Nil
-      @failed_jobs << FailedJob.new(job: job, error_details: error_details)
+    def mark_as_failed(job : JoobQ::Job, ) : Nil
+      @failed_jobs << FailedJob.new(job: job)
     end
 
     # Marks a job as dead with an expiration time

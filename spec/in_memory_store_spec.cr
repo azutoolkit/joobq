@@ -82,13 +82,19 @@ describe JoobQ::InMemoryStore do
 
   describe "#mark_as_failed" do
     it "stores a failed job with error details" do
-      error_details = {:error => "Test Failure", :reason => "Simulated error", :none => nil}
-      store.mark_as_failed(job: job1, error_details: error_details)
+      error = {
+        failed_at: Time.local.to_rfc3339,
+        message: "Something went wrong" || nil,
+        backtrace: ["line 1", "line 2"].join("\n"),
+        cause: "Unknown",
+      }
+      job1.error = error
+      store.mark_as_failed(job: job1)
 
       failed_jobs = store.failed_jobs
       failed_jobs.size.should eq(1)
       failed_jobs.first.job.should eq(job1)
-      failed_jobs.first.error_details.should eq(error_details)
+      failed_jobs.first.job.error.should eq(error)
     end
   end
 

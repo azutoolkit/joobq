@@ -26,6 +26,10 @@ module JoobQ
       worker_manager.start_workers
     end
 
+    def parse_job(job : String) : T
+      T.from_json(job)
+    end
+
     def add(job : String)
       add T.from_json(job)
     rescue ex

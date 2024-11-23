@@ -107,16 +107,8 @@ module JoobQ
       queue.start
     end
 
-    # Start the failed job retry scheduler
     Scheduler.new(delay_set: RedisStore::FAILED_SET).run
-
-    spawn do
-      QueueMetrics.instance.collect_and_store_metrics
-      loop do
-        QueueMetrics.instance.collect_and_store_metrics
-        sleep 5.seconds
-      end
-    end
+    QueueMetrics.instance.run_metrics_collection
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }
 

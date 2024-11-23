@@ -30,6 +30,16 @@ module JoobQ
       @queues = JoobQ.config.queues
     end
 
+    def run_metrics_collection : Nil
+      spawn do
+        loop do
+          collect_and_store_metrics
+          sleep(5)
+        end
+      end
+      Log.info { "Queue metrics collection started..." }
+    end
+
     # Collect and store queue metrics into Redis
     def collect_and_store_metrics
       timestamp = Time.local.to_unix

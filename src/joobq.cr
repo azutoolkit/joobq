@@ -1,4 +1,3 @@
-require "simplog"
 require "redis"
 require "json"
 require "uuid"

@@ -1,8 +1,16 @@
 module JoobQ
+
   class Scheduler
+    record RecurringJob, interval : Time::Span, job : String, args : String
+    record CronJob, pattern : String, timezone : Time::Location, next_run : String, block : Proc(Nil) do
+      def next_run(next_time : Time)
+       @next_run = next_time.to_rfc3339
+      end
+    end
+
+    getter cron_scheduler : CronJobScheduler
     private getter delayed_scheduler : DelayedJobScheduler
     private getter recurring_scheduler : RecurringJobScheduler
-    private getter cron_scheduler : CronJobScheduler
     private getter store : Store
     private getter time_location = JoobQ.config.time_location
 
@@ -11,6 +19,10 @@ module JoobQ
       @delayed_scheduler = DelayedJobScheduler.new(store)
       @recurring_scheduler = RecurringJobScheduler.new
       @cron_scheduler = CronJobScheduler.new
+    end
+
+    def jobs
+      cron_scheduler.jobs.merge(recurring_scheduler.jobs)
     end
 
     # Class methods for job registration
@@ -26,6 +38,10 @@ module JoobQ
       cron_scheduler.cron(pattern, @timezone, &block)
     end
 
+    def enqueue(time : Time::Span)
+      delayed_scheduler.enqueue(time)
+    end
+
     def run
       Log.info &.emit("Scheduler starting...")
       spawn do
@@ -39,8 +55,7 @@ module JoobQ
       run
     end
 
-    private def enqueue_due_jobs
-      current_time = Time.local
+    def enqueue_due_jobs(current_time = Time.local)
       results = store.fetch_due_jobs(current_time)
 
       results.each do |job_data|

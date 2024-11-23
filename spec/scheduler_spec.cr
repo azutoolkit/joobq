@@ -2,7 +2,7 @@ require "./spec_helper"
 
 module JoobQ
   describe Scheduler do
-    scheduler = JoobQ.scheduler
+    scheduler = JoobQ.config.schedulers.first
     job = ExampleJob.new 2
 
     before_each do
@@ -20,10 +20,11 @@ module JoobQ
         JoobQ.store.clear_queue "joobq:delayed_jobs"
         JoobQ.store.clear_queue job.queue
 
-        scheduler.delay job, for: 2.seconds
+        scheduler.delay job, delay_time: 1.seconds
         JoobQ.store.set_size("joobq:delayed_jobs").should eq 1
 
-        scheduler.enqueue 10.seconds.from_now
+        scheduler.enqueue_due_jobs(current_time = 10.seconds.from_now)
+
         JoobQ.store.set_size("joobq:delayed_jobs").should eq 0
       end
     end
@@ -35,7 +36,8 @@ module JoobQ
 
       it "runs recurring jobs" do
         x = 0
-        scheduler.cron "* * * * * *" { x = job.perform }
+
+        scheduler.cron "*/2 * * * * *" { x = job.perform }
 
         sleep 2.5.seconds
 

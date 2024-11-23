@@ -203,7 +203,7 @@ module JoobQ
       def self.delay(for wait_time : Time::Span, **args)
         job = new(**args)
         job.scheduled!
-        DelayJobScheduler.new.delay(job: job, delay_time: wait_time)
+        JoobQ::DelayedJobScheduler.new.delay(job: job, delay_time: wait_time)
         job.jid
       end
 
@@ -213,7 +213,7 @@ module JoobQ
       # TestJob.run(every: 1.second, x: 1)
       # ```
       def self.schedule(every : Time::Span, **args)
-        RecurringJobScheduler.instance.every(every, self, **args)
+        JoobQ::RecurringJobScheduler.instance.every(every, self, **args)
       end
     end
 

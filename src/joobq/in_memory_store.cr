@@ -30,7 +30,11 @@ module JoobQ
 
     # Deletes a specific job from the store
     def delete_job(job : String) : Nil
-      # @queues[job.queue].delete(job)
+      job_json = JSON.parse(job)
+      queue_name = job_json["queue"].as_s
+      item = @queues[queue_name].each do |entry|
+        @queues[queue_name].delete(entry) if entry.to_json == job
+      end
       @scheduled_jobs.reject! { |entry| entry.job == job }
     end
 
@@ -48,7 +52,8 @@ module JoobQ
     # Dequeues the next job from the specified queue
     def dequeue(queue_name : String, klass : Class) : String?
       return nil unless @queues.has_key?(queue_name)
-      @queues[queue_name].shift.to_s
+      item = @queues[queue_name].shift
+      item.to_json if item
     end
 
     # Moves a job back to the queue if it was being processed but not completed
@@ -81,6 +86,11 @@ module JoobQ
       due_jobs = @scheduled_jobs.select { |entry| entry.execute_at <= current_time }
       due_jobs.each { |entry| @scheduled_jobs.delete(entry) }
       due_jobs.map(&.job.to_json)
+    end
+
+    # Gets the size of the specified queue
+    def set_size(queue_name : String) : Nil
+      queue_size(queue_name)
     end
 
     # Returns the size of the specified queue

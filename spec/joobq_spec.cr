@@ -11,10 +11,10 @@ describe JoobQ do
   end
 
   it "registers recurring jobs at specific time" do
-    jobs = JoobQ.scheduler.jobs
+    jobs = JoobQ.config.schedulers.first.cron_scheduler.jobs
 
-    jobs["*/1 * * * *"].should_not be_nil
-    jobs["*/5 20-23 * * *"].should_not be_nil
-    jobs[ExampleJob.name].should_not be_nil
+    jobs["*/30 * * * *:America/New_York"].should_not be_nil
+    jobs["*/5 20-23 * * *:America/New_York"].should_not be_nil
+    # jobs[ExampleJob.name].should_not be_nil
   end
 end

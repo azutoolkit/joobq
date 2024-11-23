@@ -24,8 +24,9 @@ module JoobQ
     end
 
     it "performs jobs every one second" do
+      JoobQ.store.reset
       job = TestJob.schedule(every: 1.second, x: 1)
-      sleep 3.seconds
+      sleep 2.seconds
       job.x.should eq 3
     end
   end

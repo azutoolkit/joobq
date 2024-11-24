@@ -92,18 +92,18 @@ module JoobQ
       @retried = global_metrics["retried"].to_i64
       @dead = global_metrics["dead"].to_i64
       @running_workers = global_metrics["running_workers"].to_i64
-      @jobs_completed_per_second = global_metrics["jobs_completed_per_second"].to_f64
-      @queue_reduction_rate = global_metrics["queue_reduction_rate"].to_f64
-      @job_wait_time = global_metrics["job_wait_time"].to_f64
-      @job_execution_time = global_metrics["job_execution_time"].to_f64
-      @worker_utilization = global_metrics["worker_utilization"].to_f64
-      @error_rate_trend = global_metrics["error_rate_trend"].to_f64
-      @failed_job_rate = global_metrics["failed_job_rate"].to_f64
-      @average_jobs_in_flight = global_metrics["average_jobs_in_flight"].to_f64
-      @percent_completed = global_metrics["percent_completed"].to_f64
-      @percent_retried = global_metrics["percent_retried"].to_f64
-      @percent_dead = global_metrics["percent_dead"].to_f64
-      @percent_busy = global_metrics["percent_busy"].to_f64
+      @jobs_completed_per_second = global_metrics["jobs_completed_per_second"].to_f64.round(2)
+      @queue_reduction_rate = global_metrics["queue_reduction_rate"].to_f64.round(2)
+      @job_wait_time = global_metrics["job_wait_time"].to_f64.round(2)
+      @job_execution_time = global_metrics["job_execution_time"].to_f64.round(2)
+      @worker_utilization = global_metrics["worker_utilization"].to_f64.round(2)
+      @error_rate_trend = global_metrics["error_rate_trend"].to_f64.round(2)
+      @failed_job_rate = global_metrics["failed_job_rate"].to_f64.round(2)
+      @average_jobs_in_flight = global_metrics["average_jobs_in_flight"].to_f64.round(2)
+      @percent_completed = global_metrics["percent_completed"].to_f64.round(2)
+      @percent_retried = global_metrics["percent_retried"].to_f64.round(2)
+      @percent_dead = global_metrics["percent_dead"].to_f64.round(2)
+      @percent_busy = global_metrics["percent_busy"].to_f64.round(2)
 
       update_overtime_series
       stats

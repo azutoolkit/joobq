@@ -34,23 +34,19 @@ module JoobQ
     end
 
     def percent_completed
-      percentage_rate(completed.get, total_jobs)
+      percentage_rate(completed.get,  completed.get + busy.get + retried.get + dead.get)
     end
 
     def percent_retried
-      percentage_rate(retried.get, total_jobs)
+      percentage_rate(retried.get,  completed.get + busy.get + retried.get + dead.get)
     end
 
     def percent_dead
-      percentage_rate(dead.get, total_jobs)
+      percentage_rate(dead.get,  completed.get + busy.get + retried.get + dead.get)
     end
 
     def percent_busy
-      percentage_rate(busy.get, total_jobs)
-    end
-
-    def total_jobs
-      completed.get + retried.get + dead.get
+      percentage_rate(busy.get,  completed.get + busy.get + retried.get + dead.get)
     end
 
     def add_job_wait_time(wait_time : Time::Span)
@@ -135,7 +131,7 @@ module JoobQ
     # This is used to determine the trend of errors in the queue over time
     # The error rate trend is calculated as the percentage of retried jobs compared to the total number of attempted jobs
     def error_rate_trend : Float64
-      percentage_rate(retried.get, total_jobs)
+      percentage_rate(retried.get, completed.get + busy.get + retried.get + dead.get)
     end
 
     # Calculate the rate of failed jobs in the queue

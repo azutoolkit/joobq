@@ -77,7 +77,6 @@ module JoobQ
         execution_time = Time.monotonic - start_time
         @metrics.add_job_execution_time(execution_time)
         @metrics.increment_completed
-
       rescue ex : Exception
         execution_time = Time.monotonic - start_time
         @metrics.add_job_execution_time(execution_time)

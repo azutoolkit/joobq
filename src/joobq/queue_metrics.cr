@@ -89,7 +89,7 @@ module JoobQ
       if queue_count > 0
         ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
          "job_wait_time", "job_execution_time", "worker_utilization",
-         "error_rate_trend", "failed_job_rate"].each do |metric|
+         "error_rate_trend", "failed_job_rate", "percent_completed", "percent_retried", "percent_dead", "percent_busy"].each do |metric|
           (data[metric] /= queue_count).round(2)
         end
       end
@@ -132,7 +132,7 @@ module JoobQ
       if count > 0
         ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
          "job_wait_time", "job_execution_time", "worker_utilization",
-         "error_rate_trend", "failed_job_rate"].each do |metric|
+         "error_rate_trend", "failed_job_rate", "percent_completed", "percent_retried", "percent_dead", "percent_busy"].each do |metric|
           (aggregated_metrics[metric] /= count).round(2)
         end
       end

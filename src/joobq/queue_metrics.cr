@@ -126,9 +126,8 @@ module JoobQ
         metrics_array.each_slice(2) do |key_value|
           key = key_value[0].to_s
           value = key_value[1].to_s
-          unless NON_METRIC_KEYS.includes?(key)
-            aggregated_metrics[key] += value.includes?(".") ? value.to_f64 : value.to_i64
-          end
+          next if NON_METRIC_KEYS.includes?(key)
+          aggregated_metrics[key] += value.includes?(".") ? value.to_f64 : value.to_i64
         end
 
         count += 1

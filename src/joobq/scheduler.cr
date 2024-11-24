@@ -36,7 +36,6 @@ module JoobQ
       @store : Store = RedisStore.instance,
       @delay_set : String = RedisStore::DELAYED_SET
     )
-      Log.info &.emit("Initializing Scheduler for #{@delay_set}...")
       @delayed_scheduler = DelayedJobScheduler.new(store)
       @recurring_scheduler = RecurringJobScheduler.new
       @cron_scheduler = CronJobScheduler.new

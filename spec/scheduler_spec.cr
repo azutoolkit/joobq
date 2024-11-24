@@ -39,7 +39,7 @@ module JoobQ
 
         scheduler.cron "*/2 * * * * *" { x = job.perform }
 
-        sleep 2.5.seconds
+        sleep 3.seconds
 
         x.should be >= 2
         x.should be <= 3

@@ -14,7 +14,6 @@ module JoobQ
 
     def self.add(job)
       store.mark_as_dead(job, expires)
-      Log.error &.emit("Job Moved to Dead Letter Queue", job_id: job.jid.to_s)
     end
   end
 end

@@ -72,6 +72,10 @@ module JoobQ
       store.clear_queue name
     end
 
+    def jobs(page_number : Int32 = 1, page_size : Int32 = 200)
+      store.list_jobs(name)
+    end
+
     def stop!
       worker_manager.stop_workers
     end
@@ -96,7 +100,9 @@ module JoobQ
         job_type:                  job_type,
         total_workers:             total_workers,
         status:                    status,
+        throttle_limit:            throttle_limit,
         current_size:              current_queue_size,
+        started_at:                metrics.start_time.from_now,
         completed:                 metrics.completed.get,
         retried:                   metrics.retried.get,
         dead:                      metrics.dead.get,

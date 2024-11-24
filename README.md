@@ -2,7 +2,7 @@
 
 ![JoobQ Logo](./joobq-logo.png)
 
-[![Crystal CI](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml/badge.svg)](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml)
+[![Crystal CI](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml/badge.svg?branch=master)](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml)
 
 ## Overview
 

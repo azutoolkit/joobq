@@ -13,6 +13,15 @@ module JoobQ
   class QueueMetrics
     include MetricsProvider
 
+    NON_METRIC_KEYS = %w[instance_id process_id last_updated started_at throttle_limit name job_type status]
+
+    AVERAGES_METRICS = %w[
+      jobs_completed_per_second errors_per_second enqueued_per_second
+      job_wait_time job_execution_time worker_utilization
+      error_rate_trend failed_job_rate percent_completed
+      percent_retried percent_dead percent_busy
+    ]
+
     def self.instance : QueueMetrics
       @@instance ||= new
     end
@@ -87,9 +96,7 @@ module JoobQ
       # Calculate averages for specific metrics
       queue_count = @queues.size
       if queue_count > 0
-        ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
-         "job_wait_time", "job_execution_time", "worker_utilization",
-         "error_rate_trend", "failed_job_rate", "percent_completed", "percent_retried", "percent_dead", "percent_busy"].each do |metric|
+        AVERAGES_METRICS.each do |metric|
           (data[metric] /= queue_count).round(2)
         end
       end
@@ -119,8 +126,7 @@ module JoobQ
         metrics_array.each_slice(2) do |key_value|
           key = key_value[0].to_s
           value = key_value[1].to_s
-          unless ["instance_id", "process_id", "last_updated"].includes?(key)
-            next if %w[name job_type status].includes?(key)
+          unless NON_METRIC_KEYS.includes?(key)
             aggregated_metrics[key] += value.includes?(".") ? value.to_f64 : value.to_i64
           end
         end
@@ -130,9 +136,7 @@ module JoobQ
 
       # Calculate average metrics where applicable
       if count > 0
-        ["jobs_completed_per_second", "errors_per_second", "enqueued_per_second",
-         "job_wait_time", "job_execution_time", "worker_utilization",
-         "error_rate_trend", "failed_job_rate", "percent_completed", "percent_retried", "percent_dead", "percent_busy"].each do |metric|
+        AVERAGES_METRICS.each do |metric|
           (aggregated_metrics[metric] /= count).round(2)
         end
       end

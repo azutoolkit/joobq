@@ -1,32 +1,31 @@
 module JoobQ
-
   class Scheduler
     record RecurringJob, interval : Time::Span, job : String, args : String do
       def to_h
         {
           "interval" => @interval.to_s,
-          "job" => @job,
-          "args" => @args,
+          "job"      => @job,
+          "args"     => @args,
         }
       end
     end
     record CronJob, pattern : String, timezone : Time::Location, next_run : String, block : Proc(Nil) do
       def next_run(next_time : Time)
-       @next_run = next_time.to_rfc3339
+        @next_run = next_time.to_rfc3339
       end
 
       def to_h
         {
-          "pattern" => @pattern,
+          "pattern"  => @pattern,
           "timezone" => @timezone.to_s,
           "next_run" => @next_run.to_s,
         }
       end
     end
 
-     getter cron_scheduler : CronJobScheduler
-     getter delayed_scheduler : DelayedJobScheduler
-     getter recurring_scheduler : RecurringJobScheduler
+    getter cron_scheduler : CronJobScheduler
+    getter delayed_scheduler : DelayedJobScheduler
+    getter recurring_scheduler : RecurringJobScheduler
     private getter store : Store
     private getter time_location : Time::Location
     private getter delay_set : String
@@ -35,8 +34,8 @@ module JoobQ
     def initialize(
       @time_location : Time::Location = JoobQ.config.time_location,
       @store : Store = RedisStore.instance,
-      @delay_set : String = RedisStore::DELAYED_SET)
-
+      @delay_set : String = RedisStore::DELAYED_SET
+    )
       Log.info &.emit("Initializing Scheduler for #{@delay_set}...")
       @delayed_scheduler = DelayedJobScheduler.new(store)
       @recurring_scheduler = RecurringJobScheduler.new

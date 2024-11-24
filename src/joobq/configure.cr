@@ -12,7 +12,7 @@ module JoobQ
   # ### Usage Example
   #
   # ```
-  # JoobQ::Configure.instance.queue "my_queue", 5, MyJob, { limit: 10, period: 1.minute }
+  # JoobQ::Configure.instance.queue "my_queue", 5, MyJob, {limit: 10, period: 1.minute}
   # ```
   class Configure
     Log.setup_from_env(default_level: :trace)

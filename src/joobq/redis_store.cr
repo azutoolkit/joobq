@@ -79,7 +79,8 @@ module JoobQ
       current_time = Time.local,
       delay_set : String = DELAYED_SET,
       limit : Int32 = 50,
-      remove : Bool = true) : Array(String)
+      remove : Bool = true
+    ) : Array(String)
       score = current_time.to_unix_ms
       jobs = redis.zrangebyscore(delay_set, 0, score, with_scores: false, limit: [0, limit])
       redis.zremrangebyscore(delay_set, "-inf", score) if remove

@@ -34,19 +34,19 @@ module JoobQ
     end
 
     def percent_completed
-      percentage_rate(completed.get,  completed.get + busy.get + retried.get + dead.get)
+      percentage_rate(completed.get, completed.get + busy.get + retried.get + dead.get)
     end
 
     def percent_retried
-      percentage_rate(retried.get,  completed.get + busy.get + retried.get + dead.get)
+      percentage_rate(retried.get, completed.get + busy.get + retried.get + dead.get)
     end
 
     def percent_dead
-      percentage_rate(dead.get,  completed.get + busy.get + retried.get + dead.get)
+      percentage_rate(dead.get, completed.get + busy.get + retried.get + dead.get)
     end
 
     def percent_busy
-      percentage_rate(busy.get,  completed.get + busy.get + retried.get + dead.get)
+      percentage_rate(busy.get, completed.get + busy.get + retried.get + dead.get)
     end
 
     def add_job_wait_time(wait_time : Time::Span)

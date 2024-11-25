@@ -47,7 +47,7 @@ module JoobQ
             end
           end
         rescue ex : Exception
-          Log.error &.emit("Worker Error", queue: @queue.name, worker_id: wid, reason: ex.message)
+          Log.error &.emit("Worker Error #{ex}", queue: @queue.name, worker_id: wid, reason: ex.message)
           @queue.worker_manager.restart self, ex
         end
       end

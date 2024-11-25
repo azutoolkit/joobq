@@ -14,7 +14,7 @@ module JoobQ
     include MetricsProvider
 
     NON_METRIC_KEYS = %w[instance_id process_id last_updated started_at throttle_limit name job_type status]
-
+    METRICS_KEY_PATTERN = "joobq:metrics:*"
     AVERAGES_METRICS = %w[
       jobs_completed_per_second errors_per_second enqueued_per_second
       job_wait_time job_execution_time worker_utilization
@@ -65,22 +65,27 @@ module JoobQ
       end
     end
 
-    # Modify this method to return a Hash instead of an Array
-    def all_queue_metrics : Hash(String, Hash(String, String))
-      all_metrics = Hash(String, Hash(String, String)).new
-
-      @queues.each do |queue_name, _|
-        all_metrics[queue_name] = queue_metrics(queue_name)
+    def all_queue_metrics :  Hash(String, Hash(String, String | Hash(String, Float64 | Int64)))
+      result = Hash(String, Hash(String, String | Hash(String, Float64 | Int64))).new
+      @queues.keys.each do |queue_name|
+        result[queue_name] = queue_metrics(queue_name)
       end
-
-      all_metrics
+      result
     end
 
-    # Retrieve metrics for a specific queue
-    def queue_metrics(queue_name : String) : Hash(String, String)
-      metrics_key = "joobq:metrics:#{@instance_id}:#{@process_id}:#{queue_name}"
-      @redis.hgetall(metrics_key)
+
+    def queue_metrics(queue_name : String) : Hash(String, String | Hash(String, Float64 | Int64))
+      queue = @queues[queue_name]
+
+      result = Hash(String, String | Hash(String, Float64 | Int64)).new
+      result["status"] = queue.status
+      result["job_type"] = queue.job_type
+      result["started_at"] = queue.metrics.start_time.from_now.to_s
+      result["stats"]= aggregate_metrics(queue_name)
+      result
     end
+
+
 
     # Aggregate metrics across all queues into a single hash
     def global_metrics : Hash(String, Float64 | Int64)
@@ -106,7 +111,7 @@ module JoobQ
 
     # Aggregate metrics across all instances for a particular queue
     def aggregate_metrics(queue_name : String) : Hash(String, Int64 | Float64)
-      keys_pattern = "joobq:metrics:*:#{queue_name}"
+      keys_pattern = "#{METRICS_KEY_PATTERN}:#{queue_name}"
       all_keys = scan_keys(keys_pattern)
 
       aggregated_metrics = metric_store
@@ -127,7 +132,7 @@ module JoobQ
           key = key_value[0].to_s
           value = key_value[1].to_s
           next if NON_METRIC_KEYS.includes?(key)
-          aggregated_metrics[key] += value.includes?(".") ? value.to_f64 : value.to_i64
+          aggregated_metrics[key] += value.includes?(".") ? (value.to_f64).round(2) : value.to_i64
         end
 
         count += 1

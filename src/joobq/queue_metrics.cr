@@ -13,9 +13,9 @@ module JoobQ
   class QueueMetrics
     include MetricsProvider
 
-    NON_METRIC_KEYS = %w[instance_id process_id last_updated started_at throttle_limit name job_type status]
+    NON_METRIC_KEYS     = %w[instance_id process_id last_updated started_at throttle_limit name job_type status]
     METRICS_KEY_PATTERN = "joobq:metrics:*"
-    AVERAGES_METRICS = %w[
+    AVERAGES_METRICS    = %w[
       jobs_completed_per_second errors_per_second enqueued_per_second
       job_wait_time job_execution_time worker_utilization
       error_rate_trend failed_job_rate percent_completed
@@ -65,14 +65,13 @@ module JoobQ
       end
     end
 
-    def all_queue_metrics :  Hash(String, Hash(String, String | Hash(String, Float64 | Int64)))
+    def all_queue_metrics : Hash(String, Hash(String, String | Hash(String, Float64 | Int64)))
       result = Hash(String, Hash(String, String | Hash(String, Float64 | Int64))).new
       @queues.keys.each do |queue_name|
         result[queue_name] = queue_metrics(queue_name)
       end
       result
     end
-
 
     def queue_metrics(queue_name : String) : Hash(String, String | Hash(String, Float64 | Int64))
       queue = @queues[queue_name]
@@ -81,11 +80,9 @@ module JoobQ
       result["status"] = queue.status
       result["job_type"] = queue.job_type
       result["started_at"] = queue.metrics.start_time.from_now.to_s
-      result["stats"]= aggregate_metrics(queue_name)
+      result["stats"] = aggregate_metrics(queue_name)
       result
     end
-
-
 
     # Aggregate metrics across all queues into a single hash
     def global_metrics : Hash(String, Float64 | Int64)

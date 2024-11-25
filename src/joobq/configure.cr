@@ -16,10 +16,6 @@ module JoobQ
   # ```
   class Configure
     Log.setup_from_env(default_level: :trace)
-
-    # Constants
-    QUEUE_THROTTLE_LIMITS = ThrottlerConfig.new
-
     # Properties and Getters
     getter queues = {} of String => BaseQueue
     getter time_location : Time::Location = Time::Location.load("America/New_York")
@@ -66,10 +62,7 @@ module JoobQ
     # Adds a queue configuration and optionally applies throttling limits.
     macro queue(name, workers, job, throttle = nil)
       {% begin %}
-      queues[{{name}}] = JoobQ::Queue({{job.id}}).new({{name}}, {{workers}})
-      {% if throttle %}
-      JoobQ::Configure::QUEUE_THROTTLE_LIMITS[{{name}}] = {{throttle}}
-      {% end %}
+      queues[{{name}}] = JoobQ::Queue({{job.id}}).new({{name}}, {{workers}}, {{throttle}})
       job_registry.register({{job.id}})
       {% end %}
     end

@@ -157,7 +157,9 @@ module JoobQ
       # ```
       # TestJob.batch_enqueue([job1, job2, job3])
       # ```
-      def self.batch_enqueue(jobs : Array({{@type}}))
+      def self.batch_enqueue(jobs : Array(Job), batch_size : Int32 = 1000) : Nil
+        raise "Batch size must be greater than 0" if batch_size <= 0
+        raise "Batch size must be less than or equal to 1000" if batch_size > 1000
         JoobQ.store.enqueue_batch(jobs)
       end
 

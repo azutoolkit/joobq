@@ -62,7 +62,7 @@ module JoobQ
         "instantaneous_input_kbps"  => @instantaneous_input_kbps,
         "instantaneous_output_kbps" => @instantaneous_output_kbps,
         "cpu_usage"                 => cpu_usage.round(2),
-        "average_cpu_usage"         => ((@used_cpu_sys + @used_cpu_user) / (@uptime_in_seconds) * 100).round(2),
+        "average_cpu_usage"         => average_cpu_usage.round(2),
       }
     end
 
@@ -79,6 +79,17 @@ module JoobQ
 
       if elapsed_time > 0
         ((delta_cpu_sys + delta_cpu_user) / (elapsed_time) * 100).round(2)
+      else
+        0.0
+      end
+    end
+
+    def average_cpu_usage
+      current_timestamp = Time.local
+      elapsed_time = (current_timestamp - @@prev_timestamp).total_seconds
+
+      if elapsed_time > 0
+        ((@used_cpu_sys + @used_cpu_user) / (elapsed_time) * 100).round(2)
       else
         0.0
       end

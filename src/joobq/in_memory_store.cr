@@ -49,6 +49,17 @@ module JoobQ
       job.jid.to_s
     end
 
+    def enqueue_batch(jobs : Array(JoobQ::Job), batch_size : Int32 = 1000) : Nil
+      raise "Batch size must be greater than 0" if batch_size <= 0
+      raise "Batch size must be less than or equal to 1000" if batch_size > 1000
+
+      jobs.each_slice(batch_size) do |batch_jobs|
+        batch_jobs.each do |job|
+          enqueue(job)
+        end
+      end
+    end
+
     # Dequeues the next job from the specified queue
     def dequeue(queue_name : String, klass : Class) : String?
       return nil unless @queues.has_key?(queue_name)

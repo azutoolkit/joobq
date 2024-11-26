@@ -164,14 +164,14 @@ module JoobQ
       when {method: "GET", path: "/joobq/jobs/registry"} then job_registry(context)
       when {method: "GET", path: "/joobq/queues"}        then queue_metrics(context)
       when {method: "GET", path: "/joobq/metrics"}       then global_metrics(context)
+      when {method: "GET", path: "/joobq/health/check"}  then health_check(context)
       else                                                    call_next(context)
       end
     end
 
-    private def overtime_series(context)
+    private def health_check(context)
       context.response.content_type = "application/json"
-      metrics = GlobalStats.instance.calculate_stats
-      context.response.print(metrics["overtime_series"].to_json)
+      context.response.print({status: "OK"}.to_json)
     end
 
     private def global_metrics(context)

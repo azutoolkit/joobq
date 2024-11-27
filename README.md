@@ -63,14 +63,12 @@ Ready to dive in? Follow our [Getting Started](#getting-started) guide to set up
     - [Rest API](#rest-api)
     - [GET /joobq/jobs/registry](#get-joobqjobsregistry)
     - [POST /joobq/jobs](#post-joobqjobs)
-    - [GET /joob/metrics](#get-joobmetrics)
   - [Performance](#performance)
     - [Performance Comparison](#performance-comparison)
       - [Disclaimer](#disclaimer)
   - [Contributing](#contributing)
   - [Testing](#testing)
   - [Deployment](#deployment)
-  - [Roadmap](#roadmap)
   - [License](#license)
   - [Acknowledgments](#acknowledgments)
 
@@ -98,10 +96,10 @@ This section will help you get started with JoobQ. Follow the instructions below
    shards install
    ```
 
-3. Start Redis with TimeSeries module:
+3. Start Redis
 
    ```sh
-   docker-compose up -d
+   redis-server
    ```
 
 ## Installation
@@ -391,43 +389,6 @@ Content-Length: 175
 }
 ```
 
-### GET /joob/metrics
-
-This endpoint returns metrics about the queue
-
-**Rquest:**
-
-```http
-GET /joobq/metrics HTTP/1.1
-Host: localhost:8080
-```
-
-**Response:**
-
-```json
-[
-  {
-    "queue:test": {
-      "total_workers": 5,
-      "status": "Running",
-      "metrics": {
-        "enqueued": 394775,
-        "completed": 171446,
-        "retried": 1757,
-        "dead": 0,
-        "processing": 3,
-        "running_workers": 5,
-        "jobs_per_second": 24624.079804538018,
-        "errors_per_second": 252.17920194481889,
-        "enqueued_per_second": 56652.61565975511,
-        "jobs_latency": "00:00:00.000040613",
-        "elapsed_time": "00:00:06.970125250"
-      }
-    }
-  }
-]
-```
-
 ## Performance
 
 JoobQ is designed for high performance and scalability. In our benchmarks, JoobQ has easily achieved processing rates of 35,000 jobs per second. This performance is made possible by leveraging Crystal's concurrency model and efficient job handling mechanisms.
@@ -494,18 +455,12 @@ up Redis.
 docker-compose up -d
 ```
 
-## Roadmap
-
-- [ ] CLI to manage queues and monitor server
-- [ ] Extend the REST API for more functionality
-- [ ] Approve Queue: Jobs have to be manually approved to execute
-
 ## License
 
 The MIT License (MIT). Please see License File for more information.
 
 ## Acknowledgments
 
-Elias J. Perez - creator and maintainer
-Crystal Language
-Redis
+[Elias J. Perez](https://github.com/eliasjpr/) - creator and maintainer
+[Crystal Language](https://crystal-lang.org/)
+[Redis](https://redis.io/)

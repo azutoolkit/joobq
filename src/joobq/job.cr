@@ -221,26 +221,6 @@ module JoobQ
 
     abstract def perform
 
-    # With timeout method to run a block of code with a timeout limit set
-    #
-    # ```
-    # @timeout = 5.seconds
-    #
-    # with_timeout do
-    #   # Simulate a long-running task
-    #   puts "Starting a task that should timeout..."
-    #   sleep 10.seconds
-    #   puts "This should not print because the task should be timed out"
-    # rescue Timeout::TimeoutError => e
-    #   puts e.message # => "execution expired after 5 seconds"
-    # end
-    # ```
-    def with_timeout(timeout : Time::Span = JoobQ.config.timeout, &block : ->)
-      Timeout.run(timeout) do
-        block.call
-      end
-    end
-
     def <=>(other)
       self.jid <=> other.jid
     end

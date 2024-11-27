@@ -27,6 +27,9 @@ module JoobQ
           if last_job_time
             elapsed = now - last_job_time
             sleep_time = min_interval - elapsed
+
+            Log.debug { "Throttling #{queue.name} queue. Last job was #{elapsed}ms ago. Sleeping for #{sleep_time}ms" }
+
             if sleep_time > 0
               sleep (sleep_time / 1000.0).seconds
             end

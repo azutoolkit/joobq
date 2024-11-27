@@ -14,6 +14,7 @@ module JoobQ
 
     def self.add(job)
       store.mark_as_dead(job, expires)
+      Log.info { "Job #{job.id} has been added to the dead letter queue" }
     end
   end
 end

@@ -39,6 +39,7 @@ module JoobQ
       delay = (2 ** (job.retries)) * 1000 # Delay in ms
       # Logic to add the job back to the queue after a delay
       queue.store.schedule(job, delay, delay_set: RedisStore::FAILED_SET)
+      Log.info { "Job #{job.id} has been scheduled for retry in #{delay}ms" }
     end
   end
 end

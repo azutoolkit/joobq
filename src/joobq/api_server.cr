@@ -160,8 +160,7 @@ module JoobQ
         if request_body = context.request.body.try(&.gets_to_end)
           payload = JSON.parse(request_body)
           queue_name = payload["queue"].to_s
-          queue = ::JoobQ.queues[queue_name]
-
+          queue = JoobQ[queue_name]
           return {error: "Invalid queue name"}.to_json unless queue
 
           # Assuming there's a method to add a job to the queue
@@ -169,7 +168,7 @@ module JoobQ
 
           response = {
             status: "Job enqueued",
-            queue:  queue.name,
+            queue:  queue_name,
             job_id: jid.to_s,
           }
           context.response.content_type = "application/json"
@@ -197,7 +196,7 @@ module JoobQ
     def call(context : HTTP::Server::Context)
       method = context.request.method
       path = context.request.path
-      if handler = ENDPOINTS[{method: method, path: path}]
+      if handler = ENDPOINTS[{method: method, path: path}]?
         handler.call(context)
       else
         call_next(context)

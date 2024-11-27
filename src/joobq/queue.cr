@@ -1,13 +1,21 @@
 module JoobQ
   # BaseQueue remains as the abstract base class
-  abstract class BaseQueue
+  module BaseQueue
     abstract def add(job : String)
     abstract def start
     abstract def stop!
+    abstract def name : String
+    abstract def size : Int64
+    abstract def job_type : String
+    abstract def total_workers : Int32
+    abstract def running_workers : Int32
+    abstract def status : String
+    abstract def throttle_limit : NamedTuple(limit: Int32, period: Time::Span)?
   end
 
   # The Queue class now focuses solely on queue operations
-  class Queue(T) < BaseQueue
+  class Queue(T)
+    include BaseQueue
     getter store : Store = ::JoobQ.config.store
     getter name : String
     getter job_type : String = T.name

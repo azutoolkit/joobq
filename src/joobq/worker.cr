@@ -40,7 +40,7 @@ module JoobQ
               break
             else
               if job = @queue.next_job
-                handle_job job
+                handle_job job.to_s
               end
             end
           end

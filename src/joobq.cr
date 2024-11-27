@@ -108,7 +108,6 @@ module JoobQ
     end
 
     Scheduler.new(delay_set: RedisStore::FAILED_SET).run
-    QueueMetrics.instance.run_metrics_collection
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }
 

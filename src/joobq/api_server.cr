@@ -155,74 +155,53 @@ module JoobQ
 
     Log = ::Log.for("API")
 
+    ENDPOINTS = {
+      {method: "POST", path: "/joobq/jobs"} => ->(context : HTTP::Server::Context) do
+        if request_body = context.request.body.try(&.gets_to_end)
+          payload = JSON.parse(request_body)
+          queue_name = payload["queue"].to_s
+          queue = ::JoobQ.queues[queue_name]
+
+          return {error: "Invalid queue name"}.to_json unless queue
+
+          # Assuming there's a method to add a job to the queue
+          jid = queue.add(request_body)
+
+          response = {
+            status: "Job enqueued",
+            queue:  queue.name,
+            job_id: jid.to_s,
+          }
+          context.response.content_type = "application/json"
+          context.response.status = HTTP::Status::CREATED
+          context.response.print(response.to_json)
+        else
+          context.response.status_code = 400
+          context.response.print("Invalid request")
+        end
+      end,
+      {method: "GET", path: "/joobq/jobs/registry"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+        context.response.print(::JoobQ.config.job_registry.json)
+      end,
+      {method: "GET", path: "/joobq/health/check"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+        context.response.print({status: "OK"}.to_json)
+      end,
+    } of NamedTuple(method: String, path: String) => Proc(HTTP::Server::Context, Nil)
+
+    def self.register_endpoint(method, path, handler)
+      ENDPOINTS[{method: method, path: path}] = handler
+    end
+
     def call(context : HTTP::Server::Context)
       method = context.request.method
       path = context.request.path
-
-      case {method: method, path: path}
-      when {method: "POST", path: "/joobq/jobs"}         then enqueue_job(context)
-      when {method: "GET", path: "/joobq/jobs/registry"} then job_registry(context)
-      when {method: "GET", path: "/joobq/queues"}        then queue_metrics(context)
-      when {method: "GET", path: "/joobq/metrics"}       then global_metrics(context)
-      when {method: "GET", path: "/joobq/health/check"}  then health_check(context)
-      else                                                    call_next(context)
-      end
-    end
-
-    private def health_check(context)
-      context.response.content_type = "application/json"
-      context.response.print({status: "OK"}.to_json)
-    end
-
-    private def global_metrics(context)
-      context.response.content_type = "application/json"
-      metrics = GlobalStats.instance.calculate_stats
-      context.response.print(metrics.to_json)
-    end
-
-    private def queue_metrics(context)
-      metrics = QueueMetrics.new.all_queue_metrics
-
-      context.response.headers["Refresh"] = "5"
-      context.response.content_type = "application/json"
-      context.response.print(metrics.to_json)
-    end
-
-    private def job_registry(context)
-      context.response.content_type = "application/json"
-      context.response.print(::JoobQ.config.job_registry.json)
-    end
-
-    private def enqueue_job(context)
-      if request_body = context.request.body.try(&.gets_to_end)
-        response = enqueue(request_body)
-        context.response.content_type = "application/json"
-        context.response.status = HTTP::Status::CREATED
-        context.response.print(response)
+      if handler = ENDPOINTS[{method: method, path: path}]
+        handler.call(context)
       else
-        context.response.status_code = 400
-        context.response.print("Invalid request")
+        call_next(context)
       end
-    end
-
-    private def enqueue(raw_payload)
-      payload = JSON.parse(raw_payload)
-      queue_name = payload["queue"].to_s
-      queue = ::JoobQ.queues[queue_name]
-
-      return {error: "Invalid queue name"}.to_json unless queue
-
-      # Assuming there's a method to add a job to the queue
-      jid = queue.add(raw_payload)
-      response = {
-        status: "Job enqueued",
-        queue:  queue.name,
-        job_id: jid.to_s,
-      }
-
-      Log.info &.emit("Job enqueued", queue: queue.name.to_s, job_id: jid.to_s)
-
-      response.to_json
     end
   end
 end

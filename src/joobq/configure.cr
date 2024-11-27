@@ -68,7 +68,7 @@ module JoobQ
     end
 
     # Add a scheduler and execute within its context
-    def scheduler(tz : Time::Location = self.time_location)
+    def scheduler(tz : Time::Location = self.time_location, &)
       scheduler = Scheduler.new(time_location: tz)
       @schedulers << scheduler
       with scheduler yield

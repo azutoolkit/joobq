@@ -6,23 +6,20 @@ module JoobQ
     abstract def stop!
   end
 
-  # The Queue class now focuses on queue operations
+  # The Queue class now focuses solely on queue operations
   class Queue(T) < BaseQueue
     getter store : Store = ::JoobQ.config.store
     getter name : String
     getter job_type : String = T.name
     getter total_workers : Int32
-    getter metrics : Metrics
-    getter worker_manager : WorkerManager(T) { WorkerManager(T).new(total_workers, self, metrics) }
+    getter worker_manager : WorkerManager(T) { WorkerManager(T).new(total_workers, self) }
     getter throttle_limit : NamedTuple(limit: Int32, period: Time::Span)?
 
     def initialize(@name : String, @total_workers : Int32,
                    @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
-      @metrics = Metrics.new
     end
 
     def start
-      metrics.start_time = Time.monotonic
       reprocess_busy_jobs!
       worker_manager.start_workers
     end
@@ -92,37 +89,6 @@ module JoobQ
         return "Awaiting"
       end
       running? ? "Running" : "Done"
-    end
-
-    def info
-      current_queue_size = size
-      result = {
-        name:                      name,
-        job_type:                  job_type,
-        total_workers:             total_workers,
-        status:                    status,
-        throttle_limit:            throttle_limit,
-        current_size:              current_queue_size,
-        started_at:                metrics.start_time.from_now,
-        completed:                 metrics.completed.get,
-        retried:                   metrics.retried.get,
-        dead:                      metrics.dead.get,
-        running_workers:           running_workers,
-        jobs_completed_per_second: metrics.jobs_completed_per_second,
-        queue_reduction_rate:      metrics.queue_reduction_rate(current_queue_size),
-        errors_per_second:         metrics.errors_per_second,
-        job_wait_time:             metrics.job_wait_time,
-        job_execution_time:        metrics.job_execution_time,
-        worker_utilization:        metrics.worker_utilization(total_workers),
-        error_rate_trend:          metrics.error_rate_trend,
-        failed_job_rate:           metrics.failed_job_rate,
-        average_jobs_in_flight:    metrics.average_jobs_in_flight,
-        percent_completed:         metrics.percent_completed,
-        percent_retried:           metrics.percent_retried,
-        percent_dead:              metrics.percent_dead,
-        percent_busy:              metrics.percent_busy,
-      }
-      result
     end
 
     private def reprocess_busy_jobs!

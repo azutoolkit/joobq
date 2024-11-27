@@ -49,7 +49,7 @@ module JoobQ
       raise "Batch size must be less than or equal to 1000" if batch_size > 1000
 
       jobs.each_slice(batch_size) do |batch_jobs|
-        results = redis.pipelined do |pipe|
+        redis.pipelined do |pipe|
           batch_jobs.each do |job|
             pipe.rpush job.queue, job.to_json
           end
@@ -118,7 +118,6 @@ module JoobQ
       end
 
       jobs_collected
-
     end
 
     private def processing_queue(name : String)

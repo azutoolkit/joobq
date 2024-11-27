@@ -6,7 +6,7 @@ module JoobQ
     getter terminate_channel : Channel(Nil) = Channel(Nil).new
     getter total_workers : Int32
 
-    def initialize(@total_workers : Int32, @queue : Queue(T), @metrics : Metrics)
+    def initialize(@total_workers : Int32, @queue : Queue(T))
       create_workers
     end
 
@@ -43,7 +43,7 @@ module JoobQ
     end
 
     private def create_worker
-      Worker(T).new(workers.size, terminate_channel, @queue, @metrics)
+      Worker(T).new(workers.size, terminate_channel, @queue)
     end
   end
 end

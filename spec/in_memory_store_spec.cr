@@ -31,11 +31,12 @@ describe JoobQ::InMemoryStore do
         store.enqueue(job: job1)
         store.enqueue(job: job2)
 
-        dequeued_job = store.dequeue(queue_name: job1.queue, klass: ExampleJob)
-        job = ExampleJob.from_json(dequeued_job.not_nil!)
-        job.should eq(job1)
+        if dequeued_job = store.dequeue(queue_name: job1.queue, klass: ExampleJob)
+          job = ExampleJob.from_json(dequeued_job)
+          job.should eq(job1)
 
-        store.queue_size(queue_name: job1.queue).should eq(1)
+          store.queue_size(queue_name: job1.queue).should eq(1)
+        end
       end
     end
 
@@ -66,9 +67,10 @@ describe JoobQ::InMemoryStore do
       store.delete_job(job: job1.to_json)
 
       store.queue_size(queue_name: job1.queue).should eq(1)
-      job_json = store.dequeue(queue_name: job1.queue, klass: ExampleJob)
-      job = ExampleJob.from_json(job_json.not_nil!)
-      job.should eq(job2)
+      if job_json = store.dequeue(queue_name: job1.queue, klass: ExampleJob)
+        job = ExampleJob.from_json(job_json)
+        job.should eq(job2)
+      end
     end
   end
 

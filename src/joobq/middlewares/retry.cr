@@ -25,11 +25,9 @@ module JoobQ
         }
 
         if job.retries > 0
-          queue.metrics.increment_retried
           job.retrying!
           ExponentialBackoff.retry(job, queue)
         else
-          queue.metrics.increment_dead
           DeadLetterManager.add(job)
         end
       end

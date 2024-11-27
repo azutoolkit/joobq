@@ -15,7 +15,7 @@ module JoobQ
       end
 
       private def throttle(queue : BaseQueue)
-        if throttle = queue.throttle_limit.not_nil!
+        if throttle = queue.throttle_limit
           limit = throttle[:limit]
           period = throttle[:period].total_milliseconds
 

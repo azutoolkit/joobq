@@ -23,7 +23,7 @@ module JoobQ
         scheduler.delay job, delay_time: 1.seconds
         JoobQ.store.set_size("joobq:delayed_jobs").should eq 1
 
-        scheduler.enqueue_due_jobs(current_time = 10.seconds.from_now)
+        scheduler.enqueue_due_jobs(current_time: 10.seconds.from_now)
 
         JoobQ.store.set_size("joobq:delayed_jobs").should eq 0
       end

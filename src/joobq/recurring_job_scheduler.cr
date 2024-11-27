@@ -17,7 +17,6 @@ module JoobQ
 
       spawn do
         loop do
-          start_time = Time.monotonic
           spawn { job_instance.perform }
           sleep interval
         end

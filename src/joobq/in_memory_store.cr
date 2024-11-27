@@ -32,7 +32,7 @@ module JoobQ
     def delete_job(job : String) : Nil
       job_json = JSON.parse(job)
       queue_name = job_json["queue"].as_s
-      item = @queues[queue_name].each do |entry|
+      @queues[queue_name].each do |entry|
         @queues[queue_name].delete(entry) if entry.to_json == job
       end
       @scheduled_jobs.reject! { |entry| entry.job == job }
@@ -119,7 +119,7 @@ module JoobQ
 
     def processing_list(pattern : String = "", limit : Int32 = 100) : Array(String)
       puts "Processing list called with pattern: #{pattern}"
-      @queues.select.map do |key, value|
+      @queues.select.flat_map do |_, value|
         value.map(&.to_json)
       end.flatten[0...limit]
     end

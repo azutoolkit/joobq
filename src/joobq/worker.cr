@@ -7,13 +7,11 @@ module JoobQ
 
     @terminate_channel : Channel(Nil)
     @queue : BaseQueue
-    @metrics : Metrics
 
     private getter middleware_pipeline : MiddlewarePipeline = JoobQ.config.middleware_pipeline
 
-    def initialize(@wid : Int32, @terminate_channel : Channel(Nil), @queue : BaseQueue, @metrics : Metrics)
+    def initialize(@wid : Int32, @terminate_channel : Channel(Nil), @queue : BaseQueue)
       @queue = queue
-      @metrics = metrics
       @terminate_channel = terminate_channel
     end
 
@@ -58,29 +56,10 @@ module JoobQ
       parsed_job.running!
 
       middleware_pipeline.call(parsed_job, @queue) do
-        @metrics.increment_busy
-        execute parsed_job
+        parsed_job.perform
+        parsed_job.completed!
       ensure
-        @metrics.decrement_busy
         @queue.delete_job job
-      end
-    end
-
-    private def execute(job : T)
-      wait_time = Time.monotonic - job.enqueue_time
-      @metrics.add_job_wait_time(wait_time)
-      start_time = Time.monotonic
-
-      begin
-        job.perform
-        job.completed!
-        execution_time = Time.monotonic - start_time
-        @metrics.add_job_execution_time(execution_time)
-        @metrics.increment_completed
-      rescue ex : Exception
-        execution_time = Time.monotonic - start_time
-        @metrics.add_job_execution_time(execution_time)
-        raise ex # Allow middleware to handle failures
       end
     end
   end

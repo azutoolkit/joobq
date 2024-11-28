@@ -63,7 +63,7 @@ module JoobQ
     end
 
     def run
-      Log.info &.emit("Scheduler starting...")
+      Log.info { "Scheduler starting..." }
       spawn do
         loop do
           enqueue_due_jobs

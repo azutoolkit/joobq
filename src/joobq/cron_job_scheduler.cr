@@ -32,7 +32,7 @@ module JoobQ
 
           sleep_duration = (nxt - now)
           if sleep_duration.seconds > 0
-            sleep(sleep_duration.seconds)
+            sleep sleep_duration
           end
 
           # Execute the job

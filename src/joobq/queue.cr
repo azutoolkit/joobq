@@ -86,10 +86,11 @@ module JoobQ
       worker_manager.stop_workers
     end
 
-    def next_job
+    def next_job : String?
       store.dequeue(name, T)
     rescue ex
       Log.error &.emit("Error Dequeuing", queue: name, error: ex.message)
+      nil
     end
 
     def status : String

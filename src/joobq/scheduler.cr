@@ -67,7 +67,7 @@ module JoobQ
       spawn do
         loop do
           enqueue_due_jobs
-          sleep 2.seconds
+          sleep 5.seconds
         end
       end
     rescue ex : Exception

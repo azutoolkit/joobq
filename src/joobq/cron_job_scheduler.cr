@@ -32,10 +32,7 @@ module JoobQ
 
           sleep_duration = (nxt - now)
           if sleep_duration.seconds > 0
-            sleep(sleep_duration)
-          else
-            Log.error &.emit("Cron schedule miscalculated", pattern: pattern, timezone: timezone.name)
-            break
+            sleep(sleep_duration.seconds)
           end
 
           # Execute the job

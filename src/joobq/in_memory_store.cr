@@ -65,6 +65,7 @@ module JoobQ
       return nil unless @queues.has_key?(queue_name)
       item = @queues[queue_name].shift
       item.to_json if item
+      nil
     end
 
     # Moves a job back to the queue if it was being processed but not completed

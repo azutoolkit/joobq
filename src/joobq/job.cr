@@ -96,22 +96,6 @@ module JoobQ
   # ExampleJob.schedule(5.seconds, param: "value")
   # ```
   #
-  # #### Timeout Handling
-  #
-  # `with_timeout` provides a way to enforce a timeout on the job's execution.
-  # If the block takes longer than the specified `@timeout`, it raises a `Timeout::TimeoutError`.
-  #
-  # ```
-  # def perform
-  #   with_timeout do
-  #     # Simulate a long-running task
-  #     puts "Starting a task that should timeout..."
-  #     sleep 10.seconds
-  #   rescue Timeout::TimeoutError => e
-  #     puts e.message # => "execution expired after 5 seconds"
-  #   end
-  # end
-  # ```
   module Job
     enum Status
       Completed

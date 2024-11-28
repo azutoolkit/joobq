@@ -10,7 +10,6 @@ module JoobQ
       def call(job : Job, queue : BaseQueue, next_middleware : ->) : Nil
         if job.expired?
           job.expired!
-
           DeadLetterManager.add(job)
           Log.info &.emit("Job has expired, added to dead letter queue",
             job_id: job.jid, status: job.status, expires: job.expires, retries: job.retries, queue: job.queue)

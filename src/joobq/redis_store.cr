@@ -58,9 +58,10 @@ module JoobQ
     end
 
     def dequeue(queue_name : String, klass : Class) : String?
-      if job_data = redis.brpoplpush(queue_name, processing_queue(queue_name), BLOCKING_TIMEOUT)
-        return job_data.as(String)
+      if job_data = redis.brpoplpush(queue_name, processing_queue(queue_name), BLOCKING_TIMEOUT).as(String)
+        return job_data.to_s
       end
+      nil
     end
 
     def move_job_back_to_queue(queue_name : String) : Bool

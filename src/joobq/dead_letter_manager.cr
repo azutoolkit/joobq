@@ -14,8 +14,6 @@ module JoobQ
 
     def self.add(job)
       store.mark_as_dead(job, expires)
-      Log.info &.emit("Job added to dead letter queue",
-        job_id: job.jid, status: job.status, expires: job.expires, retries: job.retries, queue: job.queue)
     end
   end
 end

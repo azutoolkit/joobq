@@ -95,61 +95,7 @@ module JoobQ
   #
   # ### Usage
   #
-  # To use the `Store` class, you need to implement it in a concrete storage backend. Here is an example implementation
-  # using an in-memory store:
-  #
-  # ```
-  # class InMemoryStore < JoobQ::Store
-  #   def initialize
-  #     @queues = Hash(String, Array(JoobQ::Job)).new { |h, k| h[k] = [] }
-  #   end
-  #
-  #   def clear_queue(queue_name : String) : Nil
-  #     @queues[queue_name].clear
-  #   end
-  #
-  #   def delete_job(job : JoobQ::Job) : Nil
-  #     @queues[job.queue_name].delete(job)
-  #   end
-  #
-  #   def enqueue(job : JoobQ::Job) : String
-  #     @queues[job.queue_name] << job
-  #     job.id
-  #   end
-  #
-  #   def dequeue(queue_name : String, klass : Class) : JoobQ::Job?
-  #     @queues[queue_name].shift
-  #   end
-  #
-  #   def move_job_back_to_queue(queue_name : String) : Bool
-  #     # Implementation here
-  #   end
-  #
-  #   def mark_as_failed(job : JoobQ::Job, error_details : Hash) : Nil
-  #     # Implementation here
-  #   end
-  #
-  #   def mark_as_dead(job : JoobQ::Job, expiration_time : String) : Nil
-  #     # Implementation here
-  #   end
-  #
-  #   def schedule(job : JoobQ::Job, delay_in_ms : Int64) : Nil
-  #     # Implementation here
-  #   end
-  #
-  #   def fetch_due_jobs(current_time : Time) : Array(String)
-  #     # Implementation here
-  #   end
-  #
-  #   def queue_size(queue_name : String) : Int64
-  #     @queues[queue_name].size
-  #   end
-  #
-  #   def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
-  #     @queues[queue_name].map(&.to_json)
-  #   end
-  # end
-  # ```
+  # To use the `Store` class, you need to implement it in a concrete storage backend.
   #
   # ### Workflow
   #
@@ -188,72 +134,6 @@ module JoobQ
   #   end
   # end
   #
-  # # Implement an in-memory store
-  # class InMemoryStore < JoobQ::Store
-  #   def initialize
-  #     @queues = Hash(String, Array(JoobQ::Job)).new { |h, k| h[k] = [] }
-  #   end
-  #
-  #   def clear_queue(queue_name : String) : Nil
-  #     @queues[queue_name].clear
-  #   end
-  #
-  #   def delete_job(job : JoobQ::Job) : Nil
-  #     @queues[job.queue_name].delete(job)
-  #   end
-  #
-  #   def enqueue(job : JoobQ::Job) : String
-  #     @queues[job.queue_name] << job
-  #     job.id
-  #   end
-  #
-  #   def dequeue(queue_name : String, klass : Class) : JoobQ::Job?
-  #     @queues[queue_name].shift
-  #   end
-  #
-  #   def move_job_back_to_queue(queue_name : String) : Bool
-  #     # Implementation here
-  #   end
-  #
-  #   def mark_as_failed(job : JoobQ::Job, error_details : Hash) : Nil
-  #     # Implementation here
-  #   end
-  #
-  #   def mark_as_dead(job : JoobQ::Job, expiration_time : String) : Nil
-  #     # Implementation here
-  #   end
-  #
-  #   def schedule(job : JoobQ::Job, delay_in_ms : Int64) : Nil
-  #     # Implementation here
-  #   end
-  #
-  #   def fetch_due_jobs(current_time : Time) : Array(String)
-  #     # Implementation here
-  #   end
-  #
-  #   def queue_size(queue_name : String) : Int64
-  #     @queues[queue_name].size
-  #   end
-  #
-  #   def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
-  #     @queues[queue_name].map(&.to_json)
-  #   end
-  # end
-  #
-  # # Initialize the store
-  # store = InMemoryStore.new
-  #
-  # # Create a job
-  # job = ExampleJob.new(x: 1)
-  #
-  # # Enqueue the job
-  # store.enqueue(job)
-  #
-  # # Dequeue and perform the job
-  # if job = store.dequeue("example", ExampleJob)
-  #   job.perform
-  # end
-  # ```
   #
   # This example demonstrates how to implement an in-memory store, enqueue a job, and dequeue and perform the job.
   abstract class Store

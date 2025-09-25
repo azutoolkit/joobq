@@ -188,7 +188,7 @@ module JoobQ
         end
 
         # Sanitize job data
-        sanitized_payload = payload.dup
+        sanitized_payload = payload.as_h.dup
         if data = sanitized_payload["data"]?
           sanitized_payload["data"] = APIValidation.sanitize_job_data(data)
         end

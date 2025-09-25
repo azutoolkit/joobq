@@ -26,6 +26,7 @@ JoobQ is more than just a job queue scheduler; it's a robust framework that ensu
 - **Delayed Jobs**: Delay job execution to a specific time in the future.
 - **Throttle Control**: Manage the rate at which jobs are processed to prevent system overload.
 - **REST API**: Interact with JoobQ through a comprehensive REST API for job management and metrics.
+- **OpenAPI Specification**: Complete OpenAPI 3.0 specification for easy client generation and documentation.
 - **Graceful Termination**: Stop workers gracefully without losing jobs in progress.
 
 ### Get Started!
@@ -63,6 +64,12 @@ Ready to dive in? Follow our [Getting Started](#getting-started) guide to set up
     - [Rest API](#rest-api)
     - [GET /joobq/jobs/registry](#get-joobqjobsregistry)
     - [POST /joobq/jobs](#post-joobqjobs)
+  - [REST API \& OpenAPI Specification](#rest-api--openapi-specification)
+    - [API Endpoints](#api-endpoints)
+    - [OpenAPI Specification](#openapi-specification)
+    - [Quick Start with the API](#quick-start-with-the-api)
+    - [Client Generation](#client-generation)
+    - [Interactive Documentation](#interactive-documentation)
   - [Performance](#performance)
     - [Performance Comparison](#performance-comparison)
       - [Disclaimer](#disclaimer)
@@ -387,6 +394,72 @@ Content-Length: 175
   "queue": "default",
   "job_id": "some-unique-job-id"
 }
+```
+
+## REST API & OpenAPI Specification
+
+JoobQ provides a comprehensive REST API for job management, monitoring, and debugging. The API is fully documented with an OpenAPI 3.0 specification that enables easy client generation and integration.
+
+### API Endpoints
+
+- **Job Management**: Enqueue jobs, retrieve job registry
+- **Queue Operations**: Reprocess busy jobs, monitor queue health
+- **Error Monitoring**: Track errors, get statistics, filter by type/queue
+- **Health Checks**: System status and monitoring
+
+### OpenAPI Specification
+
+The complete OpenAPI 3.0 specification is available in the `docs/` directory:
+
+- **Specification**: `docs/openapi.yaml`
+- **Documentation**: `docs/API_SPECIFICATION.md`
+- **Client Examples**: `examples/crystal_client_example.cr`
+
+### Quick Start with the API
+
+```bash
+# Health check
+curl http://localhost:8080/joobq/health/check
+
+# Enqueue a job
+curl -X POST http://localhost:8080/joobq/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "queue": "email",
+    "job_type": "EmailJob",
+    "data": {
+      "email": "user@example.com",
+      "subject": "Welcome"
+    }
+  }'
+
+# Get error statistics
+curl http://localhost:8080/joobq/errors/stats
+
+# Reprocess busy jobs
+curl -X POST http://localhost:8080/joobq/queues/default/reprocess
+```
+
+### Client Generation
+
+Generate clients for your preferred language:
+
+```bash
+# Install OpenAPI Generator
+brew install openapi-generator
+
+# Generate clients
+openapi-generator generate -i docs/openapi.yaml -g crystal -o clients/crystal/
+openapi-generator generate -i docs/openapi.yaml -g typescript-axios -o clients/typescript/
+openapi-generator generate -i docs/openapi.yaml -g python -o clients/python/
+```
+
+### Interactive Documentation
+
+View the interactive API documentation:
+
+```bash
+docker run -p 8080:8080 -e SWAGGER_JSON=/docs/openapi.yaml -v $(pwd)/docs:/docs swaggerapi/swagger-ui
 ```
 
 ## Performance

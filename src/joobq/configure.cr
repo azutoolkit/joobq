@@ -29,6 +29,7 @@ module JoobQ
     property timeout : Time::Span = 2.seconds
     property failed_ttl : Time::Span = 3.milliseconds
     property dead_letter_ttl : Time::Span = 7.days
+    property worker_batch_size : Int32 = 5
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
 
     # Middlewares and Pipeline

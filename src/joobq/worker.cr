@@ -58,8 +58,17 @@ module JoobQ
               end
               break
             else
-              if job = @queue.claim_job(@worker_id)
-                handle_job(job)
+              # Use batch processing for improved performance
+              jobs = @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
+
+              if jobs.any?
+                # Process jobs concurrently
+                jobs.each do |job|
+                  spawn { handle_job_async(job) }
+                end
+              else
+                # Small delay to prevent busy waiting when no jobs available
+                sleep 0.001.seconds
               end
             end
           end
@@ -117,6 +126,61 @@ module JoobQ
         # Always release the job claim and delete the job
         @queue.release_job_claim(@worker_id)
         @queue.delete_job job
+      end
+    end
+
+    # Async job handling for batch processing
+    private def handle_job_async(job : String)
+      spawn do
+        parsed_job = nil
+        begin
+          parsed_job = T.from_json(job)
+          parsed_job.running!
+
+          middleware_pipeline.call(parsed_job, @queue) do
+            parsed_job.perform
+            parsed_job.completed!
+          end
+        rescue ex : Exception
+          # Use the monitored error handling system with rich context
+          if parsed_job
+            error_context = MonitoredErrorHandler.handle_job_error(
+              parsed_job,
+              @queue,
+              ex,
+              worker_id: @worker_id,
+              additional_context: {
+                "worker_id" => @worker_id,
+                "job_data_length" => job.size.to_s,
+                "queue_workers" => @queue.total_workers.to_s,
+                "queue_running_workers" => @queue.running_workers.to_s,
+                "processing_mode" => "async_batch"
+              }
+            )
+
+            # Log worker-specific error
+            additional_context = {
+              worker_wid: wid.to_s,
+              job_processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s
+            }.to_h
+
+            Log.error &.emit(
+              "Worker async job processing failed",
+              error_context.to_log_context.merge(additional_context)
+            )
+          else
+            Log.error &.emit(
+              "Worker async job processing failed - could not parse job",
+              worker_id: @worker_id,
+              job_data_length: job.size.to_s,
+              error: ex.message
+            )
+          end
+        ensure
+          # Always release the job claim and delete the job
+          @queue.release_job_claim(@worker_id)
+          @queue.delete_job job
+        end
       end
     end
   end

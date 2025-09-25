@@ -127,10 +127,25 @@ module JoobQ
       nil
     end
 
+    def claim_jobs_batch(worker_id : String, batch_size : Int32 = 5) : Array(String)
+      store.claim_jobs_batch(name, worker_id, T, batch_size)
+    rescue ex
+      Log.error &.emit("Error Claiming Jobs Batch", queue: name, worker: worker_id,
+                      batch_size: batch_size, error: ex.message)
+      [] of String
+    end
+
     def release_job_claim(worker_id : String) : Nil
       store.release_job_claim(name, worker_id)
     rescue ex
       Log.error &.emit("Error Releasing Job Claim", queue: name, worker: worker_id, error: ex.message)
+    end
+
+    def release_job_claims_batch(worker_id : String, job_count : Int32) : Nil
+      store.release_job_claims_batch(name, worker_id, job_count)
+    rescue ex
+      Log.error &.emit("Error Releasing Job Claims Batch", queue: name, worker: worker_id,
+                      job_count: job_count, error: ex.message)
     end
 
     def status : String

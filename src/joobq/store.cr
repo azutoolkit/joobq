@@ -142,7 +142,9 @@ module JoobQ
     abstract def enqueue(job : JoobQ::Job) : String
     abstract def dequeue(queue_name : String, klass : Class) : String?
     abstract def claim_job(queue_name : String, worker_id : String, klass : Class) : String?
+    abstract def claim_jobs_batch(queue_name : String, worker_id : String, klass : Class, batch_size : Int32) : Array(String)
     abstract def release_job_claim(queue_name : String, worker_id : String) : Nil
+    abstract def release_job_claims_batch(queue_name : String, worker_id : String, job_count : Int32) : Nil
     abstract def move_job_back_to_queue(queue_name : String) : Bool
     abstract def mark_as_dead(job : JoobQ::Job, expiration_time : Int64) : Nil
     abstract def schedule(job : JoobQ::Job, delay_in_ms : Int64, delay_set : String) : Nil

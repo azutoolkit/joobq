@@ -6,6 +6,11 @@ module JoobQ
     private PROCESSING_QUEUE = "joobq:processing"
     private BLOCKING_TIMEOUT = 5
 
+    # Cached Lua script SHA for better performance
+    @@claim_job_script_sha : String? = nil
+    @@claim_jobs_batch_script_sha : String? = nil
+    @@release_claims_batch_script_sha : String? = nil
+
     def self.instance : RedisStore
       @@instance ||= new
     end
@@ -24,6 +29,102 @@ module JoobQ
         pool_size: @pool_size,
         pool_timeout: @pool_timeout
       )
+
+      # Cache Lua scripts for better performance
+      cache_lua_scripts
+    end
+
+    # Cache Lua scripts to avoid recompilation overhead
+    private def cache_lua_scripts
+      begin
+        # Cache claim_jobs_batch script
+        @@claim_jobs_batch_script_sha = redis.script_load(claim_jobs_batch_lua_script)
+
+        # Cache release_claims_batch script
+        @@release_claims_batch_script_sha = redis.script_load(release_claims_batch_lua_script)
+
+        Log.debug &.emit("Lua scripts cached successfully")
+      rescue ex
+        Log.warn &.emit("Failed to cache Lua scripts", error: ex.message)
+        # Fall back to EVAL if caching fails
+        @@claim_jobs_batch_script_sha = nil
+        @@release_claims_batch_script_sha = nil
+      end
+    end
+
+    # Get the Lua script for claim_jobs_batch
+    private def claim_jobs_batch_lua_script : String
+      <<-LUA
+        local queue_key = KEYS[1]
+        local processing_key = KEYS[2]
+        local worker_claim_key = KEYS[3]
+        local worker_id = ARGV[1]
+        local batch_size = tonumber(ARGV[2])
+        local timeout = tonumber(ARGV[3])
+
+        -- Pre-allocate arrays for better performance
+        local jobs = {}
+        local claim_keys = {}
+        local claim_data = {}
+
+        -- Get current time once
+        local current_time = redis.call('TIME')[1]
+
+        -- Claim multiple jobs in a single loop with optimized operations
+        for i = 1, batch_size do
+          local job_data = redis.call('RPOPLPUSH', queue_key, processing_key)
+          if job_data then
+            jobs[i] = job_data
+            -- Pre-build claim key and data for batch operations
+            local job_claim_key = worker_claim_key .. ':' .. i
+            claim_keys[i] = job_claim_key
+            claim_data[i] = {job_data, current_time}
+          else
+            break -- No more jobs available
+          end
+        end
+
+        -- Batch create claim records using MSET for better performance
+        if #jobs > 0 then
+          local claim_args = {}
+          for i = 1, #jobs do
+            local job_claim_key = claim_keys[i]
+            claim_args[#claim_args + 1] = job_claim_key .. ':job'
+            claim_args[#claim_args + 1] = claim_data[i][1]
+            claim_args[#claim_args + 1] = job_claim_key .. ':claimed_at'
+            claim_args[#claim_args + 1] = claim_data[i][2]
+          end
+
+          -- Use MSET for batch setting
+          if #claim_args > 0 then
+            redis.call('MSET', unpack(claim_args))
+
+            -- Batch set expiration for all claim keys
+            for i = 1, #jobs do
+              redis.call('EXPIRE', claim_keys[i], 3600)
+            end
+          end
+        end
+
+        return jobs
+      LUA
+    end
+
+    # Get the Lua script for release_claims_batch
+    private def release_claims_batch_lua_script : String
+      <<-LUA
+        local worker_claim_key = KEYS[1]
+        local job_count = tonumber(ARGV[1])
+
+        local keys_to_delete = {}
+        for i = 1, job_count do
+          keys_to_delete[#keys_to_delete + 1] = worker_claim_key .. ':' .. i
+        end
+
+        if #keys_to_delete > 0 then
+          redis.call('DEL', unpack(keys_to_delete))
+        end
+      LUA
     end
 
     def reset : Nil
@@ -58,7 +159,7 @@ module JoobQ
     end
 
     def dequeue(queue_name : String, klass : Class) : String?
-      if job_data = redis.brpoplpush(queue_name, processing_queue(queue_name), BLOCKING_TIMEOUT)
+      if job_data = redis.rpoplpush(queue_name, processing_queue(queue_name))
         return job_data.to_s
       end
       nil
@@ -78,7 +179,7 @@ module JoobQ
         local timeout = ARGV[2]
 
         -- Try to get a job from the queue
-        local job_data = redis.call('BRPOPLPUSH', queue_key, processing_key, timeout)
+        local job_data = redis.call('RPOPLPUSH', queue_key, processing_key)
         if job_data then
           -- Atomically claim the job for this worker
           redis.call('HSET', worker_claim_key, 'job', job_data)
@@ -96,6 +197,38 @@ module JoobQ
       nil
     end
 
+    # Batch job claiming for improved performance
+    def claim_jobs_batch(queue_name : String, worker_id : String, klass : Class, batch_size : Int32 = 5) : Array(String)
+      processing_key = processing_queue(queue_name)
+      worker_claim_key = "#{processing_key}:#{worker_id}"
+
+      # Use cached script if available, otherwise fall back to EVAL
+      result = if script_sha = @@claim_jobs_batch_script_sha
+        begin
+          redis.evalsha(script_sha, [queue_name, processing_key, worker_claim_key],
+                       [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
+        rescue
+          # Script not found, fall back to EVAL and recache
+          cache_lua_scripts
+          redis.eval(claim_jobs_batch_lua_script, [queue_name, processing_key, worker_claim_key],
+                    [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
+        end
+      else
+        redis.eval(claim_jobs_batch_lua_script, [queue_name, processing_key, worker_claim_key],
+                  [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
+      end
+
+      if result && result.as(Array).any?
+        result.as(Array).map(&.as(String))
+      else
+        [] of String
+      end
+    rescue ex
+      Log.error &.emit("Error claiming jobs batch", queue: queue_name, worker: worker_id,
+                      batch_size: batch_size, error: ex.message)
+      [] of String
+    end
+
     def release_job_claim(queue_name : String, worker_id : String) : Nil
       processing_key = processing_queue(queue_name)
       worker_claim_key = "#{processing_key}:#{worker_id}"
@@ -104,6 +237,28 @@ module JoobQ
       redis.del(worker_claim_key)
     rescue ex
       Log.error &.emit("Error releasing job claim", queue: queue_name, worker: worker_id, error: ex.message)
+    end
+
+    # Batch release job claims for improved performance
+    def release_job_claims_batch(queue_name : String, worker_id : String, job_count : Int32) : Nil
+      processing_key = processing_queue(queue_name)
+      worker_claim_key = "#{processing_key}:#{worker_id}"
+
+      # Use cached script if available, otherwise fall back to EVAL
+      if script_sha = @@release_claims_batch_script_sha
+        begin
+          redis.evalsha(script_sha, [worker_claim_key], [job_count.to_s])
+        rescue
+          # Script not found, fall back to EVAL and recache
+          cache_lua_scripts
+          redis.eval(release_claims_batch_lua_script, [worker_claim_key], [job_count.to_s])
+        end
+      else
+        redis.eval(release_claims_batch_lua_script, [worker_claim_key], [job_count.to_s])
+      end
+    rescue ex
+      Log.error &.emit("Error releasing job claims batch", queue: queue_name, worker: worker_id,
+                      job_count: job_count, error: ex.message)
     end
 
     def move_job_back_to_queue(queue_name : String) : Bool

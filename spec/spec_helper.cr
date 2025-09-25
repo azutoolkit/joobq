@@ -1,6 +1,6 @@
 require "spec"
 require "../src/joobq"
-require "./jobs_spec"
+require "./jobs"
 
 JoobQ.configure do
   queue "single", 10, Job1

@@ -224,6 +224,67 @@ module JoobQ
           context.response.print({error: "Missing 'queue' parameter"}.to_json)
         end
       end,
+      {method: "POST", path: "/joobq/queues/:queue_name/reprocess"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+
+        # Extract queue name from path using regex
+        path = context.request.path
+        queue_match = path.match(/^\/joobq\/queues\/([^\/]+)\/reprocess$/)
+
+        unless queue_match && queue_match[1]?
+          context.response.status_code = 400
+          context.response.print({error: "Missing or invalid queue name in path"}.to_json)
+          return
+        end
+
+        queue_name = queue_match[1]
+
+        queue = JoobQ[queue_name]
+        unless queue
+          context.response.status_code = 404
+          context.response.print({error: "Queue '#{queue_name}' not found"}.to_json)
+          return
+        end
+
+        begin
+          success = queue.store.move_job_back_to_queue(queue_name)
+
+          if success
+            response = {
+              status: "success",
+              message: "Successfully reprocessed busy jobs for queue '#{queue_name}'",
+              queue: queue_name,
+              timestamp: Time.local.to_rfc3339
+            }
+            context.response.status = HTTP::Status::OK
+            context.response.print(response.to_json)
+          else
+            response = {
+              status: "warning",
+              message: "No busy jobs found to reprocess for queue '#{queue_name}'",
+              queue: queue_name,
+              timestamp: Time.local.to_rfc3339
+            }
+            context.response.status = HTTP::Status::OK
+            context.response.print(response.to_json)
+          end
+        rescue ex
+          Log.error &.emit(
+            "Error reprocessing busy jobs for queue",
+            queue: queue_name,
+            error: ex.message || "Unknown error"
+          )
+
+          response = {
+            status: "error",
+            message: "Failed to reprocess busy jobs for queue '#{queue_name}': #{ex.message}",
+            queue: queue_name,
+            timestamp: Time.local.to_rfc3339
+          }
+          context.response.status = HTTP::Status::INTERNAL_SERVER_ERROR
+          context.response.print(response.to_json)
+        end
+      end,
     } of NamedTuple(method: String, path: String) => Proc(HTTP::Server::Context, Nil)
 
     def self.register_endpoint(method, path, handler)

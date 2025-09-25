@@ -93,6 +93,19 @@ module JoobQ
       nil
     end
 
+    def claim_job(worker_id : String) : String?
+      store.claim_job(name, worker_id, T)
+    rescue ex
+      Log.error &.emit("Error Claiming Job", queue: name, worker: worker_id, error: ex.message)
+      nil
+    end
+
+    def release_job_claim(worker_id : String) : Nil
+      store.release_job_claim(name, worker_id)
+    rescue ex
+      Log.error &.emit("Error Releasing Job Claim", queue: name, worker: worker_id, error: ex.message)
+    end
+
     def status : String
       if size.zero? && running?
         return "Awaiting"

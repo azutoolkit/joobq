@@ -64,6 +64,48 @@ module JoobQ
       nil
     end
 
+    # Atomic job claiming with worker identification
+    def claim_job(queue_name : String, worker_id : String, klass : Class) : String?
+      processing_key = processing_queue(queue_name)
+      worker_claim_key = "#{processing_key}:#{worker_id}"
+
+      # Use a Lua script for atomic job claiming
+      lua_script = <<-LUA
+        local queue_key = KEYS[1]
+        local processing_key = KEYS[2]
+        local worker_claim_key = KEYS[3]
+        local worker_id = ARGV[1]
+        local timeout = ARGV[2]
+
+        -- Try to get a job from the queue
+        local job_data = redis.call('BRPOPLPUSH', queue_key, processing_key, timeout)
+        if job_data then
+          -- Atomically claim the job for this worker
+          redis.call('HSET', worker_claim_key, 'job', job_data)
+          redis.call('HSET', worker_claim_key, 'claimed_at', redis.call('TIME')[1])
+          redis.call('EXPIRE', worker_claim_key, 3600) -- 1 hour timeout
+          return job_data
+        end
+        return nil
+      LUA
+
+      result = redis.eval(lua_script, [queue_name, processing_key, worker_claim_key], [worker_id, BLOCKING_TIMEOUT])
+      result ? result.to_s : nil
+    rescue ex
+      Log.error &.emit("Error claiming job", queue: queue_name, worker: worker_id, error: ex.message)
+      nil
+    end
+
+    def release_job_claim(queue_name : String, worker_id : String) : Nil
+      processing_key = processing_queue(queue_name)
+      worker_claim_key = "#{processing_key}:#{worker_id}"
+
+      # Remove the worker's claim
+      redis.del(worker_claim_key)
+    rescue ex
+      Log.error &.emit("Error releasing job claim", queue: queue_name, worker: worker_id, error: ex.message)
+    end
+
     def move_job_back_to_queue(queue_name : String) : Bool
       redis.brpoplpush(processing_queue(queue_name), queue_name, BLOCKING_TIMEOUT)
       true

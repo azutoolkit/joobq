@@ -7,6 +7,7 @@ require "cron_parser"
 require "./joobq/store"
 require "./joobq/error_context"
 require "./joobq/error_monitor"
+require "./joobq/api_validation"
 require "./joobq/**"
 
 module JoobQ

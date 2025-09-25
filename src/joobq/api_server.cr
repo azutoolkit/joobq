@@ -1,5 +1,6 @@
 require "http/server"
 require "json"
+require "./api_validation"
 
 module JoobQ
   class APIServer
@@ -157,26 +158,72 @@ module JoobQ
 
     ENDPOINTS = {
       {method: "POST", path: "/joobq/jobs"} => ->(context : HTTP::Server::Context) do
-        if request_body = context.request.body.try(&.gets_to_end)
-          payload = JSON.parse(request_body)
+        context.response.content_type = "application/json"
+
+        # Validate content type
+        content_type_validation = APIValidation.validate_content_type(context.request.headers["Content-Type"]?)
+        unless content_type_validation.success?
+          context.response.status_code = 400
+          context.response.print(content_type_validation.error_response.to_json)
+          return
+        end
+
+        # Validate and parse request body
+        request_body = context.request.body.try(&.gets_to_end)
+        json_validation = APIValidation.validate_json_request(request_body)
+        unless json_validation.success?
+          context.response.status_code = 400
+          context.response.print(json_validation.error_response.to_json)
+          return
+        end
+
+        payload = json_validation.data.not_nil!
+
+        # Validate job enqueue data
+        job_validation = APIValidation.validate_job_enqueue(payload)
+        unless job_validation.success?
+          context.response.status_code = 422
+          context.response.print(job_validation.error_response.to_json)
+          return
+        end
+
+        # Sanitize job data
+        sanitized_payload = payload.dup
+        if data = sanitized_payload["data"]?
+          sanitized_payload["data"] = APIValidation.sanitize_job_data(data)
+        end
+
+        begin
           queue_name = payload["queue"].to_s
           queue = JoobQ[queue_name]
-          return {error: "Invalid queue name"}.to_json unless queue
 
-          # Assuming there's a method to add a job to the queue
-          jid = queue.add(request_body)
+          # Enqueue the job
+          jid = queue.add(sanitized_payload.to_json)
 
           response = {
             status: "Job enqueued",
-            queue:  queue_name,
+            queue: queue_name,
             job_id: jid.to_s,
+            timestamp: Time.local.to_rfc3339
           }
-          context.response.content_type = "application/json"
+
           context.response.status = HTTP::Status::CREATED
           context.response.print(response.to_json)
-        else
-          context.response.status_code = 400
-          context.response.print("Invalid request")
+        rescue ex
+          Log.error &.emit(
+            "Error enqueuing job",
+            queue: queue_name,
+            error: ex.message || "Unknown error"
+          )
+
+          error_response = {
+            error: "Failed to enqueue job",
+            message: ex.message || "Unknown error occurred",
+            timestamp: Time.local.to_rfc3339
+          }
+
+          context.response.status_code = 500
+          context.response.print(error_response.to_json)
         end
       end,
       {method: "GET", path: "/joobq/jobs/registry"} => ->(context : HTTP::Server::Context) do
@@ -198,31 +245,88 @@ module JoobQ
       end,
       {method: "GET", path: "/joobq/errors/recent"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
+
+        # Validate query parameters
+        query_validation = APIValidation.validate_error_query_params(context.request.query_params)
+        unless query_validation.success?
+          context.response.status_code = 400
+          context.response.print(query_validation.error_response.to_json)
+          return
+        end
+
         limit = context.request.query_params["limit"]?.try(&.to_i) || 20
         recent_errors = JoobQ.error_monitor.get_recent_errors(limit)
         context.response.print(recent_errors.to_json)
       end,
       {method: "GET", path: "/joobq/errors/by-type"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
-        error_type = context.request.query_params["type"]?
-        if error_type
-          errors = JoobQ.error_monitor.get_errors_by_type(error_type)
-          context.response.print(errors.to_json)
-        else
+
+        # Validate query parameters
+        query_validation = APIValidation.validate_error_query_params(context.request.query_params)
+        unless query_validation.success?
           context.response.status_code = 400
-          context.response.print({error: "Missing 'type' parameter"}.to_json)
+          context.response.print(query_validation.error_response.to_json)
+          return
         end
+
+        error_type = context.request.query_params["type"]?
+        unless error_type
+          context.response.status_code = 400
+          context.response.print({
+            error: "Missing required parameter",
+            message: "The 'type' parameter is required",
+            parameter: "type",
+            timestamp: Time.local.to_rfc3339
+          }.to_json)
+          return
+        end
+
+        # Validate error type
+        type_validation = APIValidation.validate_error_type(error_type)
+        unless type_validation.success?
+          context.response.status_code = 400
+          context.response.print(type_validation.error_response.to_json)
+          return
+        end
+
+        limit = context.request.query_params["limit"]?.try(&.to_i) || 20
+        errors = JoobQ.error_monitor.get_errors_by_type(error_type, limit)
+        context.response.print(errors.to_json)
       end,
       {method: "GET", path: "/joobq/errors/by-queue"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
-        queue_name = context.request.query_params["queue"]?
-        if queue_name
-          errors = JoobQ.error_monitor.get_errors_by_queue(queue_name)
-          context.response.print(errors.to_json)
-        else
+
+        # Validate query parameters
+        query_validation = APIValidation.validate_error_query_params(context.request.query_params)
+        unless query_validation.success?
           context.response.status_code = 400
-          context.response.print({error: "Missing 'queue' parameter"}.to_json)
+          context.response.print(query_validation.error_response.to_json)
+          return
         end
+
+        queue_name = context.request.query_params["queue"]?
+        unless queue_name
+          context.response.status_code = 400
+          context.response.print({
+            error: "Missing required parameter",
+            message: "The 'queue' parameter is required",
+            parameter: "queue",
+            timestamp: Time.local.to_rfc3339
+          }.to_json)
+          return
+        end
+
+        # Validate queue name
+        queue_validation = APIValidation.validate_queue_name(queue_name)
+        unless queue_validation.success?
+          context.response.status_code = 400
+          context.response.print(queue_validation.error_response.to_json)
+          return
+        end
+
+        limit = context.request.query_params["limit"]?.try(&.to_i) || 20
+        errors = JoobQ.error_monitor.get_errors_by_queue(queue_name, limit)
+        context.response.print(errors.to_json)
       end,
       {method: "POST", path: "/joobq/queues/:queue_name/reprocess"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
@@ -233,16 +337,34 @@ module JoobQ
 
         unless queue_match && queue_match[1]?
           context.response.status_code = 400
-          context.response.print({error: "Missing or invalid queue name in path"}.to_json)
+          context.response.print({
+            error: "Invalid path format",
+            message: "Missing or invalid queue name in path",
+            expected_format: "/joobq/queues/{queue_name}/reprocess",
+            timestamp: Time.local.to_rfc3339
+          }.to_json)
           return
         end
 
         queue_name = queue_match[1]
 
+        # Validate queue name
+        queue_validation = APIValidation.validate_queue_name(queue_name)
+        unless queue_validation.success?
+          context.response.status_code = 400
+          context.response.print(queue_validation.error_response.to_json)
+          return
+        end
+
         queue = JoobQ[queue_name]
         unless queue
           context.response.status_code = 404
-          context.response.print({error: "Queue '#{queue_name}' not found"}.to_json)
+          context.response.print({
+            error: "Queue not found",
+            message: "Queue '#{queue_name}' does not exist",
+            queue: queue_name,
+            timestamp: Time.local.to_rfc3339
+          }.to_json)
           return
         end
 

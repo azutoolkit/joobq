@@ -88,6 +88,31 @@ module JoobQ
           parsed_job.perform
           parsed_job.completed!
         end
+      rescue ex : Exception
+        # Use the monitored error handling system with rich context
+        error_context = MonitoredErrorHandler.handle_job_error(
+          parsed_job,
+          @queue,
+          ex,
+          worker_id: @worker_id,
+          additional_context: {
+            "worker_id" => @worker_id,
+            "job_data_length" => job.size.to_s,
+            "queue_workers" => @queue.total_workers.to_s,
+            "queue_running_workers" => @queue.running_workers.to_s
+          }
+        )
+
+        # Log worker-specific error
+        additional_context = {
+          worker_wid: wid.to_s,
+          job_processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s
+        }.to_h
+
+        Log.error &.emit(
+          "Worker job processing failed",
+          error_context.to_log_context.merge(additional_context)
+        )
       ensure
         # Always release the job claim and delete the job
         @queue.release_job_claim(@worker_id)

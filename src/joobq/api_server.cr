@@ -187,6 +187,43 @@ module JoobQ
         context.response.content_type = "application/json"
         context.response.print({status: "OK"}.to_json)
       end,
+      {method: "GET", path: "/joobq/errors/stats"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+        stats = {
+          error_counts: JoobQ.error_monitor.get_error_stats,
+          recent_errors_count: JoobQ.error_monitor.get_recent_errors.size,
+          time_window: JoobQ.error_monitor.time_window.to_s
+        }
+        context.response.print(stats.to_json)
+      end,
+      {method: "GET", path: "/joobq/errors/recent"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+        limit = context.request.query_params["limit"]?.try(&.to_i) || 20
+        recent_errors = JoobQ.error_monitor.get_recent_errors(limit)
+        context.response.print(recent_errors.to_json)
+      end,
+      {method: "GET", path: "/joobq/errors/by-type"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+        error_type = context.request.query_params["type"]?
+        if error_type
+          errors = JoobQ.error_monitor.get_errors_by_type(error_type)
+          context.response.print(errors.to_json)
+        else
+          context.response.status_code = 400
+          context.response.print({error: "Missing 'type' parameter"}.to_json)
+        end
+      end,
+      {method: "GET", path: "/joobq/errors/by-queue"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+        queue_name = context.request.query_params["queue"]?
+        if queue_name
+          errors = JoobQ.error_monitor.get_errors_by_queue(queue_name)
+          context.response.print(errors.to_json)
+        else
+          context.response.status_code = 400
+          context.response.print({error: "Missing 'queue' parameter"}.to_json)
+        end
+      end,
     } of NamedTuple(method: String, path: String) => Proc(HTTP::Server::Context, Nil)
 
     def self.register_endpoint(method, path, handler)

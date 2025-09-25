@@ -14,22 +14,20 @@ module JoobQ
       end
 
       private def handle_failure(job : JoobQ::Job, queue : BaseQueue, ex : Exception)
-        job.failed!
-        job.retries -= 1
+        # Calculate retry count (original retries - current retries)
+        retry_count = job.retries - (job.retries || 0)
 
-        job.error = {
-          failed_at: Time.local.to_rfc3339,
-          message:   ex.message,
-          backtrace: ex.inspect_with_backtrace[0..10],
-          cause:     ex.cause.to_s,
-        }
-
-        if job.retries > 0
-          job.retrying!
-          ExponentialBackoff.retry(job, queue)
-        else
-          DeadLetterManager.add(job)
-        end
+        # Use the monitored error handling system
+        error_context = MonitoredErrorHandler.handle_job_error(
+          job,
+          queue,
+          ex,
+          retry_count: retry_count,
+          additional_context: {
+            "middleware" => "retry",
+            "original_retries" => job.retries.to_s
+          }
+        )
       end
     end
   end

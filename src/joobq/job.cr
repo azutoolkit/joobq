@@ -119,7 +119,16 @@ module JoobQ
       property status : Status = Status::Enqueued
 
       @[JSON::Field(emit_null: true)]
-      property error : NamedTuple(failed_at: String, message: String | Nil, backtrace: String, cause: String)?
+      property error : NamedTuple(
+        failed_at: String,
+        message: String | Nil,
+        backtrace: String,
+        cause: String,
+        error_type: String?,
+        error_class: String?,
+        retry_count: Int32?,
+        system_context: Hash(String, String)?
+      )?
 
       @[JSON::Field(ignore: true)]
       property enqueue_time = Time.monotonic

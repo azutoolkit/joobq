@@ -39,13 +39,40 @@ module JoobQ
     def add(job : String)
       add T.from_json(job)
     rescue ex
-      Log.error &.emit("Error Enqueuing", queue: name, error: ex.message, job: job)
+      handle_enqueue_error(ex, job, "string_job")
     end
 
     def add(job : T)
       store.enqueue job
     rescue ex
-      Log.error &.emit("Error Enqueuing", queue: name, error: ex.message, job: job.to_s)
+      handle_enqueue_error(ex, job.to_json, "typed_job")
+    end
+
+    private def handle_enqueue_error(ex : Exception, job_data : String, job_type : String)
+      error_context = {
+        queue: name,
+        job_type: job_type,
+        error_class: ex.class.name,
+        error_message: ex.message || "Unknown error",
+        job_data_length: job_data.size.to_s,
+        queue_size: size.to_s,
+        queue_workers: total_workers.to_s,
+        occurred_at: Time.local.to_rfc3339
+      }
+
+      Log.error &.emit("Failed to enqueue job", error_context)
+
+      # For critical enqueue failures, we might want to raise or handle differently
+      case ex
+      when Redis::CannotConnectError
+        Log.error &.emit("Redis connection failed during enqueue", error_context)
+        raise ex # Re-raise connection errors as they're critical
+      when JSON::Error
+        Log.error &.emit("Invalid job data format", error_context)
+        # Don't re-raise JSON errors, just log them
+      else
+        Log.error &.emit("Unexpected error during enqueue", error_context)
+      end
     end
 
     def delete_job(job : String)

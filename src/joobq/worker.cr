@@ -99,7 +99,7 @@ module JoobQ
           parsed_job = T.from_json(job)
           parsed_job.running!
 
-          middleware_pipeline.call(parsed_job, @queue) do
+          middleware_pipeline.call(parsed_job, @queue, @worker_id) do
             parsed_job.perform
             parsed_job.completed!
           end

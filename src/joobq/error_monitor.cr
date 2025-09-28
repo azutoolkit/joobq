@@ -70,6 +70,12 @@ module JoobQ
       @error_counts.dup
     end
 
+    # Get fresh error stats by forcing a reload from Redis
+    def get_fresh_error_stats : Hash(String, Int32)
+      force_reload_from_redis
+      @error_counts.dup
+    end
+
     def get_time_windowed_error_stats : Hash(String, Int32)
       # Ensure Redis data is loaded
       ensure_redis_loaded
@@ -255,6 +261,16 @@ module JoobQ
     def load_errors_from_redis : Nil
       return if @redis_loaded
 
+      perform_redis_load
+    end
+
+    # Force reload data from Redis, bypassing the cache
+    def force_reload_from_redis : Nil
+      @redis_loaded = false
+      perform_redis_load
+    end
+
+    private def perform_redis_load : Nil
       begin
         store = JoobQ.store.as(RedisStore)
 
@@ -283,8 +299,8 @@ module JoobQ
         # Sort by occurred_at timestamp
         @recent_errors.sort_by! { |error| error.occurred_at }
 
-
         @redis_loaded = true
+        Log.debug &.emit("Loaded #{@recent_errors.size} errors from Redis")
       rescue ex
         Log.warn &.emit("Failed to load errors from Redis", error: ex.message)
         @redis_loaded = true # Mark as loaded even if failed to avoid retrying
@@ -312,7 +328,7 @@ module JoobQ
       job : Job,
       queue : BaseQueue,
       exception : Exception,
-      worker_id : String? = nil,
+      worker_id : String,
       retry_count : Int32 = 0,
       additional_context : Hash(String, String) = {} of String => String
     ) : ErrorContext

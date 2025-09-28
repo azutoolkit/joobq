@@ -5,7 +5,7 @@ module JoobQ
 
     getter job_id : String
     getter queue_name : String
-    getter worker_id : String?
+    getter worker_id : String
     getter job_type : String
     getter error_type : String
     getter error_message : String
@@ -20,6 +20,7 @@ module JoobQ
     def initialize(
       @job_id : String,
       @queue_name : String,
+      @worker_id : String,
       @job_type : String,
       @error_type : String,
       @error_message : String,
@@ -27,7 +28,6 @@ module JoobQ
       @backtrace : Array(String),
       @retry_count : Int32 = 0,
       @job_data : String? = nil,
-      @worker_id : String? = nil,
       @error_cause : String? = nil,
       @system_context : Hash(String, String) = {} of String => String,
       @occurred_at : String = Time.local.to_rfc3339,
@@ -38,7 +38,7 @@ module JoobQ
       job : Job,
       queue : BaseQueue,
       exception : Exception,
-      worker_id : String? = nil,
+      worker_id : String,
       retry_count : Int32 = 0,
       additional_context : Hash(String, String) = {} of String => String,
     ) : ErrorContext
@@ -47,6 +47,7 @@ module JoobQ
       new(
         job_id: job.jid.to_s,
         queue_name: queue.name,
+        worker_id: worker_id,
         job_type: job.class.name,
         error_type: error_type,
         error_message: exception.message || "Unknown error",
@@ -54,7 +55,6 @@ module JoobQ
         backtrace: extract_backtrace(exception),
         retry_count: retry_count,
         job_data: job.to_json,
-        worker_id: worker_id,
         error_cause: exception.cause.try(&.message),
         system_context: build_system_context(queue, additional_context),
         occurred_at: Time.local.to_rfc3339
@@ -171,7 +171,7 @@ module JoobQ
       job : Job,
       queue : BaseQueue,
       exception : Exception,
-      worker_id : String? = nil,
+      worker_id : String,
       retry_count : Int32 = 0,
       additional_context : Hash(String, String) = {} of String => String,
     ) : ErrorContext

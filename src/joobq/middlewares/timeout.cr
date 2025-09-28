@@ -7,9 +7,25 @@ module JoobQ
         true
       end
 
-      def call(job : Job, queue : BaseQueue, next_middleware : ->) : Nil
+      def call(job : Job, queue : BaseQueue, worker_id : String, next_middleware : ->) : Nil
         if job.expired?
           job.expired!
+
+          # Record timeout error to error context
+          timeout_error = Exception.new("Job expired after timeout")
+          MonitoredErrorHandler.handle_job_error(
+            job,
+            queue,
+            timeout_error,
+            worker_id: worker_id,
+            retry_count: 0,
+            additional_context: {
+              "middleware" => "timeout",
+              "reason" => "job_expired",
+              "worker_id" => worker_id
+            }
+          )
+
           DeadLetterManager.add(job)
         else
           next_middleware.call

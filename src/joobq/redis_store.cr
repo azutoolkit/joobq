@@ -20,8 +20,8 @@ module JoobQ
     def initialize(@host : String = ENV.fetch("REDIS_HOST", "localhost"),
                    @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
                    @password : String? = ENV["REDIS_PASS"]?,
-                   @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "500").to_i,
-                   @pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "5.0").to_f)
+                   @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "100").to_i,
+                   @pool_timeout : Float64 = 0.5)
       @redis = Redis::PooledClient.new(
         host: @host,
         port: @port,
@@ -32,12 +32,6 @@ module JoobQ
 
       # Cache Lua scripts for better performance
       cache_lua_scripts
-
-      # Initialize connection health monitoring
-      start_connection_health_monitor
-
-      # Pre-warm connections for better performance
-      pre_warm_connections
     end
 
     # Cache Lua scripts to avoid recompilation overhead
@@ -142,12 +136,8 @@ module JoobQ
     end
 
     def delete_job(job : String) : Nil
-      job_data = JSON.parse(job)
-      queue_name = job_data["queue"].as_s
-      processing_key = processing_queue(queue_name)
-
-      # Remove the specific job from the processing queue
-      redis.lrem(processing_key, 1, job)
+      job = JSON.parse(job)
+      redis.lpop processing_queue(job["queue"].as_s)
     end
 
     def enqueue(job : Job) : String
@@ -331,82 +321,5 @@ module JoobQ
     private def processing_queue(name : String)
       "#{PROCESSING_QUEUE}:#{name}"
     end
-
-    # Start background fiber for connection health monitoring
-    private def start_connection_health_monitor
-      spawn do
-        loop do
-          sleep 30.0 # Check every 30 seconds
-          validate_pool_connections
-        rescue ex
-          Log.error &.emit("Connection health monitor error", error: ex.message)
-        end
-      end
-    end
-
-    # Validate all connections in the pool and remove stale ones
-    private def validate_pool_connections
-      begin
-        # Test a simple ping to validate connection health
-        redis.ping
-        Log.debug &.emit("Redis pool health check passed",
-                        pool_size: @pool_size,
-                        pool_timeout: @pool_timeout)
-      rescue ex
-        Log.warn &.emit("Redis pool health check failed", error: ex.message)
-        # In a production environment, you might want to implement
-        # connection pool recreation or more sophisticated recovery
-      end
-    end
-
-    # Get pool statistics for monitoring
-    def pool_stats : Hash(String, Int32)
-      {
-        "pool_size" => @pool_size,
-        "pool_timeout" => @pool_timeout.to_i,
-        "available_connections" => redis.pool.pending,
-        "total_connections" => redis.pool.size
-      }
-    end
-
-    # Pre-warm connections to reduce latency during high load
-    private def pre_warm_connections
-      spawn do
-        begin
-          # Pre-warm a subset of connections (10% of pool size, max 50)
-          connections_to_warm = Math.min(@pool_size // 10, 50)
-
-          connections_to_warm.times do |i|
-            spawn do
-              begin
-                redis.ping
-                Log.debug &.emit("Pre-warmed Redis connection", connection: i + 1)
-              rescue ex
-                Log.warn &.emit("Failed to pre-warm connection", connection: i + 1, error: ex.message)
-              end
-            end
-          end
-
-          Log.info &.emit("Pre-warming #{connections_to_warm} Redis connections")
-        rescue ex
-          Log.warn &.emit("Error during connection pre-warming", error: ex.message)
-        end
-      end
-    end
-
-    # Force pool recreation if needed (for recovery scenarios)
-    def recreate_pool : Nil
-      Log.info &.emit("Recreating Redis connection pool")
-      @redis = Redis::PooledClient.new(
-        host: @host,
-        port: @port,
-        password: @password,
-        pool_size: @pool_size,
-        pool_timeout: @pool_timeout
-      )
-      cache_lua_scripts
-      pre_warm_connections
-    end
-
   end
 end

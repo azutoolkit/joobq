@@ -289,8 +289,7 @@ module JoobQ
           return
         end
 
-        limit = context.request.query_params["limit"]?.try(&.to_i) || 20
-        errors = JoobQ.error_monitor.get_errors_by_type(error_type, limit)
+        errors = JoobQ.error_monitor.get_errors_by_type(error_type)
         context.response.print(errors.to_json)
       end,
       {method: "GET", path: "/joobq/errors/by-queue"} => ->(context : HTTP::Server::Context) do
@@ -324,8 +323,7 @@ module JoobQ
           return
         end
 
-        limit = context.request.query_params["limit"]?.try(&.to_i) || 20
-        errors = JoobQ.error_monitor.get_errors_by_queue(queue_name, limit)
+        errors = JoobQ.error_monitor.get_errors_by_queue(queue_name)
         context.response.print(errors.to_json)
       end,
       {method: "POST", path: "/joobq/queues/:queue_name/reprocess"} => ->(context : HTTP::Server::Context) do

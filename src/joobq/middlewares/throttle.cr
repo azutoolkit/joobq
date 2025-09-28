@@ -9,7 +9,7 @@ module JoobQ
         !queue.throttle_limit.nil?
       end
 
-      def call(job : JoobQ::Job, queue : BaseQueue, next_middleware : ->) : Nil
+      def call(job : JoobQ::Job, queue : BaseQueue, worker_id : String, next_middleware : ->) : Nil
         throttle(queue)
         next_middleware.call
       end

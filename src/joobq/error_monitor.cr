@@ -50,7 +50,11 @@ module JoobQ
     def clear_old_errors : Nil
       cutoff_time = Time.local - @time_window
       @recent_errors.reject! { |error|
-        Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z") < cutoff_time rescue true
+        begin
+          Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC) < cutoff_time
+        rescue
+          true
+        end
       }
     end
 
@@ -60,6 +64,10 @@ module JoobQ
     end
 
     private def trim_old_errors : Nil
+      # First remove old errors based on time window
+      clear_old_errors
+
+      # Then trim if still too many errors
       if @recent_errors.size > @max_recent_errors
         @recent_errors = @recent_errors.last(@max_recent_errors)
       end

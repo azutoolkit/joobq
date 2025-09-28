@@ -142,8 +142,12 @@ module JoobQ
     end
 
     def delete_job(job : String) : Nil
-      job = JSON.parse(job)
-      redis.lpop processing_queue(job["queue"].as_s)
+      job_data = JSON.parse(job)
+      queue_name = job_data["queue"].as_s
+      processing_key = processing_queue(queue_name)
+
+      # Remove the specific job from the processing queue
+      redis.lrem(processing_key, 1, job)
     end
 
     def enqueue(job : Job) : String

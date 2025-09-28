@@ -31,6 +31,7 @@ module JoobQ
         error_context = ErrorContext.new(
           job_id: "test-job-1",
           queue_name: "example",
+          worker_id: "test-worker",
           job_type: "TestJob",
           error_type: "test_error",
           error_message: "Test error message",
@@ -56,6 +57,7 @@ module JoobQ
         error_context = ErrorContext.new(
           job_id: "test-job-1",
           queue_name: "example",
+          worker_id: "test-worker",
           job_type: "TestJob",
           error_type: "test_error",
           error_message: "Test error message",
@@ -78,6 +80,7 @@ module JoobQ
         error1 = ErrorContext.new(
           job_id: "job-1",
           queue_name: "queue-1",
+          worker_id: "test-worker",
           job_type: "TestJob",
           error_type: "validation_error",
           error_message: "Validation failed",
@@ -89,6 +92,7 @@ module JoobQ
         error2 = ErrorContext.new(
           job_id: "job-2",
           queue_name: "queue-1",
+          worker_id: "test-worker",
           job_type: "TestJob",
           error_type: "connection_error",
           error_message: "Connection failed",
@@ -115,6 +119,7 @@ module JoobQ
         error1 = ErrorContext.new(
           job_id: "job-1",
           queue_name: "queue-1",
+          worker_id: "test-worker",
           job_type: "TestJob",
           error_type: "test_error",
           error_message: "Test error",
@@ -126,6 +131,7 @@ module JoobQ
         error2 = ErrorContext.new(
           job_id: "job-2",
           queue_name: "queue-2",
+          worker_id: "test-worker",
           job_type: "TestJob",
           error_type: "test_error",
           error_message: "Test error",
@@ -155,6 +161,7 @@ module JoobQ
         error_context = ErrorContext.new(
           job_id: "old-job",
           queue_name: "example",
+          worker_id: "test-worker",
           job_type: "TestJob",
           error_type: "test_error",
           error_message: "Old error",
@@ -181,6 +188,7 @@ module JoobQ
         error_context = ErrorContext.new(
           job_id: "test-job",
           queue_name: "example",
+          worker_id: "test-worker",
           job_type: "TestJob",
           error_type: "test_error",
           error_message: "Test error",

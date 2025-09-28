@@ -1,3 +1,6 @@
+require "spec"
+require "../src/joobq"
+
 struct FailJob
   include JoobQ::Job
 

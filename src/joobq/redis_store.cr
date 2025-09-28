@@ -147,9 +147,7 @@ module JoobQ
     end
 
     def enqueue(job : Job) : String
-      with_redis_connection do |conn|
-        conn.rpush job.queue, job.to_json
-      end
+      redis.rpush job.queue, job.to_json
       job.jid.to_s
     end
 
@@ -157,13 +155,10 @@ module JoobQ
       raise "Batch size must be greater than 0" if batch_size <= 0
       raise "Batch size must be less than or equal to 1000" if batch_size > 1000
 
-      # Use connection pooling for better performance
-      with_redis_connection do |conn|
-        jobs.each_slice(batch_size) do |batch_jobs|
-          conn.pipelined do |pipe|
-            batch_jobs.each do |job|
-              pipe.rpush job.queue, job.to_json
-            end
+      jobs.each_slice(batch_size) do |batch_jobs|
+        redis.pipelined do |pipe|
+          batch_jobs.each do |job|
+            pipe.rpush job.queue, job.to_json
           end
         end
       end
@@ -409,19 +404,5 @@ module JoobQ
       pre_warm_connections
     end
 
-    # Enhanced error handling for pool timeouts
-    private def with_redis_connection(&block)
-      redis.with_pool_connection do |conn|
-        yield conn
-      end
-    rescue Redis::PoolTimeoutError
-      Log.error &.emit("Redis pool timeout - all connections busy",
-                      pool_size: @pool_size,
-                      pool_timeout: @pool_timeout)
-      raise
-    rescue ex
-      Log.error &.emit("Redis connection error", error: ex.message)
-      raise
-    end
   end
 end

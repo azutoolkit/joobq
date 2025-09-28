@@ -61,15 +61,16 @@ module JoobQ
 
               if !jobs.empty?
                 # Process jobs in smaller concurrent batches to reduce connection pressure
-
-                  jobs.each do |job|
+                jobs.each_slice(32) do |job_batch|
+                  job_batch.each do |job|
                     spawn { handle_job_async(job) }
                   end
                   # Small delay between batches to allow connection reuse
-                  sleep 0.01.seconds
+                  sleep 1.microseconds if job_batch.size > 1
+                end
               else
                 # Adaptive delay to prevent busy waiting and reduce connection frequency
-                sleep 0.1.seconds
+                sleep 1.microseconds
               end
             end
           end

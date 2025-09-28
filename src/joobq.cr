@@ -45,6 +45,10 @@ module JoobQ
     queues[name]
   end
 
+  def self.error_monitor : ErrorMonitor
+    config.error_monitor
+  end
+
   def self.forge
     Log.info { "JoobQ starting..." }
 

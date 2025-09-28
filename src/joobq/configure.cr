@@ -32,6 +32,12 @@ module JoobQ
     property worker_batch_size : Int32 = 5
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
 
+    # Error Monitoring
+    @error_monitor : ErrorMonitor? = nil
+    getter error_monitor : ErrorMonitor do
+      @error_monitor ||= ErrorMonitor.new
+    end
+
     # Middlewares and Pipeline
     property middlewares : Array(Middleware) = [
       Middleware::Throttle.new,
@@ -73,6 +79,22 @@ module JoobQ
       scheduler = Scheduler.new(time_location: tz)
       @schedulers << scheduler
       with scheduler yield
+    end
+
+    # Configure error monitoring
+    def error_monitoring(&)
+      yield error_monitor
+    end
+
+    # Configure error monitoring with parameters
+    def error_monitoring(
+      alert_thresholds : Hash(String, Int32)? = nil,
+      time_window : Time::Span? = nil,
+      max_recent_errors : Int32? = nil
+    )
+      error_monitor.alert_thresholds = alert_thresholds if alert_thresholds
+      error_monitor.time_window = time_window if time_window
+      error_monitor.max_recent_errors = max_recent_errors if max_recent_errors
     end
   end
 end

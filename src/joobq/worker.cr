@@ -56,17 +56,20 @@ module JoobQ
               end
               break
             else
-              # Use batch processing for improved performance
+              # Use batch processing for improved performance and minimal connection usage
               jobs = @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
 
-              if jobs.any?
-                # Process jobs concurrently
-                jobs.each do |job|
-                  spawn { handle_job_async(job) }
-                end
+              if !jobs.empty?
+                # Process jobs in smaller concurrent batches to reduce connection pressure
+
+                  jobs.each do |job|
+                    spawn { handle_job_async(job) }
+                  end
+                  # Small delay between batches to allow connection reuse
+                  sleep 0.01.seconds if jobs.size > 1
               else
-                # Small delay to prevent busy waiting when no jobs available
-                sleep 0.001.seconds
+                # Adaptive delay to prevent busy waiting and reduce connection frequency
+                sleep 0.1.seconds
               end
             end
           end

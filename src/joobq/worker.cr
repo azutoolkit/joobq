@@ -66,7 +66,7 @@ module JoobQ
                     spawn { handle_job_async(job) }
                   end
                   # Small delay between batches to allow connection reuse
-                  sleep 0.01.seconds if jobs.size > 1
+                  sleep 0.01.seconds
               else
                 # Adaptive delay to prevent busy waiting and reduce connection frequency
                 sleep 0.1.seconds

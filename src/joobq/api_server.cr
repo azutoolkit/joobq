@@ -437,7 +437,7 @@ module JoobQ
               pipeline_failures: pipeline_stats.pipeline_failures,
               last_reset: pipeline_stats.last_reset.to_rfc3339,
               configuration: {
-                enabled: JoobQ.config.enable_pipeline_optimization?,
+                enabled: true,
                 batch_size: JoobQ.config.pipeline_batch_size,
                 timeout: JoobQ.config.pipeline_timeout,
                 max_commands: JoobQ.config.pipeline_max_commands

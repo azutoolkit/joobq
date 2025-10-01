@@ -18,10 +18,9 @@ class TestJob
   end
 end
 
-# Configure JoobQ with pipeline optimization enabled
+# Configure JoobQ (pipeline optimization is always enabled)
 JoobQ.configure do
   # Pipeline optimization settings
-  enable_pipeline_optimization = true
   pipeline_batch_size = 50
   pipeline_timeout = 1.0
   pipeline_max_commands = 500
@@ -133,7 +132,7 @@ puts "   All queue metrics collected: #{all_metrics.keys.join(", ")}"
 
 # Test 4: Configuration verification
 puts "\n4. Testing Configuration..."
-puts "   Pipeline optimization enabled: #{JoobQ.config.enable_pipeline_optimization?}"
+puts "   Pipeline optimization: Always enabled"
 puts "   Pipeline batch size: #{JoobQ.config.pipeline_batch_size}"
 puts "   Pipeline timeout: #{JoobQ.config.pipeline_timeout}s"
 puts "   Pipeline max commands: #{JoobQ.config.pipeline_max_commands}"

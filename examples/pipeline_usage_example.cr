@@ -47,10 +47,9 @@ end
 puts "🚀 JoobQ Redis Pipeline Usage Example"
 puts "=" * 50
 
-# Configure JoobQ with pipeline optimization
+# Configure JoobQ (pipeline optimization is always enabled)
 JoobQ.configure do
-  # Enable pipeline optimization
-  enable_pipeline_optimization = true
+  # Pipeline optimization settings
   pipeline_batch_size = 50
   pipeline_timeout = 1.0
   pipeline_max_commands = 1000
@@ -71,7 +70,7 @@ JoobQ.configure do
   queue "data_processing", 2, DataProcessingJob
 end
 
-puts "✅ Configuration completed with pipeline optimization enabled"
+puts "✅ Configuration completed (pipeline optimization is always enabled)"
 puts ""
 
 # Example 1: Batch Job Enqueuing
@@ -230,7 +229,7 @@ puts "⚙️  Example 8: Pipeline Configuration Summary"
 puts "-" * 30
 
 puts "Current Pipeline Configuration:"
-puts "  Pipeline optimization enabled: #{JoobQ.config.enable_pipeline_optimization?}"
+puts "  Pipeline optimization: Always enabled"
 puts "  Pipeline batch size: #{JoobQ.config.pipeline_batch_size}"
 puts "  Pipeline timeout: #{JoobQ.config.pipeline_timeout}s"
 puts "  Pipeline max commands: #{JoobQ.config.pipeline_max_commands}"
@@ -259,4 +258,4 @@ puts "For production use:"
 puts "  • Monitor pipeline statistics via /joobq/pipeline/stats"
 puts "  • Check pipeline health via /joobq/pipeline/health"
 puts "  • Tune batch sizes based on your workload"
-puts "  • Use batch operations whenever possible"
+puts "  • Pipeline optimization is always enabled for maximum performance"

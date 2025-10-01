@@ -203,32 +203,10 @@ module JoobQ
     # Redis storage methods
     private def store_error_in_redis(error_context : ErrorContext) : Nil
       begin
-        store = JoobQ.store.as(RedisStore)
-
-        # Use pipelined approach if enabled
-        if JoobQ.config.enable_pipeline_optimization?
-          store_error_in_redis_pipelined(error_context)
-        else
-          store_error_in_redis_individual(error_context)
-        end
+        store_error_in_redis_pipelined(error_context)
       rescue ex
         Log.warn &.emit("Failed to store error in Redis", error: ex.message)
       end
-    end
-
-    private def store_error_in_redis_individual(error_context : ErrorContext) : Nil
-      store = JoobQ.store.as(RedisStore)
-      error_id = "#{error_context.job_id}:#{Time.local.to_unix}"
-
-      # Store error context as JSON
-      store.redis.hset(RECENT_ERRORS_KEY, error_id, error_context.to_json)
-
-      # Add to sorted set for time-based queries (score = timestamp)
-      timestamp = Time.parse(error_context.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC).to_unix
-      store.redis.zadd(ERROR_INDEX_KEY, timestamp, error_id)
-
-      # Trim old errors from Redis
-      trim_redis_errors
     end
 
     private def store_error_in_redis_pipelined(error_context : ErrorContext) : Nil
@@ -251,16 +229,8 @@ module JoobQ
     end
 
     private def update_redis_error_counts(error_key : String) : Nil
-      # Skip individual count updates when using pipelined approach
-      # as it's already handled in store_error_in_redis_pipelined
-      return if JoobQ.config.enable_pipeline_optimization?
-
-      begin
-        store = JoobQ.store.as(RedisStore)
-        store.redis.hincrby(ERROR_COUNTS_KEY, error_key, 1)
-      rescue ex
-        Log.warn &.emit("Failed to update Redis error counts", error: ex.message)
-      end
+      # Error counts are now handled in the pipelined approach
+      # This method is kept for compatibility but does nothing
     end
 
     private def trim_redis_errors : Nil
@@ -359,14 +329,7 @@ module JoobQ
       return if error_contexts.empty?
 
       begin
-        store = JoobQ.store.as(RedisStore)
-
-        if JoobQ.config.enable_pipeline_optimization?
-          store_errors_batch_pipelined(error_contexts)
-        else
-          # Fallback to individual storage
-          error_contexts.each { |error_context| store_error_in_redis_individual(error_context) }
-        end
+        store_errors_batch_pipelined(error_contexts)
       rescue ex
         Log.warn &.emit("Failed to store error batch in Redis", error: ex.message)
       end

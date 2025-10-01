@@ -50,43 +50,26 @@ module JoobQ
 
     # Batch add jobs with pipelining for improved performance
     def add_batch(jobs : Array(T))
-      if JoobQ.config.enable_pipeline_optimization?
-        add_batch_pipelined(jobs)
-      else
-        add_batch_individual(jobs)
-      end
+      add_batch_pipelined(jobs)
     rescue ex
       Log.error &.emit("Error adding job batch", queue: name, job_count: jobs.size, error: ex.message)
     end
 
     # Add batch of job strings
     def add_batch_strings(jobs : Array(String))
-      if JoobQ.config.enable_pipeline_optimization?
-        add_batch_strings_pipelined(jobs)
-      else
-        add_batch_strings_individual(jobs)
-      end
+      add_batch_strings_pipelined(jobs)
     rescue ex
       Log.error &.emit("Error adding job batch strings", queue: name, job_count: jobs.size, error: ex.message)
     end
 
     private def add_batch_pipelined(jobs : Array(T))
-      job_objects = jobs.map { |job| job }
-      store.as(RedisStore).enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
-    end
-
-    private def add_batch_individual(jobs : Array(T))
-      jobs.each { |job| store.enqueue(job) }
+      store.as(RedisStore).enqueue_batch(jobs, JoobQ.config.pipeline_batch_size)
     end
 
     private def add_batch_strings_pipelined(jobs : Array(String))
       # Convert strings to Job objects for batch enqueuing
       job_objects = jobs.map { |job_str| T.from_json(job_str) }
       store.as(RedisStore).enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
-    end
-
-    private def add_batch_strings_individual(jobs : Array(String))
-      jobs.each { |job_str| add(job_str) }
     end
 
     private def handle_enqueue_error(ex : Exception, job_data : String, job_type : String)

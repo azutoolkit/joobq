@@ -401,25 +401,7 @@ module JoobQ
 
     # Get metrics for a single queue
     def get_queue_metrics(queue_name : String) : QueueMetrics
-      if JoobQ.config.enable_pipeline_optimization?
-        get_queue_metrics_pipelined([queue_name])[queue_name]? || QueueMetrics.new(0, 0, 0, 0, 0)
-      else
-        get_queue_metrics_individual(queue_name)
-      end
-    end
-
-    private def get_queue_metrics_individual(queue_name : String) : QueueMetrics
-      queue_size = redis.llen(queue_name)
-      processing_size = redis.llen(processing_queue(queue_name))
-      failed_count = redis.zcard("#{queue_name}:failed")
-      dead_letter_count = redis.zcard("#{queue_name}:dead_letter")
-      processed_str = redis.hget("joobq:stats:processed", queue_name)
-      processed_count = processed_str ? processed_str.to_i64 : 0i64
-
-      QueueMetrics.new(queue_size, processing_size, failed_count, dead_letter_count, processed_count)
-    rescue ex
-      Log.error &.emit("Error collecting individual queue metrics", queue: queue_name, error: ex.message)
-      QueueMetrics.new(0, 0, 0, 0, 0)
+      get_queue_metrics_pipelined([queue_name])[queue_name]? || QueueMetrics.new(0, 0, 0, 0, 0)
     end
 
     # Get metrics for all configured queues using pipelining

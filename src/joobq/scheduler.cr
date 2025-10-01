@@ -77,26 +77,7 @@ module JoobQ
 
     def enqueue_due_jobs(current_time = Time.local)
       results = store.fetch_due_jobs(current_time, @delay_set)
-
-      if JoobQ.config.enable_pipeline_optimization?
-        enqueue_due_jobs_pipelined(results, current_time)
-      else
-        enqueue_due_jobs_individual(results, current_time)
-      end
-    end
-
-    private def enqueue_due_jobs_individual(results : Array(String), current_time : Time)
-      results.each do |job_data|
-        begin
-          # Deserialize job and enqueue
-          job_json = JSON.parse(job_data)
-          queue_name = job_json["queue"]
-          queue = JoobQ.queues[queue_name]
-          queue.add(job_data)
-        rescue ex : Exception
-          handle_scheduler_error(ex, job_data, current_time)
-        end
-      end
+      enqueue_due_jobs_pipelined(results, current_time)
     end
 
     private def enqueue_due_jobs_pipelined(results : Array(String), current_time : Time)

@@ -32,10 +32,9 @@ module JoobQ
     property worker_batch_size : Int32 = 5
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
 
-    # Pipeline optimization settings
+    # Pipeline optimization settings (always enabled)
     property pipeline_batch_size : Int32 = 100
     property pipeline_timeout : Float64 = 1.0
-    property? enable_pipeline_optimization : Bool = true
     property pipeline_max_commands : Int32 = 1000
 
     # Error Monitoring

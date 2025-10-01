@@ -21,10 +21,10 @@ end
 
 # Benchmark configuration
 BENCHMARK_CONFIG = {
-  job_count: 1000,
-  error_count: 500,
+  job_count:          1000,
+  error_count:        500,
   metrics_iterations: 100,
-  warmup_iterations: 10
+  warmup_iterations:  10,
 }
 
 puts "🚀 JoobQ Redis Pipeline Benchmark"

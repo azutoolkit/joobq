@@ -90,7 +90,6 @@ module JoobQ
       end
     end
 
-
     # Async job handling for batch processing
     private def handle_job_async(job : String)
       spawn do
@@ -112,18 +111,18 @@ module JoobQ
               ex,
               worker_id: @worker_id,
               additional_context: {
-                "worker_id" => @worker_id,
-                "job_data_length" => job.size.to_s,
-                "queue_workers" => @queue.total_workers.to_s,
+                "worker_id"             => @worker_id,
+                "job_data_length"       => job.size.to_s,
+                "queue_workers"         => @queue.total_workers.to_s,
                 "queue_running_workers" => @queue.running_workers.to_s,
-                "processing_mode" => "async_batch"
+                "processing_mode"       => "async_batch",
               }
             )
 
             # Log worker-specific error
             additional_context = {
-              worker_wid: wid.to_s,
-              job_processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s
+              worker_wid:          wid.to_s,
+              job_processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s,
             }.to_h
 
             Log.error &.emit(

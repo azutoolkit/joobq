@@ -53,7 +53,7 @@ def validate_openapi_spec(file_path : String)
       "GET /joobq/errors/stats",
       "GET /joobq/errors/recent",
       "GET /joobq/errors/by-type",
-      "GET /joobq/errors/by-queue"
+      "GET /joobq/errors/by-queue",
     ]
 
     paths = spec["paths"]?
@@ -114,7 +114,6 @@ def validate_openapi_spec(file_path : String)
     end
 
     errors.empty?
-
   rescue ex
     puts "❌ Error parsing OpenAPI specification: #{ex.message}"
     false
@@ -126,16 +125,16 @@ def generate_client_info(file_path : String)
   puts "=" * 50
 
   languages = {
-    "crystal" => "crystal",
+    "crystal"    => "crystal",
     "javascript" => "javascript",
     "typescript" => "typescript-axios",
-    "python" => "python",
-    "go" => "go",
-    "java" => "java",
-    "csharp" => "csharp",
-    "ruby" => "ruby",
-    "php" => "php",
-    "rust" => "rust"
+    "python"     => "python",
+    "go"         => "go",
+    "java"       => "java",
+    "csharp"     => "csharp",
+    "ruby"       => "ruby",
+    "php"        => "php",
+    "rust"       => "rust",
   }
 
   languages.each do |lang, generator|

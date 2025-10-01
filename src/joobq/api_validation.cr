@@ -42,10 +42,10 @@ module JoobQ
 
       def error_response : Hash(String, JSON::Any)
         {
-          "error" => JSON::Any.new("Validation failed"),
-          "message" => JSON::Any.new("One or more validation errors occurred"),
+          "error"             => JSON::Any.new("Validation failed"),
+          "message"           => JSON::Any.new("One or more validation errors occurred"),
           "validation_errors" => JSON::Any.new(@errors.map { |error| JSON.parse(error.to_json) }),
-          "timestamp" => JSON::Any.new(Time.local.to_rfc3339)
+          "timestamp"         => JSON::Any.new(Time.local.to_rfc3339),
         }
       end
     end
@@ -159,12 +159,12 @@ module JoobQ
         "serialization_error",
         "configuration_error",
         "implementation_error",
-        "unknown_error"
+        "unknown_error",
       ]
 
       unless valid_types.includes?(error_type)
         result.add_error("type", "Invalid error type. Must be one of: #{valid_types.join(", ")}",
-                        JSON::Any.new(error_type), "invalid_enum")
+          JSON::Any.new(error_type), "invalid_enum")
       end
 
       result
@@ -178,10 +178,10 @@ module JoobQ
         result.add_error("queue_name", "Queue name cannot be empty")
       elsif !valid_queue_name?(queue_name)
         result.add_error("queue_name", "Queue name contains invalid characters",
-                        JSON::Any.new(queue_name), "invalid_format")
+          JSON::Any.new(queue_name), "invalid_format")
       elsif !queue_exists?(queue_name)
         result.add_error("queue_name", "Queue '#{queue_name}' does not exist",
-                        JSON::Any.new(queue_name), "queue_not_found")
+          JSON::Any.new(queue_name), "queue_not_found")
       end
 
       result
@@ -206,10 +206,10 @@ module JoobQ
         result.data = parsed
       rescue ex : JSON::Error
         result.add_error("body", "Invalid JSON format: #{ex.message}",
-                        JSON::Any.new(body), "invalid_json")
+          JSON::Any.new(body), "invalid_json")
       rescue ex
         result.add_error("body", "Failed to parse request body: #{ex.message}",
-                        JSON::Any.new(body), "parse_error")
+          JSON::Any.new(body), "parse_error")
       end
 
       result
@@ -226,7 +226,7 @@ module JoobQ
 
       unless content_type.includes?("application/json")
         result.add_error("content_type", "Content-Type must be 'application/json'",
-                        JSON::Any.new(content_type), "invalid_content_type")
+          JSON::Any.new(content_type), "invalid_content_type")
       end
 
       result
@@ -250,10 +250,10 @@ module JoobQ
     # Sanitize input to prevent injection attacks
     def self.sanitize_string(input : String) : String
       input.gsub('&', "&amp;")
-          .gsub('<', "&lt;")
-          .gsub('>', "&gt;")
-          .gsub('"', "&quot;")
-          .gsub("'", "&#x27;")
+        .gsub('<', "&lt;")
+        .gsub('>', "&gt;")
+        .gsub('"', "&quot;")
+        .gsub("'", "&#x27;")
     end
 
     # Validate and sanitize job data

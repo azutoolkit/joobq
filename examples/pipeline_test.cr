@@ -29,8 +29,8 @@ JoobQ.configure do
   error_monitoring do |monitor|
     monitor.alert_thresholds = {
       "error" => 5,
-      "warn" => 20,
-      "info" => 50
+      "warn"  => 20,
+      "info"  => 50,
     }
     monitor.time_window = 2.minutes
     monitor.max_recent_errors = 50

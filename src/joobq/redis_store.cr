@@ -204,19 +204,19 @@ module JoobQ
 
       # Use cached script if available, otherwise fall back to EVAL
       result = if script_sha = @@claim_jobs_batch_script_sha
-        begin
-          redis.evalsha(script_sha, [queue_name, processing_key, worker_claim_key],
-                       [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
-        rescue
-          # Script not found, fall back to EVAL and recache
-          cache_lua_scripts
-          redis.eval(claim_jobs_batch_lua_script, [queue_name, processing_key, worker_claim_key],
-                    [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
-        end
-      else
-        redis.eval(claim_jobs_batch_lua_script, [queue_name, processing_key, worker_claim_key],
-                  [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
-      end
+                 begin
+                   redis.evalsha(script_sha, [queue_name, processing_key, worker_claim_key],
+                     [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
+                 rescue
+                   # Script not found, fall back to EVAL and recache
+                   cache_lua_scripts
+                   redis.eval(claim_jobs_batch_lua_script, [queue_name, processing_key, worker_claim_key],
+                     [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
+                 end
+               else
+                 redis.eval(claim_jobs_batch_lua_script, [queue_name, processing_key, worker_claim_key],
+                   [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
+               end
 
       if result && result.as(Array).any?
         result.as(Array).map(&.as(String))
@@ -225,7 +225,7 @@ module JoobQ
       end
     rescue ex
       Log.error &.emit("Error claiming jobs batch", queue: queue_name, worker: worker_id,
-                      batch_size: batch_size, error: ex.message)
+        batch_size: batch_size, error: ex.message)
       [] of String
     end
 
@@ -258,7 +258,7 @@ module JoobQ
       end
     rescue ex
       Log.error &.emit("Error releasing job claims batch", queue: queue_name, worker: worker_id,
-                      job_count: job_count, error: ex.message)
+        job_count: job_count, error: ex.message)
     end
 
     def move_job_back_to_queue(queue_name : String) : Bool
@@ -280,7 +280,7 @@ module JoobQ
       current_time = Time.local,
       delay_set : String = DELAYED_SET,
       limit : Int32 = 50,
-      remove : Bool = true
+      remove : Bool = true,
     ) : Array(String)
       score = current_time.to_unix_ms
       jobs = redis.zrangebyscore(delay_set, 0, score, with_scores: false, limit: [0, limit])
@@ -320,7 +320,7 @@ module JoobQ
       end
     rescue ex
       Log.error &.emit("Error in batch job cleanup", queue: queue_name, worker: worker_id,
-                      job_count: job_ids.size, error: ex.message)
+        job_count: job_ids.size, error: ex.message)
     end
 
     # Enhanced job processing cleanup with pipelining
@@ -329,13 +329,13 @@ module JoobQ
       worker_claim_key = "#{processing_key}:#{worker_id}"
 
       redis.pipelined do |pipe|
-        pipe.del(worker_claim_key)                    # Release claim
-        pipe.lrem(processing_key, 1, job_id)          # Remove from processing
-        pipe.hincrby("joobq:stats:processed", queue_name, 1)  # Update stats
+        pipe.del(worker_claim_key)                           # Release claim
+        pipe.lrem(processing_key, 1, job_id)                 # Remove from processing
+        pipe.hincrby("joobq:stats:processed", queue_name, 1) # Update stats
       end
     rescue ex
       Log.error &.emit("Error in pipelined job cleanup", queue: queue_name, worker: worker_id,
-                      job_id: job_id, error: ex.message)
+        job_id: job_id, error: ex.message)
     end
 
     def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
@@ -370,11 +370,11 @@ module JoobQ
       # Process results (Redis pipelined returns results in order)
       results = redis.pipelined do |pipe|
         queue_names.each do |queue_name|
-          pipe.llen(queue_name)                                    # Queue size
-          pipe.llen(processing_queue(queue_name))                  # Processing size
-          pipe.zcard("#{queue_name}:failed")                       # Failed count
-          pipe.zcard("#{queue_name}:dead_letter")                  # Dead letter count
-          pipe.hget("joobq:stats:processed", queue_name)           # Processed count
+          pipe.llen(queue_name)                          # Queue size
+          pipe.llen(processing_queue(queue_name))        # Processing size
+          pipe.zcard("#{queue_name}:failed")             # Failed count
+          pipe.zcard("#{queue_name}:dead_letter")        # Dead letter count
+          pipe.hget("joobq:stats:processed", queue_name) # Processed count
         end
       end
 

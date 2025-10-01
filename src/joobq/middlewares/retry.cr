@@ -26,9 +26,9 @@ module JoobQ
           worker_id: worker_id,
           retry_count: retry_count,
           additional_context: {
-            "middleware" => "retry",
+            "middleware"       => "retry",
             "original_retries" => job.retries.to_s,
-            "worker_id" => worker_id
+            "worker_id"        => worker_id,
           }
         )
       end

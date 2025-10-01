@@ -7,22 +7,19 @@ module JoobQ
     getter recent_errors : Array(ErrorContext) = [] of ErrorContext
     getter alert_thresholds : Hash(String, Int32) = {
       "error" => 10,
-      "warn" => 50,
-      "info" => 100
+      "warn"  => 50,
+      "info"  => 100,
     } of String => Int32
     getter time_window : Time::Span = 5.minutes
     getter max_recent_errors : Int32 = 100
 
     # Redis keys for error storage
-    private ERROR_COUNTS_KEY = "joobq:error_counts"
+    private ERROR_COUNTS_KEY  = "joobq:error_counts"
     private RECENT_ERRORS_KEY = "joobq:recent_errors"
-    private ERROR_INDEX_KEY = "joobq:error_index"
+    private ERROR_INDEX_KEY   = "joobq:error_index"
 
     # Flag to track if Redis data has been loaded
     @redis_loaded : Bool = false
-
-    def initialize
-    end
 
     # Setter methods for configuration
     def alert_thresholds=(thresholds : Hash(String, Int32))
@@ -56,9 +53,6 @@ module JoobQ
       # Update error counts
       error_key = "#{error_context.error_type}:#{error_context.queue_name}"
       @error_counts[error_key] = (@error_counts[error_key]? || 0) + 1
-
-      # Update Redis error counts
-      update_redis_error_counts(error_key)
 
       # Check for alerts
       check_alerts(error_context)
@@ -177,14 +171,14 @@ module JoobQ
 
     private def send_alert(error_context : ErrorContext, count : Int32, threshold : Int32) : Nil
       alert_context = {
-        alert_type: "error_threshold_exceeded",
-        error_type: error_context.error_type,
-        queue_name: error_context.queue_name,
+        alert_type:    "error_threshold_exceeded",
+        error_type:    error_context.error_type,
+        queue_name:    error_context.queue_name,
         current_count: count.to_s,
-        threshold: threshold.to_s,
-        severity: error_context.severity,
-        time_window: @time_window.to_s,
-        occurred_at: Time.local.to_rfc3339
+        threshold:     threshold.to_s,
+        severity:      error_context.severity,
+        time_window:   @time_window.to_s,
+        occurred_at:   Time.local.to_rfc3339,
       }
 
       case error_context.severity
@@ -225,40 +219,6 @@ module JoobQ
         # Trim old errors (if needed)
         cutoff_time = (Time.local - @time_window).to_unix
         pipe.zremrangebyscore(ERROR_INDEX_KEY, "-inf", cutoff_time)
-      end
-    end
-
-    private def update_redis_error_counts(error_key : String) : Nil
-      # Error counts are now handled in the pipelined approach
-      # This method is kept for compatibility but does nothing
-    end
-
-    private def trim_redis_errors : Nil
-      begin
-        store = JoobQ.store.as(RedisStore)
-        cutoff_time = (Time.local - @time_window).to_unix
-
-        # Remove old errors from sorted set
-        store.redis.zremrangebyscore(ERROR_INDEX_KEY, "-inf", cutoff_time)
-
-        # Get current error IDs from sorted set
-        error_ids = store.redis.zrange(ERROR_INDEX_KEY, 0, -1)
-
-        # If we have too many errors, remove the oldest ones
-        if error_ids.size > @max_recent_errors
-          excess_count = error_ids.size - @max_recent_errors
-          oldest_ids = error_ids[0...excess_count]
-
-          # Remove oldest errors from hash
-          oldest_ids.each do |error_id|
-            store.redis.hdel(RECENT_ERRORS_KEY, error_id)
-          end
-
-          # Remove from sorted set
-          store.redis.zremrangebyrank(ERROR_INDEX_KEY, 0, excess_count - 1)
-        end
-      rescue ex
-        Log.warn &.emit("Failed to trim Redis errors", error: ex.message)
       end
     end
 
@@ -368,7 +328,6 @@ module JoobQ
     end
   end
 
-
   # Enhanced error handler that integrates with monitoring
   module MonitoredErrorHandler
     def self.handle_job_error(
@@ -377,7 +336,7 @@ module JoobQ
       exception : Exception,
       worker_id : String,
       retry_count : Int32 = 0,
-      additional_context : Hash(String, String) = {} of String => String
+      additional_context : Hash(String, String) = {} of String => String,
     ) : ErrorContext
       # Create error context using ErrorHandler
       error_context = ErrorHandler.handle_job_error(job, queue, exception, worker_id, retry_count, additional_context)

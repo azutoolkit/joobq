@@ -15,12 +15,12 @@ module JoobQ
     def enqueue_job(queue : String, job_type : String, data : Hash(String, JSON::Any),
                     priority : Int32 = 0, retries : Int32 = 3, delay : Int32 = 0)
       payload = {
-        queue: queue,
+        queue:    queue,
         job_type: job_type,
-        data: data,
+        data:     data,
         priority: priority,
-        retries: retries,
-        delay: delay
+        retries:  retries,
+        delay:    delay,
       }
 
       response = HTTP::Client.post("#{@base_url}/joobq/jobs") do |request|
@@ -146,9 +146,9 @@ if PROGRAM_NAME.includes?("crystal_client_example.cr")
     # Enqueue a job
     puts "\n📤 Enqueuing a job..."
     job_data = {
-      "email" => "user@example.com",
-      "subject" => "Welcome to JoobQ",
-      "template" => "welcome"
+      "email"    => "user@example.com",
+      "subject"  => "Welcome to JoobQ",
+      "template" => "welcome",
     }
 
     response = client.enqueue_job(
@@ -176,7 +176,6 @@ if PROGRAM_NAME.includes?("crystal_client_example.cr")
     puts "\n🔄 Reprocessing busy jobs..."
     reprocess_result = client.reprocess_busy_jobs("email")
     puts "🔄 Result: #{reprocess_result["status"]} - #{reprocess_result["message"]}"
-
   rescue ex
     puts "❌ Error: #{ex.message}"
   end

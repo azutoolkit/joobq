@@ -34,7 +34,7 @@ module JoobQ
     def initialize(
       @time_location : Time::Location = JoobQ.config.time_location,
       @store : Store = RedisStore.instance,
-      @delay_set : String = RedisStore::DELAYED_SET
+      @delay_set : String = RedisStore::DELAYED_SET,
     )
       @delayed_scheduler = DelayedJobScheduler.new(store)
       @recurring_scheduler = RecurringJobScheduler.new
@@ -100,15 +100,33 @@ module JoobQ
       # Batch enqueue per queue
       jobs_by_queue.each do |queue_name, jobs|
         begin
-          queue = JoobQ.queues[queue_name]
-          enqueue_jobs_batch_to_queue(queue, jobs)
+          queue = JoobQ.queues[queue_name]?
+          if queue
+            enqueue_jobs_batch_to_queue(queue, jobs)
+          else
+            Log.warn &.emit("Queue not found", queue: queue_name)
+            # Fallback to individual enqueuing via store
+            jobs.each do |job_data|
+              begin
+                # Parse job data to get queue name and enqueue directly
+                job_json = JSON.parse(job_data)
+                queue_name = job_json["queue"].as_s
+                JoobQ.store.redis.rpush(queue_name, job_data)
+              rescue ex : Exception
+                handle_scheduler_error(ex, job_data, current_time)
+              end
+            end
+          end
         rescue ex : Exception
           Log.error &.emit("Error enqueuing batch to queue", queue: queue_name,
-                          job_count: jobs.size, error: ex.message)
-          # Fallback to individual enqueuing
+            job_count: jobs.size, error: ex.message)
+          # Fallback to individual enqueuing via store
           jobs.each do |job_data|
             begin
-              queue.add(job_data)
+              # Parse job data to get queue name and enqueue directly
+              job_json = JSON.parse(job_data)
+              queue_name = job_json["queue"].as_s
+              JoobQ.store.redis.rpush(queue_name, job_data)
             rescue ex : Exception
               handle_scheduler_error(ex, job_data, current_time)
             end
@@ -131,20 +149,20 @@ module JoobQ
 
     private def handle_scheduler_error(ex : Exception, job_data : String, current_time : Time)
       error_context = {
-        scheduler: "delayed_jobs",
-        error_class: ex.class.name,
-        error_message: ex.message || "Unknown error",
+        scheduler:       "delayed_jobs",
+        error_class:     ex.class.name,
+        error_message:   ex.message || "Unknown error",
         job_data_length: job_data.size.to_s,
-        current_time: current_time.to_rfc3339,
-        delay_set: @delay_set,
-        occurred_at: Time.local.to_rfc3339
+        current_time:    current_time.to_rfc3339,
+        delay_set:       @delay_set,
+        occurred_at:     Time.local.to_rfc3339,
       }.to_h
 
       case ex
       when KeyError
         additional_context = {
-          queue_name: "unknown",
-          available_queues: JoobQ.queues.keys.join(",")
+          queue_name:       "unknown",
+          available_queues: JoobQ.queues.keys.join(","),
         }.to_h
         Log.error &.emit("Queue not found for delayed job", error_context.merge(additional_context))
       when JSON::Error

@@ -21,8 +21,8 @@ module JoobQ
             retry_count: 0,
             additional_context: {
               "middleware" => "timeout",
-              "reason" => "job_expired",
-              "worker_id" => worker_id
+              "reason"     => "job_expired",
+              "worker_id"  => worker_id,
             }
           )
 

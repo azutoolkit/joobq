@@ -259,7 +259,7 @@ module JoobQ
         {exception: JSON::Error.new("JSON parse error"), expected_type: "serialization_error"},
         {exception: KeyError.new("Missing key"), expected_type: "configuration_error"},
         {exception: NotImplementedError.new("Not implemented"), expected_type: "implementation_error"},
-        {exception: RuntimeError.new("Generic error"), expected_type: "unknown_error"}
+        {exception: RuntimeError.new("Generic error"), expected_type: "unknown_error"},
       ]
 
       test_cases.each do |test_case|

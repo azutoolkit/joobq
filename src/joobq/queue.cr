@@ -74,14 +74,14 @@ module JoobQ
 
     private def handle_enqueue_error(ex : Exception, job_data : String, job_type : String)
       error_context = {
-        queue: name,
-        job_type: job_type,
-        error_class: ex.class.name,
-        error_message: ex.message || "Unknown error",
+        queue:           name,
+        job_type:        job_type,
+        error_class:     ex.class.name,
+        error_message:   ex.message || "Unknown error",
         job_data_length: job_data.size.to_s,
-        queue_size: size.to_s,
-        queue_workers: total_workers.to_s,
-        occurred_at: Time.local.to_rfc3339
+        queue_size:      size.to_s,
+        queue_workers:   total_workers.to_s,
+        occurred_at:     Time.local.to_rfc3339,
       }
 
       Log.error &.emit("Failed to enqueue job", error_context)
@@ -155,7 +155,7 @@ module JoobQ
       store.claim_jobs_batch(name, worker_id, T, batch_size)
     rescue ex
       Log.error &.emit("Error Claiming Jobs Batch", queue: name, worker: worker_id,
-                      batch_size: batch_size, error: ex.message)
+        batch_size: batch_size, error: ex.message)
       [] of String
     end
 
@@ -169,7 +169,7 @@ module JoobQ
       store.release_job_claims_batch(name, worker_id, job_count)
     rescue ex
       Log.error &.emit("Error Releasing Job Claims Batch", queue: name, worker: worker_id,
-                      job_count: job_count, error: ex.message)
+        job_count: job_count, error: ex.message)
     end
 
     # Pipelined job cleanup for improved performance
@@ -177,7 +177,7 @@ module JoobQ
       store.as(RedisStore).cleanup_job_processing_pipelined(worker_id, job_id, name)
     rescue ex
       Log.error &.emit("Error in pipelined job cleanup", queue: name, worker: worker_id,
-                      job_id: job_id, error: ex.message)
+        job_id: job_id, error: ex.message)
     end
 
     # Batch job cleanup for improved performance
@@ -185,7 +185,7 @@ module JoobQ
       store.as(RedisStore).cleanup_jobs_batch_pipelined(worker_id, job_ids, name)
     rescue ex
       Log.error &.emit("Error in batch job cleanup", queue: name, worker: worker_id,
-                      job_count: job_ids.size, error: ex.message)
+        job_count: job_ids.size, error: ex.message)
     end
 
     def status : String

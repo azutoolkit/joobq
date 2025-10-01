@@ -91,7 +91,7 @@ test_exceptions = [
   JSON::Error.new("JSON parse error"),
   KeyError.new("Missing key"),
   NotImplementedError.new("Not implemented"),
-  RuntimeError.new("Generic error")
+  RuntimeError.new("Generic error"),
 ]
 
 puts "  Error classification test:"

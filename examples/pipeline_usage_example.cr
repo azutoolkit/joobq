@@ -58,8 +58,8 @@ JoobQ.configure do
   error_monitoring do |monitor|
     monitor.alert_thresholds = {
       "error" => 5,
-      "warn" => 20,
-      "info" => 100
+      "warn"  => 20,
+      "info"  => 100,
     }
     monitor.time_window = 5.minutes
     monitor.max_recent_errors = 200
@@ -106,7 +106,7 @@ data_sets = [
   [1, 2, 3, 4, 5],
   [10, 20, 30, 40, 50],
   [100, 200, 300],
-  [5, 15, 25, 35, 45, 55]
+  [5, 15, 25, 35, 45, 55],
 ]
 
 data_sets.each_with_index do |data, i|

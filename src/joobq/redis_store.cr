@@ -448,13 +448,16 @@ module JoobQ
     def processing_list(pattern : String = "#{PROCESSING_QUEUE}:*", limit : Int32 = 100) : Array(String)
       jobs_collected = [] of String
 
-      # Step 2: Collect jobs from each queue until the limit is reached
-      JoobQ.queues.each do |key, _|
+      # Step 1: Get all processing queue keys matching the pattern
+      processing_keys = redis.keys(pattern)
+
+      # Step 2: Collect jobs from each processing queue until the limit is reached
+      processing_keys.each do |processing_key|
         break if jobs_collected.size >= limit # Stop if we've collected enough jobs
         # Calculate remaining jobs to fetch
         remaining = limit - jobs_collected.size
-        # Fetch jobs from the current queue
-        queue_jobs = redis.lrange(key, 0, remaining - 1)
+        # Convert RedisValue to String and fetch jobs from the current processing queue
+        queue_jobs = redis.lrange(processing_key.as(String), 0, remaining - 1)
         jobs_collected.concat(queue_jobs.map &.as(String))
       end
 

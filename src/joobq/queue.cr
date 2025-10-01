@@ -48,6 +48,47 @@ module JoobQ
       handle_enqueue_error(ex, job.to_json, "typed_job")
     end
 
+    # Batch add jobs with pipelining for improved performance
+    def add_batch(jobs : Array(T))
+      if JoobQ.config.enable_pipeline_optimization?
+        add_batch_pipelined(jobs)
+      else
+        add_batch_individual(jobs)
+      end
+    rescue ex
+      Log.error &.emit("Error adding job batch", queue: name, job_count: jobs.size, error: ex.message)
+    end
+
+    # Add batch of job strings
+    def add_batch_strings(jobs : Array(String))
+      if JoobQ.config.enable_pipeline_optimization?
+        add_batch_strings_pipelined(jobs)
+      else
+        add_batch_strings_individual(jobs)
+      end
+    rescue ex
+      Log.error &.emit("Error adding job batch strings", queue: name, job_count: jobs.size, error: ex.message)
+    end
+
+    private def add_batch_pipelined(jobs : Array(T))
+      job_objects = jobs.map { |job| job }
+      store.as(RedisStore).enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
+    end
+
+    private def add_batch_individual(jobs : Array(T))
+      jobs.each { |job| store.enqueue(job) }
+    end
+
+    private def add_batch_strings_pipelined(jobs : Array(String))
+      # Convert strings to Job objects for batch enqueuing
+      job_objects = jobs.map { |job_str| T.from_json(job_str) }
+      store.as(RedisStore).enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
+    end
+
+    private def add_batch_strings_individual(jobs : Array(String))
+      jobs.each { |job_str| add(job_str) }
+    end
+
     private def handle_enqueue_error(ex : Exception, job_data : String, job_type : String)
       error_context = {
         queue: name,
@@ -146,6 +187,22 @@ module JoobQ
     rescue ex
       Log.error &.emit("Error Releasing Job Claims Batch", queue: name, worker: worker_id,
                       job_count: job_count, error: ex.message)
+    end
+
+    # Pipelined job cleanup for improved performance
+    def cleanup_job_processing_pipelined(worker_id : String, job_id : String) : Nil
+      store.as(RedisStore).cleanup_job_processing_pipelined(worker_id, job_id, name)
+    rescue ex
+      Log.error &.emit("Error in pipelined job cleanup", queue: name, worker: worker_id,
+                      job_id: job_id, error: ex.message)
+    end
+
+    # Batch job cleanup for improved performance
+    def cleanup_jobs_batch_pipelined(worker_id : String, job_ids : Array(String)) : Nil
+      store.as(RedisStore).cleanup_jobs_batch_pipelined(worker_id, job_ids, name)
+    rescue ex
+      Log.error &.emit("Error in batch job cleanup", queue: name, worker: worker_id,
+                      job_count: job_ids.size, error: ex.message)
     end
 
     def status : String

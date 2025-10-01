@@ -204,23 +204,57 @@ module JoobQ
     private def store_error_in_redis(error_context : ErrorContext) : Nil
       begin
         store = JoobQ.store.as(RedisStore)
-        error_id = "#{error_context.job_id}:#{Time.local.to_unix}"
 
-        # Store error context as JSON
-        store.redis.hset(RECENT_ERRORS_KEY, error_id, error_context.to_json)
-
-        # Add to sorted set for time-based queries (score = timestamp)
-        timestamp = Time.parse(error_context.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC).to_unix
-        store.redis.zadd(ERROR_INDEX_KEY, timestamp, error_id)
-
-        # Trim old errors from Redis
-        trim_redis_errors
+        # Use pipelined approach if enabled
+        if JoobQ.config.enable_pipeline_optimization?
+          store_error_in_redis_pipelined(error_context)
+        else
+          store_error_in_redis_individual(error_context)
+        end
       rescue ex
         Log.warn &.emit("Failed to store error in Redis", error: ex.message)
       end
     end
 
+    private def store_error_in_redis_individual(error_context : ErrorContext) : Nil
+      store = JoobQ.store.as(RedisStore)
+      error_id = "#{error_context.job_id}:#{Time.local.to_unix}"
+
+      # Store error context as JSON
+      store.redis.hset(RECENT_ERRORS_KEY, error_id, error_context.to_json)
+
+      # Add to sorted set for time-based queries (score = timestamp)
+      timestamp = Time.parse(error_context.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC).to_unix
+      store.redis.zadd(ERROR_INDEX_KEY, timestamp, error_id)
+
+      # Trim old errors from Redis
+      trim_redis_errors
+    end
+
+    private def store_error_in_redis_pipelined(error_context : ErrorContext) : Nil
+      store = JoobQ.store.as(RedisStore)
+      error_id = "#{error_context.job_id}:#{Time.local.to_unix}"
+      timestamp = Time.parse(error_context.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC).to_unix
+      error_key = "#{error_context.error_type}:#{error_context.queue_name}"
+
+      store.redis.pipelined do |pipe|
+        # Store error context
+        pipe.hset(RECENT_ERRORS_KEY, error_id, error_context.to_json)
+        # Add to time-based index
+        pipe.zadd(ERROR_INDEX_KEY, timestamp, error_id)
+        # Update error counts
+        pipe.hincrby(ERROR_COUNTS_KEY, error_key, 1)
+        # Trim old errors (if needed)
+        cutoff_time = (Time.local - @time_window).to_unix
+        pipe.zremrangebyscore(ERROR_INDEX_KEY, "-inf", cutoff_time)
+      end
+    end
+
     private def update_redis_error_counts(error_key : String) : Nil
+      # Skip individual count updates when using pipelined approach
+      # as it's already handled in store_error_in_redis_pipelined
+      return if JoobQ.config.enable_pipeline_optimization?
+
       begin
         store = JoobQ.store.as(RedisStore)
         store.redis.hincrby(ERROR_COUNTS_KEY, error_key, 1)
@@ -317,6 +351,56 @@ module JoobQ
         store.redis.del(ERROR_COUNTS_KEY, RECENT_ERRORS_KEY, ERROR_INDEX_KEY)
       rescue ex
         Log.warn &.emit("Failed to clear Redis errors", error: ex.message)
+      end
+    end
+
+    # Batch error storage for improved performance
+    def store_errors_batch(error_contexts : Array(ErrorContext)) : Nil
+      return if error_contexts.empty?
+
+      begin
+        store = JoobQ.store.as(RedisStore)
+
+        if JoobQ.config.enable_pipeline_optimization?
+          store_errors_batch_pipelined(error_contexts)
+        else
+          # Fallback to individual storage
+          error_contexts.each { |error_context| store_error_in_redis_individual(error_context) }
+        end
+      rescue ex
+        Log.warn &.emit("Failed to store error batch in Redis", error: ex.message)
+      end
+    end
+
+    private def store_errors_batch_pipelined(error_contexts : Array(ErrorContext)) : Nil
+      store = JoobQ.store.as(RedisStore)
+      cutoff_time = (Time.local - @time_window).to_unix
+
+      # Track pipeline operation
+      commands_count = (error_contexts.size * 3) + 1 # 3 commands per error + cleanup
+      success = false
+
+      begin
+        store.redis.pipelined do |pipe|
+          error_contexts.each do |error_context|
+            error_id = "#{error_context.job_id}:#{Time.local.to_unix}"
+            timestamp = Time.parse(error_context.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC).to_unix
+            error_key = "#{error_context.error_type}:#{error_context.queue_name}"
+
+            # Store error context
+            pipe.hset(RECENT_ERRORS_KEY, error_id, error_context.to_json)
+            # Add to time-based index
+            pipe.zadd(ERROR_INDEX_KEY, timestamp, error_id)
+            # Update error counts
+            pipe.hincrby(ERROR_COUNTS_KEY, error_key, 1)
+          end
+
+          # Batch cleanup old errors
+          pipe.zremrangebyscore(ERROR_INDEX_KEY, "-inf", cutoff_time)
+        end
+        success = true
+      ensure
+        store.track_pipeline_operation(commands_count, success)
       end
     end
   end

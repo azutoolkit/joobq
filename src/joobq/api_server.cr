@@ -405,6 +405,140 @@ module JoobQ
           context.response.print(response.to_json)
         end
       end,
+
+      # Pipeline health check endpoint
+      {method: "GET", path: "/joobq/pipeline/health"} => ->(context : HTTP::Server::Context) do
+        begin
+          pipeline_stats = RedisStore.pipeline_stats
+          queue_metrics = RedisStore.instance.get_all_queue_metrics
+
+          # Calculate pipeline health metrics
+          success_rate = pipeline_stats.total_pipeline_calls > 0 ?
+            ((pipeline_stats.total_pipeline_calls - pipeline_stats.pipeline_failures).to_f / pipeline_stats.total_pipeline_calls * 100) : 100.0
+
+          health_status = if success_rate >= 99.0
+            "excellent"
+          elsif success_rate >= 95.0
+            "good"
+          elsif success_rate >= 90.0
+            "warning"
+          else
+            "critical"
+          end
+
+          response = {
+            status: "success",
+            pipeline_health: {
+              status: health_status,
+              success_rate: success_rate.round(2),
+              total_pipeline_calls: pipeline_stats.total_pipeline_calls,
+              total_commands_batched: pipeline_stats.total_commands_batched,
+              average_batch_size: pipeline_stats.average_batch_size.round(2),
+              pipeline_failures: pipeline_stats.pipeline_failures,
+              last_reset: pipeline_stats.last_reset.to_rfc3339,
+              configuration: {
+                enabled: JoobQ.config.enable_pipeline_optimization?,
+                batch_size: JoobQ.config.pipeline_batch_size,
+                timeout: JoobQ.config.pipeline_timeout,
+                max_commands: JoobQ.config.pipeline_max_commands
+              }
+            },
+            queue_metrics: queue_metrics.transform_values do |metrics|
+              {
+                queue_size: metrics.queue_size,
+                processing_size: metrics.processing_size,
+                failed_count: metrics.failed_count,
+                dead_letter_count: metrics.dead_letter_count,
+                processed_count: metrics.processed_count
+              }
+            end,
+            timestamp: Time.local.to_rfc3339
+          }
+
+          context.response.status = HTTP::Status::OK
+          context.response.print(response.to_json)
+        rescue ex
+          Log.error &.emit(
+            "Error getting pipeline health",
+            error: ex.message || "Unknown error"
+          )
+
+          response = {
+            status: "error",
+            message: "Failed to get pipeline health: #{ex.message}",
+            timestamp: Time.local.to_rfc3339
+          }
+          context.response.status = HTTP::Status::INTERNAL_SERVER_ERROR
+          context.response.print(response.to_json)
+        end
+      end,
+
+      # Pipeline statistics endpoint
+      {method: "GET", path: "/joobq/pipeline/stats"} => ->(context : HTTP::Server::Context) do
+        begin
+          pipeline_stats = RedisStore.pipeline_stats
+
+          response = {
+            status: "success",
+            pipeline_stats: {
+              total_pipeline_calls: pipeline_stats.total_pipeline_calls,
+              total_commands_batched: pipeline_stats.total_commands_batched,
+              average_batch_size: pipeline_stats.average_batch_size.round(2),
+              pipeline_failures: pipeline_stats.pipeline_failures,
+              success_rate: pipeline_stats.total_pipeline_calls > 0 ?
+                ((pipeline_stats.total_pipeline_calls - pipeline_stats.pipeline_failures).to_f / pipeline_stats.total_pipeline_calls * 100).round(2) : 100.0,
+              last_reset: pipeline_stats.last_reset.to_rfc3339,
+              uptime: (Time.local - pipeline_stats.last_reset).total_seconds.round(2)
+            },
+            timestamp: Time.local.to_rfc3339
+          }
+
+          context.response.status = HTTP::Status::OK
+          context.response.print(response.to_json)
+        rescue ex
+          Log.error &.emit(
+            "Error getting pipeline statistics",
+            error: ex.message || "Unknown error"
+          )
+
+          response = {
+            status: "error",
+            message: "Failed to get pipeline statistics: #{ex.message}",
+            timestamp: Time.local.to_rfc3339
+          }
+          context.response.status = HTTP::Status::INTERNAL_SERVER_ERROR
+          context.response.print(response.to_json)
+        end
+      end,
+
+      # Reset pipeline statistics endpoint
+      {method: "POST", path: "/joobq/pipeline/stats/reset"} => ->(context : HTTP::Server::Context) do
+        begin
+          RedisStore.reset_pipeline_stats
+
+          response = {
+            status: "success",
+            message: "Pipeline statistics reset successfully",
+            timestamp: Time.local.to_rfc3339
+          }
+
+          context.response.status = HTTP::Status::OK
+          context.response.print(response.to_json)
+        rescue ex
+          Log.error &.emit(
+            "Error resetting pipeline statistics",
+            error: ex.message || "Unknown error"
+          )
+
+          response = {
+            status: "error",
+            message: "Failed to reset pipeline statistics: #{ex.message}",
+            timestamp: Time.local.to_rfc3339
+          }
+          context.response.status = HTTP::Status::INTERNAL_SERVER_ERROR
+          context.response.print(response.to_json)
+        end
+      end,
     } of NamedTuple(method: String, path: String) => Proc(HTTP::Server::Context, Nil)
 
     def self.register_endpoint(method, path, handler)

@@ -78,6 +78,14 @@ module JoobQ
     def enqueue_due_jobs(current_time = Time.local)
       results = store.fetch_due_jobs(current_time, @delay_set)
 
+      if JoobQ.config.enable_pipeline_optimization?
+        enqueue_due_jobs_pipelined(results, current_time)
+      else
+        enqueue_due_jobs_individual(results, current_time)
+      end
+    end
+
+    private def enqueue_due_jobs_individual(results : Array(String), current_time : Time)
       results.each do |job_data|
         begin
           # Deserialize job and enqueue
@@ -87,6 +95,55 @@ module JoobQ
           queue.add(job_data)
         rescue ex : Exception
           handle_scheduler_error(ex, job_data, current_time)
+        end
+      end
+    end
+
+    private def enqueue_due_jobs_pipelined(results : Array(String), current_time : Time)
+      return if results.empty?
+
+      # Group jobs by queue for batch processing
+      jobs_by_queue = {} of String => Array(String)
+
+      results.each do |job_data|
+        begin
+          job_json = JSON.parse(job_data)
+          queue_name = job_json["queue"].as_s
+          jobs_by_queue[queue_name] ||= [] of String
+          jobs_by_queue[queue_name] << job_data
+        rescue ex : Exception
+          handle_scheduler_error(ex, job_data, current_time)
+        end
+      end
+
+      # Batch enqueue per queue
+      jobs_by_queue.each do |queue_name, jobs|
+        begin
+          queue = JoobQ.queues[queue_name]
+          enqueue_jobs_batch_to_queue(queue, jobs)
+        rescue ex : Exception
+          Log.error &.emit("Error enqueuing batch to queue", queue: queue_name,
+                          job_count: jobs.size, error: ex.message)
+          # Fallback to individual enqueuing
+          jobs.each do |job_data|
+            begin
+              queue.add(job_data)
+            rescue ex : Exception
+              handle_scheduler_error(ex, job_data, current_time)
+            end
+          end
+        end
+      end
+    end
+
+    private def enqueue_jobs_batch_to_queue(queue : BaseQueue, jobs : Array(String))
+      # Use the new batch enqueue method if available
+      if queue.responds_to?(:add_batch_strings)
+        queue.add_batch_strings(jobs)
+      else
+        # Fallback to individual enqueuing
+        jobs.each do |job_data|
+          queue.add(job_data)
         end
       end
     end

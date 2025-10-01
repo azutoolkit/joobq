@@ -140,8 +140,15 @@ module JoobQ
           end
         ensure
           # Always release the job claim and delete the job
-          @queue.release_job_claim(@worker_id)
-          @queue.delete_job job
+          if JoobQ.config.enable_pipeline_optimization?
+            # Use pipelined cleanup for better performance
+            parsed_job_id = parsed_job ? parsed_job.jid.to_s : job
+            @queue.cleanup_job_processing_pipelined(@worker_id, parsed_job_id)
+          else
+            # Fallback to individual operations
+            @queue.release_job_claim(@worker_id)
+            @queue.delete_job job
+          end
         end
       end
     end

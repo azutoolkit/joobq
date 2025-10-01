@@ -32,6 +32,12 @@ module JoobQ
     property worker_batch_size : Int32 = 5
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
 
+    # Pipeline optimization settings
+    property pipeline_batch_size : Int32 = 100
+    property pipeline_timeout : Float64 = 1.0
+    property? enable_pipeline_optimization : Bool = true
+    property pipeline_max_commands : Int32 = 1000
+
     # Error Monitoring
     @error_monitor : ErrorMonitor? = nil
     getter error_monitor : ErrorMonitor do
@@ -90,7 +96,7 @@ module JoobQ
     def error_monitoring(
       alert_thresholds : Hash(String, Int32)? = nil,
       time_window : Time::Span? = nil,
-      max_recent_errors : Int32? = nil
+      max_recent_errors : Int32? = nil,
     )
       error_monitor.alert_thresholds = alert_thresholds if alert_thresholds
       error_monitor.time_window = time_window if time_window

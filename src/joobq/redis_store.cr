@@ -296,10 +296,171 @@ module JoobQ
       redis.zcard(set_name)
     end
 
+    # Batch job cleanup with pipelining for improved performance
+    def cleanup_jobs_batch_pipelined(worker_id : String, job_ids : Array(String), queue_name : String) : Nil
+      return if job_ids.empty?
+
+      processing_key = processing_queue(queue_name)
+      worker_claim_key = "#{processing_key}:#{worker_id}"
+
+      redis.pipelined do |pipe|
+        # Release all job claims
+        job_ids.each_with_index do |_, index|
+          pipe.del("#{worker_claim_key}:#{index + 1}")
+        end
+
+        # Remove jobs from processing queue
+        job_ids.each do |job_id|
+          pipe.lrem(processing_key, 1, job_id)
+        end
+
+        # Update processing statistics
+        pipe.hincrby("joobq:stats:processed", queue_name, job_ids.size)
+        pipe.hincrby("joobq:stats:total_processed", "global", job_ids.size)
+      end
+    rescue ex
+      Log.error &.emit("Error in batch job cleanup", queue: queue_name, worker: worker_id,
+                      job_count: job_ids.size, error: ex.message)
+    end
+
+    # Enhanced job processing cleanup with pipelining
+    def cleanup_job_processing_pipelined(worker_id : String, job_id : String, queue_name : String) : Nil
+      processing_key = processing_queue(queue_name)
+      worker_claim_key = "#{processing_key}:#{worker_id}"
+
+      redis.pipelined do |pipe|
+        pipe.del(worker_claim_key)                    # Release claim
+        pipe.lrem(processing_key, 1, job_id)          # Remove from processing
+        pipe.hincrby("joobq:stats:processed", queue_name, 1)  # Update stats
+      end
+    rescue ex
+      Log.error &.emit("Error in pipelined job cleanup", queue: queue_name, worker: worker_id,
+                      job_id: job_id, error: ex.message)
+    end
+
     def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
       start_index = (page_number - 1) * page_size
       end_index = start_index + page_size - 1
       redis.lrange(queue_name, start_index, end_index).map &.as(String)
+    end
+
+    # Queue metrics structure for batch collection
+    struct QueueMetrics
+      include JSON::Serializable
+      getter queue_size : Int64
+      getter processing_size : Int64
+      getter failed_count : Int64
+      getter dead_letter_count : Int64
+      getter processed_count : Int64
+
+      def initialize(@queue_size : Int64, @processing_size : Int64,
+                     @failed_count : Int64, @dead_letter_count : Int64,
+                     @processed_count : Int64)
+      end
+    end
+
+    # Get queue metrics for multiple queues using pipelining
+    def get_queue_metrics_pipelined(queue_names : Array(String)) : Hash(String, QueueMetrics)
+      metrics = {} of String => QueueMetrics
+
+      if queue_names.empty?
+        return metrics
+      end
+
+      # Process results (Redis pipelined returns results in order)
+      results = redis.pipelined do |pipe|
+        queue_names.each do |queue_name|
+          pipe.llen(queue_name)                                    # Queue size
+          pipe.llen(processing_queue(queue_name))                  # Processing size
+          pipe.zcard("#{queue_name}:failed")                       # Failed count
+          pipe.zcard("#{queue_name}:dead_letter")                  # Dead letter count
+          pipe.hget("joobq:stats:processed", queue_name)           # Processed count
+        end
+      end
+
+      # Parse results into metrics
+      queue_names.each_with_index do |queue_name, queue_index|
+        base_index = queue_index * 5
+        queue_size = results[base_index].as(Int64)
+        processing_size = results[base_index + 1].as(Int64)
+        failed_count = results[base_index + 2].as(Int64)
+        dead_letter_count = results[base_index + 3].as(Int64)
+        processed_str = results[base_index + 4]
+        processed_count = processed_str ? processed_str.as(String).to_i64 : 0i64
+
+        metrics[queue_name] = QueueMetrics.new(
+          queue_size, processing_size, failed_count, dead_letter_count, processed_count
+        )
+      end
+
+      metrics
+    rescue ex
+      Log.error &.emit("Error collecting queue metrics", queue_count: queue_names.size, error: ex.message)
+      {} of String => QueueMetrics
+    end
+
+    # Get metrics for a single queue
+    def get_queue_metrics(queue_name : String) : QueueMetrics
+      if JoobQ.config.enable_pipeline_optimization?
+        get_queue_metrics_pipelined([queue_name])[queue_name]? || QueueMetrics.new(0, 0, 0, 0, 0)
+      else
+        get_queue_metrics_individual(queue_name)
+      end
+    end
+
+    private def get_queue_metrics_individual(queue_name : String) : QueueMetrics
+      queue_size = redis.llen(queue_name)
+      processing_size = redis.llen(processing_queue(queue_name))
+      failed_count = redis.zcard("#{queue_name}:failed")
+      dead_letter_count = redis.zcard("#{queue_name}:dead_letter")
+      processed_str = redis.hget("joobq:stats:processed", queue_name)
+      processed_count = processed_str ? processed_str.to_i64 : 0i64
+
+      QueueMetrics.new(queue_size, processing_size, failed_count, dead_letter_count, processed_count)
+    rescue ex
+      Log.error &.emit("Error collecting individual queue metrics", queue: queue_name, error: ex.message)
+      QueueMetrics.new(0, 0, 0, 0, 0)
+    end
+
+    # Get metrics for all configured queues using pipelining
+    def get_all_queue_metrics : Hash(String, QueueMetrics)
+      queue_names = JoobQ.config.queues.keys
+      get_queue_metrics_pipelined(queue_names)
+    end
+
+    # Pipeline performance monitoring
+    struct PipelineStats
+      include JSON::Serializable
+      getter total_pipeline_calls : Int64
+      getter total_commands_batched : Int64
+      getter average_batch_size : Float64
+      getter pipeline_failures : Int64
+      getter last_reset : Time
+
+      def initialize(@total_pipeline_calls : Int64, @total_commands_batched : Int64,
+                     @average_batch_size : Float64, @pipeline_failures : Int64, @last_reset : Time)
+      end
+    end
+
+    # Pipeline performance tracking
+    @@pipeline_stats = PipelineStats.new(0, 0, 0.0, 0, Time.local)
+
+    def self.pipeline_stats : PipelineStats
+      @@pipeline_stats
+    end
+
+    def self.reset_pipeline_stats : Nil
+      @@pipeline_stats = PipelineStats.new(0, 0, 0.0, 0, Time.local)
+    end
+
+    def track_pipeline_operation(commands_count : Int32, success : Bool) : Nil
+      @@pipeline_stats = PipelineStats.new(
+        @@pipeline_stats.total_pipeline_calls + 1,
+        @@pipeline_stats.total_commands_batched + commands_count,
+        @@pipeline_stats.total_commands_batched.to_f / @@pipeline_stats.total_pipeline_calls,
+        success ? @@pipeline_stats.pipeline_failures : @@pipeline_stats.pipeline_failures + 1,
+        @@pipeline_stats.last_reset
+      )
     end
 
     def processing_list(pattern : String = "#{PROCESSING_QUEUE}:*", limit : Int32 = 100) : Array(String)

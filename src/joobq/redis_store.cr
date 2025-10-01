@@ -344,6 +344,12 @@ module JoobQ
       redis.lrange(queue_name, start_index, end_index).map &.as(String)
     end
 
+    def list_sorted_set_jobs(set_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
+      start_index = (page_number - 1) * page_size
+      end_index = start_index + page_size - 1
+      redis.zrange(set_name, start_index, end_index).map &.as(String)
+    end
+
     # Queue metrics structure for batch collection
     struct QueueMetrics
       include JSON::Serializable
@@ -454,10 +460,21 @@ module JoobQ
       # Step 2: Collect jobs from each processing queue until the limit is reached
       processing_keys.each do |processing_key|
         break if jobs_collected.size >= limit # Stop if we've collected enough jobs
+
+        key_string = processing_key.as(String)
+
+        # Skip worker claim keys (they have the pattern joobq:processing:queue_name:worker_id)
+        # Only process actual processing queue keys (joobq:processing:queue_name)
+        next if key_string.count(':') > 2
+
+        # Check if the key is a list before trying to perform lrange
+        key_type = redis.type(key_string)
+        next unless key_type == "list"
+
         # Calculate remaining jobs to fetch
         remaining = limit - jobs_collected.size
         # Convert RedisValue to String and fetch jobs from the current processing queue
-        queue_jobs = redis.lrange(processing_key.as(String), 0, remaining - 1)
+        queue_jobs = redis.lrange(key_string, 0, remaining - 1)
         jobs_collected.concat(queue_jobs.map &.as(String))
       end
 

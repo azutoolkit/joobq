@@ -332,9 +332,36 @@ module JoobQ
         pipe.del(worker_claim_key)                           # Release claim
         pipe.lrem(processing_key, 1, job_id)                 # Remove from processing
         pipe.hincrby("joobq:stats:processed", queue_name, 1) # Update stats
+        pipe.hincrby("joobq:stats:total_processed", "global", 1) # Update global stats
       end
     rescue ex
       Log.error &.emit("Error in pipelined job cleanup", queue: queue_name, worker: worker_id,
+        job_id: job_id, error: ex.message)
+    end
+
+    # Enhanced job processing cleanup for successful completion
+    def cleanup_completed_job_pipelined(worker_id : String, job_id : String, queue_name : String) : Nil
+      processing_key = processing_queue(queue_name)
+      worker_claim_key = "#{processing_key}:#{worker_id}"
+
+      redis.pipelined do |pipe|
+        # Release worker claim
+        pipe.del(worker_claim_key)
+
+        # Remove job from processing queue - use LREM with count 1 to remove only the first occurrence
+        pipe.lrem(processing_key, 1, job_id)
+
+        # Update completion statistics
+        pipe.hincrby("joobq:stats:completed", queue_name, 1)
+        pipe.hincrby("joobq:stats:total_completed", "global", 1)
+        pipe.hincrby("joobq:stats:processed", queue_name, 1)
+        pipe.hincrby("joobq:stats:total_processed", "global", 1)
+
+        # Log successful completion for monitoring
+        pipe.hset("joobq:completion_log", "#{queue_name}:#{job_id}", Time.local.to_unix.to_s)
+      end
+    rescue ex
+      Log.error &.emit("Error in completed job cleanup", queue: queue_name, worker: worker_id,
         job_id: job_id, error: ex.message)
     end
 
@@ -479,6 +506,36 @@ module JoobQ
       end
 
       jobs_collected
+    end
+
+    # Verify that a job has been properly removed from processing queue
+    def verify_job_removed_from_processing?(job_id : String, queue_name : String) : Bool
+      processing_key = processing_queue(queue_name)
+
+      # Check if job exists in processing queue
+      jobs_in_processing = redis.lrange(processing_key, 0, -1)
+      jobs_in_processing.none? { |job_data|
+        begin
+          parsed_job = JSON.parse(job_data.as(String))
+          parsed_job["jid"]?.try(&.as_s) == job_id
+        rescue
+          false
+        end
+      }
+    rescue ex
+      Log.warn &.emit("Error verifying job removal from processing queue",
+        job_id: job_id, queue: queue_name, error: ex.message)
+      false
+    end
+
+    # Get count of jobs currently in processing queue
+    def processing_queue_size(queue_name : String) : Int64
+      processing_key = processing_queue(queue_name)
+      redis.llen(processing_key)
+    rescue ex
+      Log.warn &.emit("Error getting processing queue size",
+        queue: queue_name, error: ex.message)
+      0i64
     end
 
     private def processing_queue(name : String)

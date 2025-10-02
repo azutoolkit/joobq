@@ -94,6 +94,7 @@ module JoobQ
     private def handle_job_async(job : String)
       spawn do
         parsed_job = nil
+        job_completed_successfully = false
         begin
           parsed_job = T.from_json(job)
           parsed_job.running!
@@ -101,6 +102,14 @@ module JoobQ
           middleware_pipeline.call(parsed_job, @queue, @worker_id) do
             parsed_job.perform
             parsed_job.completed!
+            job_completed_successfully = true
+
+            # Log successful completion
+            Log.info &.emit("Job completed successfully",
+              job_id: parsed_job.jid.to_s,
+              queue: @queue.name,
+              worker_id: @worker_id,
+              processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s)
           end
         rescue ex : Exception
           # Use the monitored error handling system with rich context
@@ -138,9 +147,15 @@ module JoobQ
             )
           end
         ensure
-          # Always release the job claim and delete the job using pipelined cleanup
+          # Use appropriate cleanup method based on job completion status
           parsed_job_id = parsed_job ? parsed_job.jid.to_s : job
-          @queue.cleanup_job_processing_pipelined(@worker_id, parsed_job_id)
+          if job_completed_successfully && parsed_job
+            # Use enhanced cleanup for successfully completed jobs
+            @queue.cleanup_completed_job_pipelined(@worker_id, parsed_job_id)
+          else
+            # Use standard cleanup for failed or unparseable jobs
+            @queue.cleanup_job_processing_pipelined(@worker_id, parsed_job_id)
+          end
         end
       end
     end

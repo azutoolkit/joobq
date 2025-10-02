@@ -180,6 +180,24 @@ module JoobQ
         job_id: job_id, error: ex.message)
     end
 
+    # Enhanced cleanup for successfully completed jobs
+    def cleanup_completed_job_pipelined(worker_id : String, job_id : String) : Nil
+      store.as(RedisStore).cleanup_completed_job_pipelined(worker_id, job_id, name)
+    rescue ex
+      Log.error &.emit("Error in completed job cleanup", queue: name, worker: worker_id,
+        job_id: job_id, error: ex.message)
+    end
+
+    # Verify that a job has been properly removed from processing queue
+    def verify_job_removed_from_processing?(job_id : String) : Bool
+      store.as(RedisStore).verify_job_removed_from_processing?(job_id, name)
+    end
+
+    # Get count of jobs currently in processing queue
+    def processing_queue_size : Int64
+      store.as(RedisStore).processing_queue_size(name)
+    end
+
     # Batch job cleanup for improved performance
     def cleanup_jobs_batch_pipelined(worker_id : String, job_ids : Array(String)) : Nil
       store.as(RedisStore).cleanup_jobs_batch_pipelined(worker_id, job_ids, name)

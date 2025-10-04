@@ -538,7 +538,7 @@ module JoobQ
 
     # Atomic operation: Move job from processing to dead letter queue
     # Uses pipelined operations to ensure atomicity and prevent partial failures
-    # IMPORTANT: Removes job from ALL queues (processing, failed, delayed) to prevent re-enqueuing
+    # IMPORTANT: Removes job from ALL queues (main, processing, delayed) to prevent re-enqueuing
     # IMPORTANT: Uses LREM with count=0 and ZREM to remove ALL occurrences of the job (ensures uniqueness)
     # original_job_json: The JSON of the job as it exists in the processing queue (before status changes)
     def move_to_dead_letter_atomic_with_original(job : Job, queue_name : String, original_job_json : String) : Nil
@@ -549,8 +549,13 @@ module JoobQ
       modified_job_json = job.to_json
 
       redis.pipelined do |pipe|
+        # Remove ALL occurrences from main queue (defensive cleanup)
+        pipe.lrem(queue_name, 0, original_job_json)
+        pipe.lrem(queue_name, 0, modified_job_json)
+
         # Remove ALL occurrences of the job from processing queue using ORIGINAL JSON (ensures uniqueness)
         pipe.lrem(processing_key, 0, original_job_json)
+        pipe.lrem(processing_key, 0, modified_job_json)
 
         # Remove job from delayed/retry set using BOTH original and modified JSON (if it exists there)
         pipe.zrem(DELAYED_SET, original_job_json)
@@ -587,7 +592,7 @@ module JoobQ
 
     # Atomic operation: Move job from processing to retry/delayed queue
     # Uses pipelined operations to ensure atomicity and prevent partial failures
-    # IMPORTANT: Uses LREM with count=0 to remove ALL occurrences of the job (ensures uniqueness)
+    # IMPORTANT: Uses LREM with count=0 to remove ALL occurrences of the job from ALL queues (ensures uniqueness)
     # original_job_json: The JSON of the job as it exists in the processing queue (before status changes)
     def move_to_retry_atomic_with_original(job : Job, queue_name : String, delay_ms : Int64, original_job_json : String) : Bool
       processing_key = processing_queue(queue_name)
@@ -598,8 +603,16 @@ module JoobQ
 
       # Atomic operation using pipeline
       redis.pipelined do |pipe|
-        # Remove ALL occurrences of the job from processing queue using ORIGINAL JSON (ensures uniqueness)
+        # Remove ALL occurrences from main queue (defensive cleanup for edge cases)
+        pipe.lrem(queue_name, 0, original_job_json)
+        pipe.lrem(queue_name, 0, modified_job_json)
+
+        # Remove ALL occurrences of the job from processing queue (ensures uniqueness)
         pipe.lrem(processing_key, 0, original_job_json)
+        pipe.lrem(processing_key, 0, modified_job_json)
+
+        # Remove from delayed set if it somehow exists there (defensive)
+        pipe.zrem(DELAYED_SET, original_job_json)
 
         # Add job to delayed/retry queue with future timestamp using MODIFIED JSON
         pipe.zadd(DELAYED_SET, schedule_time, modified_job_json)
@@ -705,9 +718,15 @@ module JoobQ
               # Only process jobs for this queue
               if job_queue == queue_name
                 # Update job status from "retrying" to "enqueued" so workers pick it up
-                job_hash = parsed_job.as_h
-                job_hash["status"] = JSON::Any.new("enqueued")
-                updated_job_json = job_hash.to_json
+                # Build a mutable hash from the parsed JSON
+                job_data = Hash(String, JSON::Any).new
+                parsed_job.as_h.each do |key, value|
+                  job_data[key] = value
+                end
+
+                # Update status to "enqueued"
+                job_data["status"] = JSON::Any.new("enqueued")
+                updated_job_json = job_data.to_json
 
                 # Remove from delayed queue (using original JSON)
                 pipe.zrem(DELAYED_SET, job_json)

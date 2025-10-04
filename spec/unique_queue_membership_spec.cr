@@ -152,16 +152,16 @@ module JoobQ
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         job = ExampleJob.new(1)
-        job_json = job.to_json
+        original_json = job.to_json  # Capture BEFORE modifications
         processing_key = "joobq:processing:#{queue_name}"
 
         # Add job multiple times to processing (shouldn't happen, but test cleanup)
-        3.times { store.redis.lpush(processing_key, job_json) }
+        3.times { store.redis.lpush(processing_key, original_json) }
         store.redis.llen(processing_key).should eq 3
 
         # Move to retry (should remove ALL occurrences)
         job.retrying!
-        success = store.move_to_retry_atomic(job, queue_name, 1000_i64)
+        success = store.move_to_retry_atomic_with_original(job, queue_name, 1000_i64, original_json)
 
         success.should be_true
 

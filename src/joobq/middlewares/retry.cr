@@ -49,12 +49,18 @@ module JoobQ
 
         # Simple logic: if retries > 0, then retry, otherwise move to dead letter queue
         if current_retries > 0
-          # Decrement retries ONCE (not in retry_idempotent)
+          # CRITICAL: Get original job JSON BEFORE modifying retries
+          # This is needed to correctly remove the job from processing queue
+          original_job_json = job.to_json
+
+          # Decrement retries AFTER capturing original JSON
           job.retries = current_retries - 1
 
           # Use idempotent retry with atomic operations to prevent duplicate retries
-          # Pass the actual retry attempt number for exponential backoff calculation
-          success, updated_job = ExponentialBackoff.retry_idempotent_atomic(job, queue, retry_attempt)
+          # Pass the original JSON and actual retry attempt number for exponential backoff calculation
+          success, updated_job = ExponentialBackoff.retry_idempotent_atomic_with_json(
+            job, queue, retry_attempt, original_job_json
+          )
           if success
             Log.info &.emit("Job retry scheduled successfully (atomic)",
               job_id: updated_job.jid.to_s,
@@ -96,11 +102,10 @@ module JoobQ
     # Retry lock expiration time (30 seconds - enough for scheduling, not excessive)
     private RETRY_LOCK_TTL = 30
 
-    # Atomic idempotent retry that prevents duplicate retries for the same job
-    # Uses Redis pipelined operations to atomically move job from processing to retry queue
-    # Note: job.retries should already be decremented by the caller
+    # Atomic idempotent retry with original JSON provided
+    # This is the preferred method to prevent JSON mismatch issues
     # Returns a tuple of (success: Bool, modified_job: Job)
-    def self.retry_idempotent_atomic(job : JoobQ::Job, queue : BaseQueue, retry_attempt : Int32) : {Bool, JoobQ::Job}
+    def self.retry_idempotent_atomic_with_json(job : JoobQ::Job, queue : BaseQueue, retry_attempt : Int32, original_job_json : String) : {Bool, JoobQ::Job}
       return {false, job} unless queue.store.is_a?(RedisStore)
 
       retry_lock_key = "#{RETRY_LOCK_PREFIX}:#{job.jid}"
@@ -117,15 +122,11 @@ module JoobQ
           safe_retry_attempt = Math.max(0, retry_attempt)
           delay_ms = [(2.0 ** safe_retry_attempt).to_i * 1000, 3_600_000].min
 
-          # Get the original job JSON BEFORE modifying status
-          # This is needed to remove the job from processing queue
-          original_job_json = job.to_json
-
           # Mark job as retrying
           job.retrying!
 
           # Atomically move job from processing to retry queue
-          # Pass the original JSON so it can be removed from processing
+          # Use the original JSON (before modifications) to remove from processing
           # This ensures the job is removed from processing and scheduled in a single atomic operation
           success = redis_store.move_to_retry_atomic_with_original(job, queue.name, delay_ms.to_i64, original_job_json)
 

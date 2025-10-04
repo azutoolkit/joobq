@@ -680,10 +680,12 @@ module JoobQ
     end
 
     # Process due jobs from delayed queue and move them back to main queue
+    # Jobs are moved back with "enqueued" status so workers can pick them up
     # Returns the array of job JSON strings that were moved
     def process_due_delayed_jobs(queue_name : String) : Array(String)
       current_time = Time.local.to_unix_ms
       due_jobs = [] of String
+      moved_count = 0
 
       # Get jobs that are due for processing (score <= current_time)
       jobs_result = redis.zrangebyscore(DELAYED_SET, "-inf", current_time.to_s, limit: [0, 100])
@@ -702,11 +704,18 @@ module JoobQ
 
               # Only process jobs for this queue
               if job_queue == queue_name
-                # Remove from delayed queue
+                # Update job status from "retrying" to "enqueued" so workers pick it up
+                job_hash = parsed_job.as_h
+                job_hash["status"] = JSON::Any.new("enqueued")
+                updated_job_json = job_hash.to_json
+
+                # Remove from delayed queue (using original JSON)
                 pipe.zrem(DELAYED_SET, job_json)
 
-                # Add back to main queue (front of queue for priority)
-                pipe.lpush(queue_name, job_json)
+                # Add back to main queue with updated status (front of queue for priority)
+                pipe.lpush(queue_name, updated_job_json)
+
+                moved_count += 1
               end
             rescue ex
               Log.warn &.emit("Failed to parse delayed job",
@@ -719,7 +728,7 @@ module JoobQ
 
         Log.debug &.emit("Processed due delayed jobs",
           queue: queue_name,
-          count: due_jobs.size
+          count: moved_count
         )
       end
 

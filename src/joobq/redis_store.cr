@@ -732,6 +732,58 @@ module JoobQ
       [] of String
     end
 
+    # Verify that a job exists in only one location (for debugging/testing)
+    # Returns a hash with the job's locations
+    def verify_job_uniqueness(job_jid : String, queue_name : String) : Hash(String, Int32)
+      locations = {
+        "main_queue"    => 0,
+        "processing"    => 0,
+        "delayed"       => 0,
+        "dead_letter"   => 0,
+      }
+
+      # Check main queue
+      main_jobs = redis.lrange(queue_name, 0, -1)
+      locations["main_queue"] = main_jobs.count { |j| j.as(String).includes?(job_jid) }
+
+      # Check processing queue
+      processing_key = processing_queue(queue_name)
+      processing_jobs = redis.lrange(processing_key, 0, -1)
+      locations["processing"] = processing_jobs.count { |j| j.as(String).includes?(job_jid) }
+
+      # Check delayed queue
+      delayed_jobs = redis.zrange(DELAYED_SET, 0, -1)
+      locations["delayed"] = delayed_jobs.count { |j| j.as(String).includes?(job_jid) }
+
+      # Check dead letter queue
+      dead_jobs = redis.zrange(DEAD_LETTER, 0, -1)
+      locations["dead_letter"] = dead_jobs.count { |j| j.as(String).includes?(job_jid) }
+
+      total_locations = locations.values.sum
+
+      if total_locations > 1
+        Log.warn &.emit("Job exists in multiple locations",
+          job_id: job_jid,
+          queue: queue_name,
+          locations: locations.to_s
+        )
+      elsif total_locations == 0
+        Log.debug &.emit("Job not found in any location",
+          job_id: job_jid,
+          queue: queue_name
+        )
+      end
+
+      locations
+    rescue ex
+      Log.error &.emit("Error verifying job uniqueness",
+        job_id: job_jid,
+        queue: queue_name,
+        error: ex.message
+      )
+      locations
+    end
+
     private def processing_queue(name : String)
       "#{PROCESSING_QUEUE}:#{name}"
     end

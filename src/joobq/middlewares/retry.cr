@@ -49,17 +49,14 @@ module JoobQ
 
         # Simple logic: if retries > 0, then retry, otherwise move to dead letter queue
         if current_retries > 0
-          # CRITICAL: Get original job JSON BEFORE modifying retries
-          # This is needed to correctly remove the job from processing queue
-          original_job_json = job.to_json
-
-          # Decrement retries AFTER capturing original JSON
+          # Decrement retries
           job.retries = current_retries - 1
 
           # Use idempotent retry with atomic operations to prevent duplicate retries
-          # Pass the original JSON and actual retry attempt number for exponential backoff calculation
-          success, updated_job = ExponentialBackoff.retry_idempotent_atomic_with_json(
-            job, queue, retry_attempt, original_job_json
+          # Pass the actual retry attempt number for exponential backoff calculation
+          # Note: Removal is done by job ID in Lua script, not JSON matching
+          success, updated_job = ExponentialBackoff.retry_idempotent_atomic(
+            job, queue, retry_attempt
           )
           if success
             Log.info &.emit("Job retry scheduled successfully (atomic)",
@@ -83,7 +80,8 @@ module JoobQ
 
       private def move_to_dead_letter_atomic(job : JoobQ::Job, queue : BaseQueue, error_context)
         # Atomically move job from processing to dead letter queue
-        # This single operation removes from processing, adds to dead letter, and cleans up retry lock
+        # This single operation removes from processing (by job ID), adds to dead letter, and cleans up retry lock
+        # Note: Removal is done by job ID in Lua script, not JSON matching
         updated_job = ExponentialBackoff.move_to_dead_letter_atomic(job, queue)
 
         Log.info &.emit("Job moved to dead letter queue atomically with error information",
@@ -102,10 +100,10 @@ module JoobQ
     # Retry lock expiration time (30 seconds - enough for scheduling, not excessive)
     private RETRY_LOCK_TTL = 30
 
-    # Atomic idempotent retry with original JSON provided
-    # This is the preferred method to prevent JSON mismatch issues
+    # Atomic idempotent retry that prevents duplicate retries for the same job
+    # Uses Lua script to remove by job ID (not JSON matching)
     # Returns a tuple of (success: Bool, modified_job: Job)
-    def self.retry_idempotent_atomic_with_json(job : JoobQ::Job, queue : BaseQueue, retry_attempt : Int32, original_job_json : String) : {Bool, JoobQ::Job}
+    def self.retry_idempotent_atomic(job : JoobQ::Job, queue : BaseQueue, retry_attempt : Int32) : {Bool, JoobQ::Job}
       return {false, job} unless queue.store.is_a?(RedisStore)
 
       retry_lock_key = "#{RETRY_LOCK_PREFIX}:#{job.jid}"
@@ -126,9 +124,9 @@ module JoobQ
           job.retrying!
 
           # Atomically move job from processing to retry queue
-          # Use the original JSON (before modifications) to remove from processing
+          # Removal is done by job ID (in Lua script), not JSON matching
           # This ensures the job is removed from processing and scheduled in a single atomic operation
-          success = redis_store.move_to_retry_atomic_with_original(job, queue.name, delay_ms.to_i64, original_job_json)
+          success = redis_store.move_to_retry_atomic(job, queue.name, delay_ms.to_i64)
 
           if success
             Log.info &.emit("Job scheduled for idempotent retry with exponential backoff (atomic)",
@@ -161,21 +159,18 @@ module JoobQ
     end
 
     # Atomically move job from processing to dead letter queue
-    # Uses Redis pipelined operations to ensure all operations complete together
+    # Uses Lua script to remove by job ID (not JSON matching)
     # Returns the modified job with dead status
     def self.move_to_dead_letter_atomic(job : JoobQ::Job, queue : BaseQueue) : JoobQ::Job
       return job unless queue.store.is_a?(RedisStore)
-
-      # Get the original job JSON BEFORE modifying status
-      original_job_json = job.to_json
 
       # Set job status to Dead before moving to dead letter queue
       job.dead!
 
       redis_store = queue.store.as(RedisStore)
 
-      # Use the atomic operation from RedisStore with original JSON
-      redis_store.move_to_dead_letter_atomic_with_original(job, queue.name, original_job_json)
+      # Use the atomic operation from RedisStore (removes by job ID)
+      redis_store.move_to_dead_letter_atomic(job, queue.name)
 
       Log.debug &.emit("Job moved to dead letter queue atomically",
         job_id: job.jid.to_s,
@@ -192,19 +187,26 @@ module JoobQ
       raise ex
     end
 
-    # Clean up retry lock when job completes successfully
+    # Clean up retry lock and job lock when job completes successfully
     def self.cleanup_retry_lock_atomic(job : JoobQ::Job, queue : BaseQueue) : Nil
       return unless queue.store.is_a?(RedisStore)
 
       redis_store = queue.store.as(RedisStore)
-      redis_store.cleanup_retry_lock_atomic(job.jid)
+      job_lock_key = "joobq:job_lock:#{job.jid}"
+      retry_lock_key = "joobq:retry_lock:#{job.jid}"
 
-      Log.debug &.emit("Retry lock cleaned up for job",
+      # Clean up both locks
+      redis_store.redis.pipelined do |pipe|
+        pipe.del(retry_lock_key)
+        pipe.del(job_lock_key)
+      end
+
+      Log.debug &.emit("Retry lock and job lock cleaned up for job",
         job_id: job.jid.to_s,
         queue: queue.name
       )
     rescue ex : Exception
-      Log.error &.emit("Failed to cleanup retry lock",
+      Log.error &.emit("Failed to cleanup locks",
         job_id: job.jid.to_s,
         queue: queue.name,
         error: ex.message

@@ -503,9 +503,8 @@ module JoobQ
 
         # Simulate retry
         retry_attempt = job.max_retries - job.retries
-        original_json = job.to_json  # Capture before modifications
         job.retries -= 1
-        success, updated_job = ExponentialBackoff.retry_idempotent_atomic_with_json(job, queue, retry_attempt, original_json)
+        success, updated_job = ExponentialBackoff.retry_idempotent_atomic(job, queue, retry_attempt)
 
         success.should be_true
         updated_job.retrying?.should be_true
@@ -605,9 +604,8 @@ module JoobQ
 
         # 2. Job fails, goes to Retrying status and Delayed queue
         retry_attempt = job.max_retries - job.retries
-        original_json = job.to_json  # Capture before modifications
         job.retries -= 1
-        success, updated_job = ExponentialBackoff.retry_idempotent_atomic_with_json(job, queue, retry_attempt, original_json)
+        success, updated_job = ExponentialBackoff.retry_idempotent_atomic(job, queue, retry_attempt)
 
         success.should be_true
         updated_job.retrying?.should be_true

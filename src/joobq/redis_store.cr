@@ -51,7 +51,7 @@ module JoobQ
       end
     end
 
-    # Get the Lua script for claim_jobs_batch
+    # Get the Lua script for claim_jobs_batch with job ID-based locking
     private def claim_jobs_batch_lua_script : String
       <<-LUA
         local queue_key = KEYS[1]
@@ -60,11 +60,13 @@ module JoobQ
         local worker_id = ARGV[1]
         local batch_size = tonumber(ARGV[2])
         local timeout = tonumber(ARGV[3])
+        local job_lock_ttl = 3600 -- 1 hour lock TTL
 
         -- Pre-allocate arrays for better performance
         local jobs = {}
         local claim_keys = {}
         local claim_data = {}
+        local job_locks = {}
 
         -- Get current time once
         local current_time = redis.call('TIME')[1]
@@ -73,11 +75,33 @@ module JoobQ
         for i = 1, batch_size do
           local job_data = redis.call('RPOPLPUSH', queue_key, processing_key)
           if job_data then
-            jobs[i] = job_data
-            -- Pre-build claim key and data for batch operations
-            local job_claim_key = worker_claim_key .. ':' .. i
-            claim_keys[i] = job_claim_key
-            claim_data[i] = {job_data, current_time}
+            -- Extract job ID from JSON (look for "jid":"<uuid>")
+            local job_id = string.match(job_data, '"jid":"([^"]+)"')
+
+            if job_id then
+              -- Try to acquire job lock using job ID
+              local job_lock_key = 'joobq:job_lock:' .. job_id
+              local lock_acquired = redis.call('SET', job_lock_key, worker_id, 'NX', 'EX', job_lock_ttl)
+
+              if lock_acquired then
+                -- Lock acquired, claim the job
+                jobs[i] = job_data
+                job_locks[i] = job_lock_key
+
+                -- Pre-build claim key and data for batch operations
+                local job_claim_key = worker_claim_key .. ':' .. i
+                claim_keys[i] = job_claim_key
+                claim_data[i] = {job_data, current_time}
+              else
+                -- Lock already held by another worker, put job back to queue
+                redis.call('LREM', processing_key, 1, job_data)
+                redis.call('RPUSH', queue_key, job_data)
+              end
+            else
+              -- Could not parse job ID, skip this job
+              redis.call('LREM', processing_key, 1, job_data)
+              redis.call('RPUSH', queue_key, job_data)
+            end
           else
             break -- No more jobs available
           end
@@ -87,11 +111,13 @@ module JoobQ
         if #jobs > 0 then
           local claim_args = {}
           for i = 1, #jobs do
-            local job_claim_key = claim_keys[i]
-            claim_args[#claim_args + 1] = job_claim_key .. ':job'
-            claim_args[#claim_args + 1] = claim_data[i][1]
-            claim_args[#claim_args + 1] = job_claim_key .. ':claimed_at'
-            claim_args[#claim_args + 1] = claim_data[i][2]
+            if claim_keys[i] then
+              local job_claim_key = claim_keys[i]
+              claim_args[#claim_args + 1] = job_claim_key .. ':job'
+              claim_args[#claim_args + 1] = claim_data[i][1]
+              claim_args[#claim_args + 1] = job_claim_key .. ':claimed_at'
+              claim_args[#claim_args + 1] = claim_data[i][2]
+            end
           end
 
           -- Use MSET for batch setting
@@ -100,7 +126,9 @@ module JoobQ
 
             -- Batch set expiration for all claim keys
             for i = 1, #jobs do
-              redis.call('EXPIRE', claim_keys[i], 3600)
+              if claim_keys[i] then
+                redis.call('EXPIRE', claim_keys[i], 3600)
+              end
             end
           end
         end
@@ -164,27 +192,49 @@ module JoobQ
       nil
     end
 
-    # Atomic job claiming with worker identification
+    # Atomic job claiming with worker identification and job ID-based locking
     def claim_job(queue_name : String, worker_id : String, klass : Class) : String?
       processing_key = processing_queue(queue_name)
       worker_claim_key = "#{processing_key}:#{worker_id}"
 
-      # Use a Lua script for atomic job claiming
+      # Use a Lua script for atomic job claiming with job ID lock
       lua_script = <<-LUA
         local queue_key = KEYS[1]
         local processing_key = KEYS[2]
         local worker_claim_key = KEYS[3]
         local worker_id = ARGV[1]
         local timeout = ARGV[2]
+        local job_lock_ttl = 3600 -- 1 hour lock TTL
 
         -- Try to get a job from the queue
         local job_data = redis.call('RPOPLPUSH', queue_key, processing_key)
         if job_data then
-          -- Atomically claim the job for this worker
-          redis.call('HSET', worker_claim_key, 'job', job_data)
-          redis.call('HSET', worker_claim_key, 'claimed_at', redis.call('TIME')[1])
-          redis.call('EXPIRE', worker_claim_key, 3600) -- 1 hour timeout
-          return job_data
+          -- Extract job ID from JSON
+          local job_id = string.match(job_data, '"jid":"([^"]+)"')
+
+          if job_id then
+            -- Try to acquire job lock using job ID
+            local job_lock_key = 'joobq:job_lock:' .. job_id
+            local lock_acquired = redis.call('SET', job_lock_key, worker_id, 'NX', 'EX', job_lock_ttl)
+
+            if lock_acquired then
+              -- Lock acquired, claim the job for this worker
+              redis.call('HSET', worker_claim_key, 'job', job_data)
+              redis.call('HSET', worker_claim_key, 'claimed_at', redis.call('TIME')[1])
+              redis.call('EXPIRE', worker_claim_key, 3600)
+              return job_data
+            else
+              -- Lock already held by another worker, put job back to queue
+              redis.call('LREM', processing_key, 1, job_data)
+              redis.call('RPUSH', queue_key, job_data)
+              return nil
+            end
+          else
+            -- Could not parse job ID, return job to queue
+            redis.call('LREM', processing_key, 1, job_data)
+            redis.call('RPUSH', queue_key, job_data)
+            return nil
+          end
         end
         return nil
       LUA
@@ -322,15 +372,29 @@ module JoobQ
         job_count: job_ids.size, error: ex.message)
     end
 
-    # Enhanced job processing cleanup with pipelining
+    # Enhanced job processing cleanup with pipelining and job ID lock release
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
     def cleanup_job_processing_pipelined(worker_id : String, job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
       worker_claim_key = "#{processing_key}:#{worker_id}"
 
+      # Extract job ID for lock release
+      begin
+        parsed = JSON.parse(job_json)
+        job_id = parsed["jid"]?.try(&.as_s)
+      rescue
+        job_id = nil
+      end
+
       redis.pipelined do |pipe|
-        pipe.del(worker_claim_key)                               # Release claim
+        pipe.del(worker_claim_key)                               # Release worker claim
         pipe.lrem(processing_key, 0, job_json)                   # Remove ALL occurrences from processing
+
+        # Release job lock by job ID
+        if job_id
+          pipe.del("joobq:job_lock:#{job_id}")
+        end
+
         pipe.hincrby("joobq:stats:processed", queue_name, 1)     # Update stats
         pipe.hincrby("joobq:stats:total_processed", "global", 1) # Update global stats
       end
@@ -339,11 +403,19 @@ module JoobQ
         job_data_length: job_json.size, error: ex.message)
     end
 
-    # Enhanced job processing cleanup for successful completion
+    # Enhanced job processing cleanup for successful completion with job ID lock release
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
     def cleanup_completed_job_pipelined(worker_id : String, job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
       worker_claim_key = "#{processing_key}:#{worker_id}"
+
+      # Extract job ID for lock release
+      begin
+        parsed = JSON.parse(job_json)
+        job_id = parsed["jid"]?.try(&.as_s)
+      rescue
+        job_id = nil
+      end
 
       redis.pipelined do |pipe|
         # Release worker claim
@@ -351,6 +423,11 @@ module JoobQ
 
         # Remove ALL occurrences of job from processing queue (ensures uniqueness)
         pipe.lrem(processing_key, 0, job_json)
+
+        # Release job lock by job ID
+        if job_id
+          pipe.del("joobq:job_lock:#{job_id}")
+        end
 
         # Update completion statistics
         pipe.hincrby("joobq:stats:completed", queue_name, 1)
@@ -537,42 +614,71 @@ module JoobQ
     end
 
     # Atomic operation: Move job from processing to dead letter queue
-    # Uses pipelined operations to ensure atomicity and prevent partial failures
-    # IMPORTANT: Removes job from ALL queues (main, processing, delayed) to prevent re-enqueuing
-    # IMPORTANT: Uses LREM with count=0 and ZREM to remove ALL occurrences of the job (ensures uniqueness)
-    # original_job_json: The JSON of the job as it exists in the processing queue (before status changes)
-    def move_to_dead_letter_atomic_with_original(job : Job, queue_name : String, original_job_json : String) : Nil
+    # Uses Lua script to remove by job ID (not JSON matching) for reliability
+    # IMPORTANT: Removes job from ALL queues by job ID to prevent re-enqueuing
+    def move_to_dead_letter_atomic(job : Job, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
       retry_lock_key = "joobq:retry_lock:#{job.jid}"
       current_timestamp = Time.local.to_unix_ms
-      # Use the modified job JSON for storing in dead letter queue
       modified_job_json = job.to_json
+      job_id = job.jid.to_s
 
-      redis.pipelined do |pipe|
-        # Remove ALL occurrences from main queue (defensive cleanup)
-        pipe.lrem(queue_name, 0, original_job_json)
-        pipe.lrem(queue_name, 0, modified_job_json)
+      # Lua script to remove job by ID from all locations and release all locks
+      lua_script = <<-LUA
+        local queue_name = KEYS[1]
+        local processing_key = KEYS[2]
+        local delayed_set = KEYS[3]
+        local dead_letter = KEYS[4]
+        local retry_lock_key = KEYS[5]
+        local job_id = ARGV[1]
+        local modified_job_json = ARGV[2]
+        local current_timestamp = ARGV[3]
+        local job_lock_key = 'joobq:job_lock:' .. job_id
 
-        # Remove ALL occurrences of the job from processing queue using ORIGINAL JSON (ensures uniqueness)
-        pipe.lrem(processing_key, 0, original_job_json)
-        pipe.lrem(processing_key, 0, modified_job_json)
+        -- Remove from main queue by job ID
+        local main_jobs = redis.call('LRANGE', queue_name, 0, -1)
+        for i, job_json in ipairs(main_jobs) do
+          if string.find(job_json, job_id, 1, true) then
+            redis.call('LREM', queue_name, 0, job_json)
+          end
+        end
 
-        # Remove job from delayed/retry set using BOTH original and modified JSON (if it exists there)
-        pipe.zrem(DELAYED_SET, original_job_json)
-        pipe.zrem(DELAYED_SET, modified_job_json)
+        -- Remove from processing queue by job ID
+        local processing_jobs = redis.call('LRANGE', processing_key, 0, -1)
+        for i, job_json in ipairs(processing_jobs) do
+          if string.find(job_json, job_id, 1, true) then
+            redis.call('LREM', processing_key, 0, job_json)
+          end
+        end
 
-        # Add job to dead letter queue with timestamp score using MODIFIED JSON
-        pipe.zadd(DEAD_LETTER, current_timestamp, modified_job_json)
+        -- Remove from delayed set by job ID
+        local delayed_jobs = redis.call('ZRANGE', delayed_set, 0, -1)
+        for i, job_json in ipairs(delayed_jobs) do
+          if string.find(job_json, job_id, 1, true) then
+            redis.call('ZREM', delayed_set, job_json)
+          end
+        end
 
-        # Remove retry lock (cleanup)
-        pipe.del(retry_lock_key)
+        -- Add to dead letter queue
+        redis.call('ZADD', dead_letter, current_timestamp, modified_job_json)
 
-        # Update statistics
-        pipe.hincrby("joobq:stats:dead_letter", queue_name, 1)
-        pipe.hincrby("joobq:stats:total_dead_letter", "global", 1)
-      end
+        -- Remove both retry lock and job lock
+        redis.call('DEL', retry_lock_key)
+        redis.call('DEL', job_lock_key)
 
-      Log.debug &.emit("Job moved to dead letter queue atomically (removed from all queues)",
+        -- Update statistics
+        redis.call('HINCRBY', 'joobq:stats:dead_letter', queue_name, 1)
+        redis.call('HINCRBY', 'joobq:stats:total_dead_letter', 'global', 1)
+
+        return 1
+      LUA
+
+      redis.eval(lua_script,
+        [queue_name, processing_key, DELAYED_SET, DEAD_LETTER, retry_lock_key],
+        [job_id, modified_job_json, current_timestamp.to_s]
+      )
+
+      Log.debug &.emit("Job moved to dead letter queue atomically (removed by ID from all queues)",
         job_id: job.jid.to_s,
         queue: queue_name
       )
@@ -585,44 +691,69 @@ module JoobQ
       raise ex
     end
 
-    # Backward compatible version that assumes the job hasn't changed
-    def move_to_dead_letter_atomic(job : Job, queue_name : String) : Nil
-      move_to_dead_letter_atomic_with_original(job, queue_name, job.to_json)
-    end
-
     # Atomic operation: Move job from processing to retry/delayed queue
-    # Uses pipelined operations to ensure atomicity and prevent partial failures
-    # IMPORTANT: Uses LREM with count=0 to remove ALL occurrences of the job from ALL queues (ensures uniqueness)
-    # original_job_json: The JSON of the job as it exists in the processing queue (before status changes)
-    def move_to_retry_atomic_with_original(job : Job, queue_name : String, delay_ms : Int64, original_job_json : String) : Bool
+    # Uses Lua script to remove by job ID (not JSON matching) for reliability
+    # IMPORTANT: Removes job from ALL queues by job ID to prevent re-enqueuing
+    def move_to_retry_atomic(job : Job, queue_name : String, delay_ms : Int64) : Bool
       processing_key = processing_queue(queue_name)
       retry_lock_key = "joobq:retry_lock:#{job.jid}"
       schedule_time = Time.local.to_unix_ms + delay_ms
-      # Use the modified job JSON for storing in delayed queue
       modified_job_json = job.to_json
+      job_id = job.jid.to_s
 
-      # Atomic operation using pipeline
-      redis.pipelined do |pipe|
-        # Remove ALL occurrences from main queue (defensive cleanup for edge cases)
-        pipe.lrem(queue_name, 0, original_job_json)
-        pipe.lrem(queue_name, 0, modified_job_json)
+      # Lua script to remove job by ID from all locations atomically and release job lock
+      lua_script = <<-LUA
+        local queue_name = KEYS[1]
+        local processing_key = KEYS[2]
+        local delayed_set = KEYS[3]
+        local job_id = ARGV[1]
+        local modified_job_json = ARGV[2]
+        local schedule_time = ARGV[3]
+        local job_lock_key = 'joobq:job_lock:' .. job_id
 
-        # Remove ALL occurrences of the job from processing queue (ensures uniqueness)
-        pipe.lrem(processing_key, 0, original_job_json)
-        pipe.lrem(processing_key, 0, modified_job_json)
+        -- Remove from main queue by job ID
+        local main_jobs = redis.call('LRANGE', queue_name, 0, -1)
+        for i, job_json in ipairs(main_jobs) do
+          if string.find(job_json, job_id, 1, true) then
+            redis.call('LREM', queue_name, 0, job_json)
+          end
+        end
 
-        # Remove from delayed set if it somehow exists there (defensive)
-        pipe.zrem(DELAYED_SET, original_job_json)
+        -- Remove from processing queue by job ID
+        local processing_jobs = redis.call('LRANGE', processing_key, 0, -1)
+        for i, job_json in ipairs(processing_jobs) do
+          if string.find(job_json, job_id, 1, true) then
+            redis.call('LREM', processing_key, 0, job_json)
+          end
+        end
 
-        # Add job to delayed/retry queue with future timestamp using MODIFIED JSON
-        pipe.zadd(DELAYED_SET, schedule_time, modified_job_json)
+        -- Remove from delayed set by job ID
+        local delayed_jobs = redis.call('ZRANGE', delayed_set, 0, -1)
+        for i, job_json in ipairs(delayed_jobs) do
+          if string.find(job_json, job_id, 1, true) then
+            redis.call('ZREM', delayed_set, job_json)
+          end
+        end
 
-        # Update retry statistics
-        pipe.hincrby("joobq:stats:retries", queue_name, 1)
-        pipe.hincrby("joobq:stats:total_retries", "global", 1)
-      end
+        -- Release existing job lock (will be re-acquired when job is claimed again)
+        redis.call('DEL', job_lock_key)
 
-      Log.debug &.emit("Job moved to retry queue atomically",
+        -- Add to delayed queue with new timestamp
+        redis.call('ZADD', delayed_set, schedule_time, modified_job_json)
+
+        -- Update statistics
+        redis.call('HINCRBY', 'joobq:stats:retries', queue_name, 1)
+        redis.call('HINCRBY', 'joobq:stats:total_retries', 'global', 1)
+
+        return 1
+      LUA
+
+      redis.eval(lua_script,
+        [queue_name, processing_key, DELAYED_SET],
+        [job_id, modified_job_json, schedule_time.to_s]
+      )
+
+      Log.debug &.emit("Job moved to retry queue atomically (removed by ID from all queues)",
         job_id: job.jid.to_s,
         queue: queue_name,
         delay_ms: delay_ms,
@@ -639,11 +770,6 @@ module JoobQ
       # Remove retry lock on failure to allow future retry attempts
       redis.del(retry_lock_key) rescue nil
       false
-    end
-
-    # Backward compatible version that assumes the job hasn't changed
-    def move_to_retry_atomic(job : Job, queue_name : String, delay_ms : Int64) : Bool
-      move_to_retry_atomic_with_original(job, queue_name, delay_ms, job.to_json)
     end
 
     # Atomic operation: Cleanup retry lock

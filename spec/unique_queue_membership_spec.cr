@@ -152,19 +152,19 @@ module JoobQ
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         job = ExampleJob.new(1)
-        original_json = job.to_json  # Capture BEFORE modifications
+        job_json = job.to_json
         processing_key = "joobq:processing:#{queue_name}"
-
+        
         # Add job multiple times to processing (shouldn't happen, but test cleanup)
-        3.times { store.redis.lpush(processing_key, original_json) }
+        3.times { store.redis.lpush(processing_key, job_json) }
         store.redis.llen(processing_key).should eq 3
-
-        # Move to retry (should remove ALL occurrences)
+        
+        # Move to retry (should remove ALL occurrences by job ID)
         job.retrying!
-        success = store.move_to_retry_atomic_with_original(job, queue_name, 1000_i64, original_json)
-
+        success = store.move_to_retry_atomic(job, queue_name, 1000_i64)
+        
         success.should be_true
-
+        
         # Verify ALL occurrences are removed
         store.redis.llen(processing_key).should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 1
@@ -273,16 +273,15 @@ module JoobQ
 
         # First retry attempt (should succeed)
         retry_attempt = job.max_retries - job.retries
-        original_json = job.to_json  # Capture before modifications
         job.retries -= 1
-        success1, _ = ExponentialBackoff.retry_idempotent_atomic_with_json(job, queue, retry_attempt, original_json)
+        success1, _ = ExponentialBackoff.retry_idempotent_atomic(job, queue, retry_attempt)
         success1.should be_true
-
+        
         # Add job back to processing (simulate duplicate processing)
         store.redis.lpush(processing_key, job.to_json)
-
+        
         # Second retry attempt (should fail due to lock)
-        success2, _ = ExponentialBackoff.retry_idempotent_atomic_with_json(job, queue, retry_attempt, original_json)
+        success2, _ = ExponentialBackoff.retry_idempotent_atomic(job, queue, retry_attempt)
         success2.should be_false
 
         # Verify job is in delayed queue only once
@@ -332,9 +331,8 @@ module JoobQ
         # Step 3: Retrying (job fails, moves to delayed)
         claimed_job = ExampleJob.from_json(claimed_job_json.not_nil!)
         retry_attempt = claimed_job.max_retries - claimed_job.retries
-        original_json = claimed_job.to_json  # Capture before modifications
         claimed_job.retries -= 1
-        success, _ = ExponentialBackoff.retry_idempotent_atomic_with_json(claimed_job, queue, retry_attempt, original_json)
+        success, _ = ExponentialBackoff.retry_idempotent_atomic(claimed_job, queue, retry_attempt)
         success.should be_true
         JoobQ.verify_single_location(store, queue_name, delayed: 1)
 

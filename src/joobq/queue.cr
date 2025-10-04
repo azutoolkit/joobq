@@ -109,8 +109,13 @@ module JoobQ
     end
 
     def retry(job : String)
-      delay = (2 ** (job.retries)) * 1000 # Delay in ms
-      store.schedule(job, delay)
+      job_data = JSON.parse(job)
+      retries = job_data["retries"]?.try(&.as_i) || 0
+      delay = (2 ** retries) * 1000_i64 # Delay in ms
+
+      # Use Redis store directly to schedule the job string
+      redis_store = store.as(RedisStore)
+      redis_store.redis.zadd(RedisStore::DELAYED_SET, delay, job)
     end
 
     def size : Int64
@@ -173,19 +178,21 @@ module JoobQ
     end
 
     # Pipelined job cleanup for improved performance
-    def cleanup_job_processing_pipelined(worker_id : String, job_id : String) : Nil
-      store.as(RedisStore).cleanup_job_processing_pipelined(worker_id, job_id, name)
+    # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
+    def cleanup_job_processing_pipelined(worker_id : String, job_json : String) : Nil
+      store.as(RedisStore).cleanup_job_processing_pipelined(worker_id, job_json, name)
     rescue ex
       Log.error &.emit("Error in pipelined job cleanup", queue: name, worker: worker_id,
-        job_id: job_id, error: ex.message)
+        job_data_length: job_json.size, error: ex.message)
     end
 
     # Enhanced cleanup for successfully completed jobs
-    def cleanup_completed_job_pipelined(worker_id : String, job_id : String) : Nil
-      store.as(RedisStore).cleanup_completed_job_pipelined(worker_id, job_id, name)
+    # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
+    def cleanup_completed_job_pipelined(worker_id : String, job_json : String) : Nil
+      store.as(RedisStore).cleanup_completed_job_pipelined(worker_id, job_json, name)
     rescue ex
       Log.error &.emit("Error in completed job cleanup", queue: name, worker: worker_id,
-        job_id: job_id, error: ex.message)
+        job_data_length: job_json.size, error: ex.message)
     end
 
     # Verify that a job has been properly removed from processing queue

@@ -1,6 +1,5 @@
 module JoobQ
   class RedisStore < Store
-    FAILED_SET       = "joobq:failed_jobs"
     DELAYED_SET      = "joobq:delayed_jobs"
     private DEAD_LETTER      = "joobq:dead_letter"
     private PROCESSING_QUEUE = "joobq:processing"
@@ -324,23 +323,25 @@ module JoobQ
     end
 
     # Enhanced job processing cleanup with pipelining
-    def cleanup_job_processing_pipelined(worker_id : String, job_id : String, queue_name : String) : Nil
+    # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
+    def cleanup_job_processing_pipelined(worker_id : String, job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
       worker_claim_key = "#{processing_key}:#{worker_id}"
 
       redis.pipelined do |pipe|
-        pipe.del(worker_claim_key)                           # Release claim
-        pipe.lrem(processing_key, 1, job_id)                 # Remove from processing
-        pipe.hincrby("joobq:stats:processed", queue_name, 1) # Update stats
+        pipe.del(worker_claim_key)                               # Release claim
+        pipe.lrem(processing_key, 0, job_json)                   # Remove ALL occurrences from processing
+        pipe.hincrby("joobq:stats:processed", queue_name, 1)     # Update stats
         pipe.hincrby("joobq:stats:total_processed", "global", 1) # Update global stats
       end
     rescue ex
       Log.error &.emit("Error in pipelined job cleanup", queue: queue_name, worker: worker_id,
-        job_id: job_id, error: ex.message)
+        job_data_length: job_json.size, error: ex.message)
     end
 
     # Enhanced job processing cleanup for successful completion
-    def cleanup_completed_job_pipelined(worker_id : String, job_id : String, queue_name : String) : Nil
+    # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
+    def cleanup_completed_job_pipelined(worker_id : String, job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
       worker_claim_key = "#{processing_key}:#{worker_id}"
 
@@ -348,21 +349,18 @@ module JoobQ
         # Release worker claim
         pipe.del(worker_claim_key)
 
-        # Remove job from processing queue - use LREM with count 1 to remove only the first occurrence
-        pipe.lrem(processing_key, 1, job_id)
+        # Remove ALL occurrences of job from processing queue (ensures uniqueness)
+        pipe.lrem(processing_key, 0, job_json)
 
         # Update completion statistics
         pipe.hincrby("joobq:stats:completed", queue_name, 1)
         pipe.hincrby("joobq:stats:total_completed", "global", 1)
         pipe.hincrby("joobq:stats:processed", queue_name, 1)
         pipe.hincrby("joobq:stats:total_processed", "global", 1)
-
-        # Log successful completion for monitoring
-        pipe.hset("joobq:completion_log", "#{queue_name}:#{job_id}", Time.local.to_unix.to_s)
       end
     rescue ex
       Log.error &.emit("Error in completed job cleanup", queue: queue_name, worker: worker_id,
-        job_id: job_id, error: ex.message)
+        job_data_length: job_json.size, error: ex.message)
     end
 
     def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
@@ -536,6 +534,202 @@ module JoobQ
       Log.warn &.emit("Error getting processing queue size",
         queue: queue_name, error: ex.message)
       0i64
+    end
+
+    # Atomic operation: Move job from processing to dead letter queue
+    # Uses pipelined operations to ensure atomicity and prevent partial failures
+    # IMPORTANT: Removes job from ALL queues (processing, failed, delayed) to prevent re-enqueuing
+    # IMPORTANT: Uses LREM with count=0 and ZREM to remove ALL occurrences of the job (ensures uniqueness)
+    # original_job_json: The JSON of the job as it exists in the processing queue (before status changes)
+    def move_to_dead_letter_atomic_with_original(job : Job, queue_name : String, original_job_json : String) : Nil
+      processing_key = processing_queue(queue_name)
+      retry_lock_key = "joobq:retry_lock:#{job.jid}"
+      current_timestamp = Time.local.to_unix_ms
+      # Use the modified job JSON for storing in dead letter queue
+      modified_job_json = job.to_json
+
+      redis.pipelined do |pipe|
+        # Remove ALL occurrences of the job from processing queue using ORIGINAL JSON (ensures uniqueness)
+        pipe.lrem(processing_key, 0, original_job_json)
+
+        # Remove job from delayed/retry set using BOTH original and modified JSON (if it exists there)
+        pipe.zrem(DELAYED_SET, original_job_json)
+        pipe.zrem(DELAYED_SET, modified_job_json)
+
+        # Add job to dead letter queue with timestamp score using MODIFIED JSON
+        pipe.zadd(DEAD_LETTER, current_timestamp, modified_job_json)
+
+        # Remove retry lock (cleanup)
+        pipe.del(retry_lock_key)
+
+        # Update statistics
+        pipe.hincrby("joobq:stats:dead_letter", queue_name, 1)
+        pipe.hincrby("joobq:stats:total_dead_letter", "global", 1)
+      end
+
+      Log.debug &.emit("Job moved to dead letter queue atomically (removed from all queues)",
+        job_id: job.jid.to_s,
+        queue: queue_name
+      )
+    rescue ex
+      Log.error &.emit("Failed to move job to dead letter queue atomically",
+        job_id: job.jid.to_s,
+        queue: queue_name,
+        error: ex.message
+      )
+      raise ex
+    end
+
+    # Backward compatible version that assumes the job hasn't changed
+    def move_to_dead_letter_atomic(job : Job, queue_name : String) : Nil
+      move_to_dead_letter_atomic_with_original(job, queue_name, job.to_json)
+    end
+
+    # Atomic operation: Move job from processing to retry/delayed queue
+    # Uses pipelined operations to ensure atomicity and prevent partial failures
+    # IMPORTANT: Uses LREM with count=0 to remove ALL occurrences of the job (ensures uniqueness)
+    # original_job_json: The JSON of the job as it exists in the processing queue (before status changes)
+    def move_to_retry_atomic_with_original(job : Job, queue_name : String, delay_ms : Int64, original_job_json : String) : Bool
+      processing_key = processing_queue(queue_name)
+      retry_lock_key = "joobq:retry_lock:#{job.jid}"
+      schedule_time = Time.local.to_unix_ms + delay_ms
+      # Use the modified job JSON for storing in delayed queue
+      modified_job_json = job.to_json
+
+      # Atomic operation using pipeline
+      redis.pipelined do |pipe|
+        # Remove ALL occurrences of the job from processing queue using ORIGINAL JSON (ensures uniqueness)
+        pipe.lrem(processing_key, 0, original_job_json)
+
+        # Add job to delayed/retry queue with future timestamp using MODIFIED JSON
+        pipe.zadd(DELAYED_SET, schedule_time, modified_job_json)
+
+        # Update retry statistics
+        pipe.hincrby("joobq:stats:retries", queue_name, 1)
+        pipe.hincrby("joobq:stats:total_retries", "global", 1)
+      end
+
+      Log.debug &.emit("Job moved to retry queue atomically",
+        job_id: job.jid.to_s,
+        queue: queue_name,
+        delay_ms: delay_ms,
+        schedule_time: schedule_time
+      )
+
+      true
+    rescue ex
+      Log.error &.emit("Failed to move job to retry queue atomically",
+        job_id: job.jid.to_s,
+        queue: queue_name,
+        error: ex.message
+      )
+      # Remove retry lock on failure to allow future retry attempts
+      redis.del(retry_lock_key) rescue nil
+      false
+    end
+
+    # Backward compatible version that assumes the job hasn't changed
+    def move_to_retry_atomic(job : Job, queue_name : String, delay_ms : Int64) : Bool
+      move_to_retry_atomic_with_original(job, queue_name, delay_ms, job.to_json)
+    end
+
+    # Atomic operation: Cleanup retry lock
+    def cleanup_retry_lock_atomic(job_id : UUID) : Nil
+      retry_lock_key = "joobq:retry_lock:#{job_id}"
+      redis.del(retry_lock_key)
+    rescue ex
+      Log.error &.emit("Failed to cleanup retry lock",
+        job_id: job_id.to_s,
+        error: ex.message
+      )
+    end
+
+    # Schedule delayed retry (job status is already set to Retrying)
+    # This method moves the job from processing queue to delayed queue
+    def schedule_delayed_retry(job : Job, queue_name : String, delay_ms : Int64) : Bool
+      processing_key = processing_queue(queue_name)
+      schedule_time = Time.local.to_unix_ms + delay_ms
+      job_json = job.to_json
+
+      redis.pipelined do |pipe|
+        # Remove from processing queue
+        pipe.lrem(processing_key, 0, job_json)
+
+        # Add to delayed queue with future timestamp
+        pipe.zadd(DELAYED_SET, schedule_time, job_json)
+
+        # Update statistics
+        pipe.hincrby("joobq:stats:delayed_retries", queue_name, 1)
+      end
+
+      Log.debug &.emit("Job scheduled for delayed retry",
+        job_id: job.jid.to_s,
+        queue: queue_name,
+        delay_ms: delay_ms,
+        schedule_time: schedule_time
+      )
+
+      true
+    rescue ex
+      Log.error &.emit("Failed to schedule delayed retry",
+        job_id: job.jid.to_s,
+        queue: queue_name,
+        error: ex.message
+      )
+      false
+    end
+
+    # Process due jobs from delayed queue and move them back to main queue
+    # Returns the array of job JSON strings that were moved
+    def process_due_delayed_jobs(queue_name : String) : Array(String)
+      current_time = Time.local.to_unix_ms
+      due_jobs = [] of String
+
+      # Get jobs that are due for processing (score <= current_time)
+      jobs_result = redis.zrangebyscore(DELAYED_SET, "-inf", current_time.to_s, limit: [0, 100])
+
+      jobs_result.each do |job_data|
+        due_jobs << job_data.as(String)
+      end
+
+      if !due_jobs.empty?
+        redis.pipelined do |pipe|
+          due_jobs.each do |job_json|
+            # Parse job to check if it belongs to this queue
+            begin
+              parsed_job = JSON.parse(job_json)
+              job_queue = parsed_job["queue"]?.try(&.as_s)
+
+              # Only process jobs for this queue
+              if job_queue == queue_name
+                # Remove from delayed queue
+                pipe.zrem(DELAYED_SET, job_json)
+
+                # Add back to main queue (front of queue for priority)
+                pipe.lpush(queue_name, job_json)
+              end
+            rescue ex
+              Log.warn &.emit("Failed to parse delayed job",
+                queue: queue_name,
+                error: ex.message
+              )
+            end
+          end
+        end
+
+        Log.debug &.emit("Processed due delayed jobs",
+          queue: queue_name,
+          count: due_jobs.size
+        )
+      end
+
+      due_jobs
+    rescue ex
+      Log.error &.emit("Failed to process due delayed jobs",
+        queue: queue_name,
+        error: ex.message
+      )
+      [] of String
     end
 
     private def processing_queue(name : String)

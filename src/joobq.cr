@@ -56,12 +56,13 @@ module JoobQ
       scheduler.run
     end
 
+    # Start delayed job scheduler (processes retrying jobs from DELAYED_SET)
+    config.delayed_job_scheduler.start
+
     queues.each do |key, queue|
       Log.info { "JoobQ starting #{key} queue..." }
       queue.start
     end
-
-    Scheduler.new(delay_set: RedisStore::FAILED_SET).run
 
     Log.info { "JoobQ initialized and waiting for Jobs..." }
 

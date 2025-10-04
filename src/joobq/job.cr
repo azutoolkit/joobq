@@ -23,12 +23,12 @@ module JoobQ
   # ### Job Status
   #
   # The `JoobQ::Job::Status` enum defines the possible states for a job:
-  # - `Pending`: The job has been created but not scheduled.
+  # - `Enqueued`: The job has been enqueued and is waiting to be processed.
   # - `Scheduled`: The job is scheduled to run at a specific time.
   # - `Running`: The job is currently executing.
   # - `Completed`: The job finished successfully.
   # - `Retrying`: The job is retrying after a failure.
-  # - `Failed`: The job execution failed after exhausting retries.
+  # - `Dead`: The job execution failed after exhausting retries.
   # - `Expired`: The job expired before execution.
   #
   # Each status has corresponding predicate and setter methods for checking
@@ -38,7 +38,8 @@ module JoobQ
   #
   # - `jid`: The unique identifier for the job (UUID).
   # - `queue`: The queue to which the job is assigned.
-  # - `retries`: The maximum number of retries allowed.
+  # - `retries`: The number of retries remaining for this job.
+  # - `max_retries`: The maximum number of retries allowed (set at job creation).
   # - `expires`: The expiration time of the job in Unix milliseconds.
   # - `status`: The current status of the job.
   # - `timeout`: The maximum execution time allowed for the job.
@@ -99,9 +100,9 @@ module JoobQ
   module Job
     enum Status
       Completed
+      Dead
       Enqueued
       Expired
-      Failed
       Retrying
       Running
       Scheduled
@@ -115,6 +116,7 @@ module JoobQ
       getter jid : UUID = UUID.random
       property queue : String = JoobQ.config.default_queue
       property retries : Int32 = JoobQ.config.retries
+      property max_retries : Int32 = JoobQ.config.retries
       property expires : Int64 = JoobQ.config.expires.from_now.to_unix_ms
       property status : Status = Status::Enqueued
 

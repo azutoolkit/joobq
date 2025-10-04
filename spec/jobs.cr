@@ -16,6 +16,10 @@ end
 
 module JoobQ
   describe Job do
+    before_each do
+      JoobQ.reset
+    end
+
     it "performs jobs at later time" do
       job_id = ExampleJob.delay(for: 1.hour, x: 1)
       job_id.should be_a UUID

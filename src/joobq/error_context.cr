@@ -93,6 +93,9 @@ module JoobQ
         "queue_running_workers" => queue.running_workers.to_s,
         "system_time"           => Time.local.to_rfc3339,
         "memory_usage"          => get_memory_usage,
+        "crystal_version"       => Crystal::VERSION,
+        "hostname"              => get_hostname,
+        "process_id"            => Process.pid.to_s,
       }
 
       # Try to get queue size, but don't fail if Redis is not available
@@ -100,6 +103,16 @@ module JoobQ
         context["queue_size"] = queue.size.to_s
       rescue
         context["queue_size"] = "unknown"
+      end
+
+      # Try to get Redis connection info
+      begin
+        redis_store = queue.store.as(RedisStore)
+        context["redis_connected"] = "true"
+        context["redis_info"] = redis_store.redis.info("server")["redis_version"]?.to_s || "unknown"
+      rescue
+        context["redis_connected"] = "false"
+        context["redis_info"] = "unavailable"
       end
 
       additional.each do |key, value|
@@ -112,6 +125,13 @@ module JoobQ
     def self.get_memory_usage : String
       # Simple memory usage estimation
       GC.stats.total_bytes.to_s
+    rescue
+      "unknown"
+    end
+
+    def self.get_hostname : String
+      # Get system hostname
+      `hostname`.strip
     rescue
       "unknown"
     end
@@ -206,9 +226,9 @@ module JoobQ
       end
     end
 
-    def self.update_job_with_error(job : Job, error_context : ErrorContext) : Nil
-      job.failed!
-      job.retries = job.retries - 1
+    def self.update_job_with_error(job : Job, error_context : ErrorContext) : Job
+      # Don't set status here - let retry middleware handle status transitions
+      # Status will be set to either Retrying or Dead based on remaining retries
 
       job.error = {
         failed_at:      error_context.occurred_at,
@@ -220,6 +240,8 @@ module JoobQ
         retry_count:    error_context.retry_count,
         system_context: error_context.system_context,
       }
+
+      job
     end
 
     def self.schedule_retry(job : Job, queue : BaseQueue, error_context : ErrorContext) : Nil
@@ -235,10 +257,13 @@ module JoobQ
         error_type: error_context.error_type
       )
 
-      queue.store.schedule(job, delay.total_milliseconds.to_i64, delay_set: RedisStore::FAILED_SET)
+      # Schedule job with retrying status using DELAYED_SET (not FAILED_SET)
+      queue.store.schedule(job, delay.total_milliseconds.to_i64, delay_set: RedisStore::DELAYED_SET)
     end
 
-    def self.send_to_dead_letter(job : Job, queue : BaseQueue, error_context : ErrorContext) : Nil
+    def self.send_to_dead_letter(job : Job, queue : BaseQueue, error_context : ErrorContext) : Job
+      job.dead! # Set to Dead status instead of Failed
+
       Log.error &.emit(
         "Sending job to dead letter queue",
         job_id: job.jid.to_s,
@@ -257,6 +282,8 @@ module JoobQ
           error: ex.message || "Unknown error"
         )
       end
+
+      job
     end
   end
 end

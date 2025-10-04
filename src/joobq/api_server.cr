@@ -537,6 +537,184 @@ module JoobQ
           context.response.print(response.to_json)
         end
       end,
+
+      # Get retrying jobs (jobs with retrying status in DELAYED_SET)
+      {method: "GET", path: "/joobq/jobs/retrying"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+
+        limit = context.request.query_params["limit"]?.try(&.to_i) || 50
+        queue_name = context.request.query_params["queue"]?
+
+        begin
+          redis_store = RedisStore.instance
+          all_delayed_jobs = redis_store.list_sorted_set_jobs(RedisStore::DELAYED_SET, 1, limit)
+
+          # Filter for retrying jobs (jobs with retrying status)
+          retrying_jobs = all_delayed_jobs.select do |job_json|
+            begin
+              parsed = JSON.parse(job_json)
+              status = parsed["status"]?.try(&.as_s)
+              job_queue = parsed["queue"]?.try(&.as_s)
+
+              # Check if status is Retrying and optionally filter by queue
+              is_retrying = status == "Retrying"
+              matches_queue = queue_name.nil? || job_queue == queue_name
+
+              is_retrying && matches_queue
+            rescue
+              false
+            end
+          end
+
+          response = {
+            status:    "success",
+            jobs:      retrying_jobs.map { |j| JSON.parse(j) },
+            count:     retrying_jobs.size,
+            timestamp: Time.local.to_rfc3339,
+          }
+
+          context.response.print(response.to_json)
+        rescue ex
+          Log.error &.emit("Error getting retrying jobs", error: ex.message)
+
+          response = {
+            status:    "error",
+            message:   "Failed to get retrying jobs: #{ex.message}",
+            timestamp: Time.local.to_rfc3339,
+          }
+          context.response.status_code = 500
+          context.response.print(response.to_json)
+        end
+      end,
+
+      # Get dead letter jobs
+      {method: "GET", path: "/joobq/jobs/dead"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+
+        limit = context.request.query_params["limit"]?.try(&.to_i) || 50
+        queue_name = context.request.query_params["queue"]?
+
+        begin
+          redis_store = RedisStore.instance
+
+          # Get dead letter jobs (from DEAD_LETTER sorted set)
+          dead_jobs_raw = redis_store.redis.zrange("joobq:dead_letter", 0, limit - 1)
+
+          dead_jobs = dead_jobs_raw.map(&.as(String)).select do |job_json|
+            if queue_name
+              begin
+                parsed = JSON.parse(job_json)
+                job_queue = parsed["queue"]?.try(&.as_s)
+                job_queue == queue_name
+              rescue
+                false
+              end
+            else
+              true
+            end
+          end
+
+          response = {
+            status:    "success",
+            jobs:      dead_jobs.map { |j| JSON.parse(j) },
+            count:     dead_jobs.size,
+            timestamp: Time.local.to_rfc3339,
+          }
+
+          context.response.print(response.to_json)
+        rescue ex
+          Log.error &.emit("Error getting dead jobs", error: ex.message)
+
+          response = {
+            status:    "error",
+            message:   "Failed to get dead jobs: #{ex.message}",
+            timestamp: Time.local.to_rfc3339,
+          }
+          context.response.status_code = 500
+          context.response.print(response.to_json)
+        end
+      end,
+
+      # Retry a dead job (move from dead letter queue back to main queue)
+      {method: "POST", path: "/joobq/jobs/:job_id/retry"} => ->(context : HTTP::Server::Context) do
+        context.response.content_type = "application/json"
+
+        # Extract job ID from path
+        path = context.request.path
+        job_match = path.match(/^\/joobq\/jobs\/([^\/]+)\/retry$/)
+
+        unless job_match && job_match[1]?
+          context.response.status_code = 400
+          context.response.print({
+            error:     "Invalid path format",
+            message:   "Missing or invalid job ID in path",
+            timestamp: Time.local.to_rfc3339,
+          }.to_json)
+          return
+        end
+
+        job_id = job_match[1]
+
+        begin
+          redis_store = RedisStore.instance
+
+          # Find the job in dead letter queue
+          dead_jobs = redis_store.redis.zrange("joobq:dead_letter", 0, -1)
+          job_found = false
+          job_to_retry : String? = nil
+
+          dead_jobs.each do |job_data|
+            job_json = job_data.as(String)
+            parsed = JSON.parse(job_json)
+            if parsed["jid"]?.try(&.as_s) == job_id
+              job_found = true
+              job_to_retry = job_json
+              break
+            end
+          end
+
+          unless job_found || job_to_retry
+            context.response.status_code = 404
+            context.response.print({
+              error:     "Job not found",
+              message:   "Job with ID '#{job_id}' not found in dead letter queue",
+              timestamp: Time.local.to_rfc3339,
+            }.to_json)
+            return
+          end
+
+          if job_to_retry
+            # Parse the job to get its queue
+            parsed_job = JSON.parse(job_to_retry.not_nil!)
+            queue_name = parsed_job["queue"]?.try(&.as_s) || "default"
+
+            # Remove from dead letter queue and add back to main queue
+            redis_store.redis.pipelined do |pipe|
+              pipe.zrem("joobq:dead_letter", job_to_retry.not_nil!)
+              pipe.lpush(queue_name, job_to_retry.not_nil!)
+            end
+
+            response = {
+              status:    "success",
+              message:   "Job '#{job_id}' has been moved from dead letter queue back to '#{queue_name}' queue",
+              job_id:    job_id,
+              queue:     queue_name,
+              timestamp: Time.local.to_rfc3339,
+            }
+            context.response.print(response.to_json)
+          end
+        rescue ex
+          Log.error &.emit("Error retrying dead job", job_id: job_id, error: ex.message)
+
+          response = {
+            status:    "error",
+            message:   "Failed to retry job: #{ex.message}",
+            timestamp: Time.local.to_rfc3339,
+          }
+          context.response.status_code = 500
+          context.response.print(response.to_json)
+        end
+      end,
     } of NamedTuple(method: String, path: String) => Proc(HTTP::Server::Context, Nil)
 
     def self.register_endpoint(method, path, handler)

@@ -57,6 +57,9 @@ module JoobQ
     # Schedulers
     property schedulers : Array(Scheduler) = [] of Scheduler
 
+    # Delayed job scheduler (processes retrying jobs)
+    property delayed_job_scheduler : DelayedJobScheduler = DelayedJobScheduler.new
+
     # DSL: Add custom middlewares
     def use(& : ->)
       yield middlewares

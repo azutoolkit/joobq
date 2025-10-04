@@ -143,18 +143,18 @@ module JoobQ
               "Worker async job processing failed - could not parse job",
               worker_id: @worker_id,
               job_data_length: job.size.to_s,
-              error: ex.message
+              error: ex.message || "Unknown error"
             )
           end
         ensure
           # Use appropriate cleanup method based on job completion status
-          parsed_job_id = parsed_job ? parsed_job.jid.to_s : job
+          # IMPORTANT: Pass the full job JSON string, not just the job ID
           if job_completed_successfully && parsed_job
             # Use enhanced cleanup for successfully completed jobs
-            @queue.cleanup_completed_job_pipelined(@worker_id, parsed_job_id)
+            @queue.cleanup_completed_job_pipelined(@worker_id, job)
           else
             # Use standard cleanup for failed or unparseable jobs
-            @queue.cleanup_job_processing_pipelined(@worker_id, parsed_job_id)
+            @queue.cleanup_job_processing_pipelined(@worker_id, job)
           end
         end
       end

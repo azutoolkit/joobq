@@ -111,11 +111,12 @@ module JoobQ
     def retry(job : String)
       job_data = JSON.parse(job)
       retries = job_data["retries"]?.try(&.as_i) || 0
-      delay = (2 ** retries) * 1000_i64 # Delay in ms
+      delay_ms = (2 ** retries) * 1000_i64 # Delay in ms
+      schedule_time = Time.local.to_unix_ms + delay_ms # Calculate when job should run
 
       # Use Redis store directly to schedule the job string
       redis_store = store.as(RedisStore)
-      redis_store.redis.zadd(RedisStore::DELAYED_SET, delay, job)
+      redis_store.redis.zadd(RedisStore::DELAYED_SET, schedule_time, job)
     end
 
     def size : Int64
@@ -180,7 +181,7 @@ module JoobQ
     # Pipelined job cleanup for improved performance
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
     def cleanup_job_processing_pipelined(worker_id : String, job_json : String) : Nil
-      store.as(RedisStore).cleanup_job_processing_pipelined(worker_id, job_json, name)
+      store.as(RedisStore).cleanup_job(job_json, name)
     rescue ex
       Log.error &.emit("Error in pipelined job cleanup", queue: name, worker: worker_id,
         job_data_length: job_json.size, error: ex.message)
@@ -189,7 +190,7 @@ module JoobQ
     # Enhanced cleanup for successfully completed jobs
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
     def cleanup_completed_job_pipelined(worker_id : String, job_json : String) : Nil
-      store.as(RedisStore).cleanup_completed_job_pipelined(worker_id, job_json, name)
+      store.as(RedisStore).mark_job_completed(job_json, name)
     rescue ex
       Log.error &.emit("Error in completed job cleanup", queue: name, worker: worker_id,
         job_data_length: job_json.size, error: ex.message)
@@ -207,7 +208,9 @@ module JoobQ
 
     # Batch job cleanup for improved performance
     def cleanup_jobs_batch_pipelined(worker_id : String, job_ids : Array(String)) : Nil
-      store.as(RedisStore).cleanup_jobs_batch_pipelined(worker_id, job_ids, name)
+      # Note: This method expects job JSON strings, not just job IDs
+      # For now, we'll need to find the actual job JSON strings
+      store.as(RedisStore).cleanup_jobs_batch(job_ids, name)
     rescue ex
       Log.error &.emit("Error in batch job cleanup", queue: name, worker: worker_id,
         job_count: job_ids.size, error: ex.message)

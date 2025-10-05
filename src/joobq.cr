@@ -8,6 +8,7 @@ require "./joobq/store"
 require "./joobq/error_context"
 require "./joobq/error_monitor"
 require "./joobq/api_validation"
+require "./joobq/api_cache"
 require "./joobq/**"
 
 module JoobQ
@@ -47,6 +48,10 @@ module JoobQ
 
   def self.error_monitor : ErrorMonitor
     config.error_monitor
+  end
+
+  def self.api_cache : APICache
+    APICache.instance
   end
 
   def self.forge

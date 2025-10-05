@@ -54,8 +54,20 @@ module JoobQ
       error_key = "#{error_context.error_type}:#{error_context.queue_name}"
       @error_counts[error_key] = (@error_counts[error_key]? || 0) + 1
 
+      # Invalidate error caches since data has changed
+      invalidate_error_caches
+
       # Check for alerts
       check_alerts(error_context)
+    end
+
+    private def invalidate_error_caches : Nil
+      # Invalidate error-related caches when new errors are recorded
+      JoobQ.api_cache.invalidate_error_stats
+      JoobQ.api_cache.invalidate_recent_errors
+    rescue ex
+      # Don't fail error recording if cache invalidation fails
+      Log.warn &.emit("Failed to invalidate error caches", error: ex.message)
     end
 
     def get_error_stats : Hash(String, Int32)
@@ -97,6 +109,45 @@ module JoobQ
       # Ensure Redis data is loaded
       ensure_redis_loaded
       @recent_errors.last(limit)
+    end
+
+    # Get recent errors with pagination support
+    def get_recent_errors_paginated(page : Int32, per_page : Int32) : Array(ErrorContext)
+      # Ensure Redis data is loaded
+      ensure_redis_loaded
+
+      offset = (page - 1) * per_page
+      start_index = [@recent_errors.size - offset - per_page, 0].max
+      end_index = [@recent_errors.size - offset - 1, 0].max
+
+      if start_index > end_index
+        [] of ErrorContext
+      else
+        @recent_errors[start_index..end_index].reverse
+      end
+    end
+
+    # Get total count of recent errors
+    def get_recent_errors_count : Int32
+      ensure_redis_loaded
+      @recent_errors.size
+    end
+
+    # Get error information for multiple jobs in batch
+    def get_errors_for_jobs_batch(jids : Array(String)) : Hash(String, ErrorContext?)
+      ensure_redis_loaded
+
+      results = {} of String => ErrorContext?
+      jids.each { |jid| results[jid] = nil }
+
+      # Find errors for each JID in a single pass through recent_errors
+      @recent_errors.each do |error|
+        if jids.includes?(error.job_id.to_s) && results[error.job_id.to_s].nil?
+          results[error.job_id.to_s] = error
+        end
+      end
+
+      results
     end
 
     def get_errors_by_type(error_type : String) : Array(ErrorContext)

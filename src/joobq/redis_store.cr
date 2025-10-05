@@ -5,16 +5,23 @@ module JoobQ
     private PROCESSING_QUEUE = "joobq:processing"
     private BLOCKING_TIMEOUT = 5
 
-    # Cached Lua script SHA for better performance
-    @@claim_job_script_sha : String? = nil
-    @@claim_jobs_batch_script_sha : String? = nil
-    @@release_claims_batch_script_sha : String? = nil
+    # Reliable queue implementation using BRPOPLPUSH
+    @@reliable_queue_timeout : Int32 = 5
+
+    # Circuit breaker state
+    @@circuit_open : Bool = false
+    @@circuit_failures : Int32 = 0
+    @@circuit_last_failure_time : Time? = nil
+    CIRCUIT_THRESHOLD = 10
+    CIRCUIT_TIMEOUT = 60.seconds
 
     def self.instance : RedisStore
       @@instance ||= new
     end
 
     getter redis : Redis::PooledClient
+    getter pool_size : Int32
+    getter pool_timeout : Float64
 
     def initialize(@host : String = ENV.fetch("REDIS_HOST", "localhost"),
                    @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
@@ -29,130 +36,141 @@ module JoobQ
         pool_timeout: @pool_timeout
       )
 
-      # Cache Lua scripts for better performance
-      cache_lua_scripts
+      # Log connection pool configuration
+      Log.info &.emit("Redis store initialized",
+        host: @host,
+        port: @port,
+        pool_size: @pool_size,
+        pool_timeout: @pool_timeout
+      )
     end
 
-    # Cache Lua scripts to avoid recompilation overhead
-    private def cache_lua_scripts
+    # Connection pool health check
+    def health_check : Hash(String, String | Int32 | Bool | Float64)
+      start_time = Time.monotonic
+
       begin
-        # Cache claim_jobs_batch script
-        @@claim_jobs_batch_script_sha = redis.script_load(claim_jobs_batch_lua_script)
+        # Try a simple ping
+        redis.ping
+        response_time = (Time.monotonic - start_time).total_milliseconds
 
-        # Cache release_claims_batch script
-        @@release_claims_batch_script_sha = redis.script_load(release_claims_batch_lua_script)
-
-        Log.debug &.emit("Lua scripts cached successfully")
+        {
+          "status" => "healthy",
+          "response_time_ms" => response_time.round(2),
+          "pool_size" => @pool_size,
+          "pool_timeout" => @pool_timeout,
+          "connected" => true,
+          "circuit_open" => @@circuit_open,
+          "circuit_failures" => @@circuit_failures,
+        }
       rescue ex
-        Log.warn &.emit("Failed to cache Lua scripts", error: ex.message)
-        # Fall back to EVAL if caching fails
-        @@claim_jobs_batch_script_sha = nil
-        @@release_claims_batch_script_sha = nil
+        {
+          "status" => "unhealthy",
+          "error" => ex.message || "Unknown error",
+          "pool_size" => @pool_size,
+          "pool_timeout" => @pool_timeout,
+          "connected" => false,
+          "circuit_open" => @@circuit_open,
+          "circuit_failures" => @@circuit_failures,
+        }
       end
     end
 
-    # Get the Lua script for claim_jobs_batch with job ID-based locking
-    private def claim_jobs_batch_lua_script : String
-      <<-LUA
-        local queue_key = KEYS[1]
-        local processing_key = KEYS[2]
-        local worker_claim_key = KEYS[3]
-        local worker_id = ARGV[1]
-        local batch_size = tonumber(ARGV[2])
-        local timeout = tonumber(ARGV[3])
-        local job_lock_ttl = 3600 -- 1 hour lock TTL
+    # Get circuit breaker statistics
+    def circuit_breaker_stats : Hash(String, String | Int32 | Bool)
+      {
+        "circuit_open" => @@circuit_open,
+        "failures" => @@circuit_failures,
+        "threshold" => CIRCUIT_THRESHOLD,
+        "timeout_seconds" => CIRCUIT_TIMEOUT.total_seconds.to_i32,
+        "last_failure" => @@circuit_last_failure_time ? @@circuit_last_failure_time.not_nil!.to_s : "none",
+      }
+    end
 
-        -- Pre-allocate arrays for better performance
-        local jobs = {}
-        local claim_keys = {}
-        local claim_data = {}
-        local job_locks = {}
+    # Reset circuit breaker (useful for manual intervention)
+    def reset_circuit_breaker : Nil
+      @@circuit_open = false
+      @@circuit_failures = 0
+      @@circuit_last_failure_time = nil
+      Log.info &.emit("Circuit breaker manually reset")
+    end
 
-        -- Get current time once
-        local current_time = redis.call('TIME')[1]
 
-        -- Claim multiple jobs in a single loop with optimized operations
-        for i = 1, batch_size do
-          local job_data = redis.call('RPOPLPUSH', queue_key, processing_key)
-          if job_data then
-            -- Extract job ID from JSON (look for "jid":"<uuid>")
-            local job_id = string.match(job_data, '"jid":"([^"]+)"')
-
-            if job_id then
-              -- Try to acquire job lock using job ID
-              local job_lock_key = 'joobq:job_lock:' .. job_id
-              local lock_acquired = redis.call('SET', job_lock_key, worker_id, 'NX', 'EX', job_lock_ttl)
-
-              if lock_acquired then
-                -- Lock acquired, claim the job
-                jobs[i] = job_data
-                job_locks[i] = job_lock_key
-
-                -- Pre-build claim key and data for batch operations
-                local job_claim_key = worker_claim_key .. ':' .. i
-                claim_keys[i] = job_claim_key
-                claim_data[i] = {job_data, current_time}
-              else
-                -- Lock already held by another worker, put job back to queue
-                redis.call('LREM', processing_key, 1, job_data)
-                redis.call('RPUSH', queue_key, job_data)
-              end
-            else
-              -- Could not parse job ID, skip this job
-              redis.call('LREM', processing_key, 1, job_data)
-              redis.call('RPUSH', queue_key, job_data)
-            end
+    # Circuit breaker check and management
+    private def check_circuit_breaker(operation_name : String)
+      if @@circuit_open
+        if last_failure = @@circuit_last_failure_time
+          if Time.local - last_failure > CIRCUIT_TIMEOUT
+            Log.info &.emit("Circuit breaker timeout elapsed, attempting to close",
+              operation: operation_name
+            )
+            @@circuit_open = false
+            @@circuit_failures = 0
           else
-            break -- No more jobs available
+            raise "Circuit breaker is open for Redis operations"
           end
         end
-
-        -- Batch create claim records using MSET for better performance
-        if #jobs > 0 then
-          local claim_args = {}
-          for i = 1, #jobs do
-            if claim_keys[i] then
-              local job_claim_key = claim_keys[i]
-              claim_args[#claim_args + 1] = job_claim_key .. ':job'
-              claim_args[#claim_args + 1] = claim_data[i][1]
-              claim_args[#claim_args + 1] = job_claim_key .. ':claimed_at'
-              claim_args[#claim_args + 1] = claim_data[i][2]
-            end
-          end
-
-          -- Use MSET for batch setting
-          if #claim_args > 0 then
-            redis.call('MSET', unpack(claim_args))
-
-            -- Batch set expiration for all claim keys
-            for i = 1, #jobs do
-              if claim_keys[i] then
-                redis.call('EXPIRE', claim_keys[i], 3600)
-              end
-            end
-          end
-        end
-
-        return jobs
-      LUA
+      end
     end
 
-    # Get the Lua script for release_claims_batch
-    private def release_claims_batch_lua_script : String
-      <<-LUA
-        local worker_claim_key = KEYS[1]
-        local job_count = tonumber(ARGV[1])
+    private def record_circuit_failure
+      @@circuit_failures += 1
+      @@circuit_last_failure_time = Time.local
 
-        local keys_to_delete = {}
-        for i = 1, job_count do
-          keys_to_delete[#keys_to_delete + 1] = worker_claim_key .. ':' .. i
-        end
-
-        if #keys_to_delete > 0 then
-          redis.call('DEL', unpack(keys_to_delete))
-        end
-      LUA
+      if @@circuit_failures >= CIRCUIT_THRESHOLD
+        @@circuit_open = true
+        Log.error &.emit("Circuit breaker opened due to failures",
+          failures: @@circuit_failures,
+          threshold: CIRCUIT_THRESHOLD
+        )
+      end
     end
+
+    private def record_circuit_success
+      if @@circuit_failures > 0
+        @@circuit_failures = [@@circuit_failures - 1, 0].max
+        if @@circuit_open
+          @@circuit_open = false
+          Log.info &.emit("Circuit breaker closed after successful operation")
+        end
+      end
+    end
+
+    # Retry wrapper for critical Redis operations with circuit breaker
+    private def with_retry(operation_name : String, max_retries : Int32 = 3, &block)
+      check_circuit_breaker(operation_name)
+
+      attempt = 0
+      loop do
+        begin
+          result = yield
+          record_circuit_success
+          return result
+        rescue ex
+          record_circuit_failure
+          attempt += 1
+          if attempt <= max_retries
+            Log.warn &.emit("Retrying Redis operation",
+              operation: operation_name,
+              attempt: attempt,
+              max_retries: max_retries,
+              error: ex.message
+            )
+            sleep (attempt * 0.1) # Exponential backoff
+          else
+            Log.error &.emit("Redis operation failed after retries",
+              operation: operation_name,
+              attempts: attempt,
+              error: ex.message,
+              error_class: ex.class.name,
+              backtrace: ex.backtrace.first(3).join(" | ")
+            )
+            raise ex
+          end
+        end
+      end
+    end
+
 
     def reset : Nil
       redis.flushdb
@@ -163,152 +181,118 @@ module JoobQ
     end
 
     def delete_job(job : String) : Nil
-      job = JSON.parse(job)
-      redis.lpop processing_queue(job["queue"].as_s)
+      with_retry("delete_job") do
+        parsed_job = JSON.parse(job)
+        queue_name = parsed_job["queue"]?.try(&.as_s)
+        return unless queue_name
+
+        processing_key = processing_queue(queue_name)
+
+        # Remove job from processing queue (all occurrences)
+        redis.lrem(processing_key, 0, job)
+
+        Log.debug &.emit("Job deleted",
+          queue: queue_name,
+          job_data_length: job.size
+        )
+      end
+    rescue ex
+      Log.error &.emit("Error deleting job", error: ex.message)
     end
 
     def enqueue(job : Job) : String
-      redis.rpush job.queue, job.to_json
-      job.jid.to_s
+      with_retry("enqueue_job") do
+        redis.rpush job.queue, job.to_json
+
+        # Invalidate processing jobs cache
+        invalidate_processing_cache
+
+        Log.debug &.emit("Job enqueued", job_id: job.jid.to_s, queue: job.queue)
+        job.jid.to_s
+      end
     end
 
     def enqueue_batch(jobs : Array(Job), batch_size : Int32 = 1000) : Nil
       raise "Batch size must be greater than 0" if batch_size <= 0
       raise "Batch size must be less than or equal to 1000" if batch_size > 1000
 
-      jobs.each_slice(batch_size) do |batch_jobs|
-        redis.pipelined do |pipe|
-          batch_jobs.each do |job|
-            pipe.rpush job.queue, job.to_json
-          end
-        end
-      end
-    end
+      return if jobs.empty?
 
-    def dequeue(queue_name : String, klass : Class) : String?
-      if job_data = redis.rpoplpush(queue_name, processing_queue(queue_name))
-        return job_data.to_s
-      end
-      nil
-    end
+      start_time = Time.monotonic
+      total_enqueued = 0
 
-    # Atomic job claiming with worker identification and job ID-based locking
-    def claim_job(queue_name : String, worker_id : String, klass : Class) : String?
-      processing_key = processing_queue(queue_name)
-      worker_claim_key = "#{processing_key}:#{worker_id}"
-
-      # Use a Lua script for atomic job claiming with job ID lock
-      lua_script = <<-LUA
-        local queue_key = KEYS[1]
-        local processing_key = KEYS[2]
-        local worker_claim_key = KEYS[3]
-        local worker_id = ARGV[1]
-        local timeout = ARGV[2]
-        local job_lock_ttl = 3600 -- 1 hour lock TTL
-
-        -- Try to get a job from the queue
-        local job_data = redis.call('RPOPLPUSH', queue_key, processing_key)
-        if job_data then
-          -- Extract job ID from JSON
-          local job_id = string.match(job_data, '"jid":"([^"]+)"')
-
-          if job_id then
-            -- Try to acquire job lock using job ID
-            local job_lock_key = 'joobq:job_lock:' .. job_id
-            local lock_acquired = redis.call('SET', job_lock_key, worker_id, 'NX', 'EX', job_lock_ttl)
-
-            if lock_acquired then
-              -- Lock acquired, claim the job for this worker
-              redis.call('HSET', worker_claim_key, 'job', job_data)
-              redis.call('HSET', worker_claim_key, 'claimed_at', redis.call('TIME')[1])
-              redis.call('EXPIRE', worker_claim_key, 3600)
-              return job_data
-            else
-              -- Lock already held by another worker, put job back to queue
-              redis.call('LREM', processing_key, 1, job_data)
-              redis.call('RPUSH', queue_key, job_data)
-              return nil
+      begin
+        jobs.each_slice(batch_size) do |batch_jobs|
+          with_retry("enqueue_batch") do
+            redis.pipelined do |pipe|
+              batch_jobs.each do |job|
+                pipe.rpush job.queue, job.to_json
+              end
             end
-          else
-            -- Could not parse job ID, return job to queue
-            redis.call('LREM', processing_key, 1, job_data)
-            redis.call('RPUSH', queue_key, job_data)
-            return nil
+            total_enqueued += batch_jobs.size
           end
         end
-        return nil
-      LUA
 
-      result = redis.eval(lua_script, [queue_name, processing_key, worker_claim_key], [worker_id, BLOCKING_TIMEOUT])
-      result ? result.to_s : nil
+        duration = Time.monotonic - start_time
+        Log.info &.emit("Batch enqueue successful",
+          jobs_count: total_enqueued,
+          duration_ms: duration.total_milliseconds.round(2),
+          jobs_per_second: (total_enqueued / duration.total_seconds).round(2)
+        )
+      rescue ex
+        Log.error &.emit("Batch enqueue failed",
+          total_jobs: jobs.size,
+          enqueued: total_enqueued,
+          error: ex.message,
+          error_class: ex.class.name
+        )
+        raise ex
+      end
+    end
+
+    # High-performance reliable queue using BRPOPLPUSH
+    def dequeue(queue_name : String, klass : Class) : String?
+      with_retry("dequeue_job") do
+        processing_key = processing_queue(queue_name)
+
+        # Use BRPOPLPUSH for reliable queue - blocks until job is available
+        if job_data = redis.brpoplpush(queue_name, processing_key, @@reliable_queue_timeout)
+          Log.debug &.emit("Job dequeued", queue: queue_name, job_data_length: job_data.to_s.size)
+          return job_data.to_s
+        end
+
+        nil
+      end
     rescue ex
-      Log.error &.emit("Error claiming job", queue: queue_name, worker: worker_id, error: ex.message)
+      Log.error &.emit("Error dequeuing job", queue: queue_name, error: ex.message)
       nil
     end
 
-    # Batch job claiming for improved performance
-    def claim_jobs_batch(queue_name : String, worker_id : String, klass : Class, batch_size : Int32 = 5) : Array(String)
-      processing_key = processing_queue(queue_name)
-      worker_claim_key = "#{processing_key}:#{worker_id}"
+    # Batch dequeue for high performance - uses non-blocking operations
+    def dequeue_batch(queue_name : String, klass : Class, batch_size : Int32 = 10) : Array(String)
+      with_retry("dequeue_batch") do
+        processing_key = processing_queue(queue_name)
+        jobs = [] of String
 
-      # Use cached script if available, otherwise fall back to EVAL
-      result = if script_sha = @@claim_jobs_batch_script_sha
-                 begin
-                   redis.evalsha(script_sha, [queue_name, processing_key, worker_claim_key],
-                     [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
-                 rescue
-                   # Script not found, fall back to EVAL and recache
-                   cache_lua_scripts
-                   redis.eval(claim_jobs_batch_lua_script, [queue_name, processing_key, worker_claim_key],
-                     [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
-                 end
-               else
-                 redis.eval(claim_jobs_batch_lua_script, [queue_name, processing_key, worker_claim_key],
-                   [worker_id, batch_size.to_s, BLOCKING_TIMEOUT])
-               end
+        # Use pipelined RPOPLPUSH for batch operations
+        redis.pipelined do |pipe|
+          batch_size.times do
+            pipe.rpoplpush(queue_name, processing_key)
+          end
+        end.each do |result|
+          if result && !result.to_s.empty?
+            jobs << result.to_s
+          end
+        end
 
-      if result && result.as(Array).any?
-        result.as(Array).map(&.as(String))
-      else
-        [] of String
+        Log.debug &.emit("Batch dequeued jobs", queue: queue_name, count: jobs.size)
+        jobs
       end
     rescue ex
-      Log.error &.emit("Error claiming jobs batch", queue: queue_name, worker: worker_id,
-        batch_size: batch_size, error: ex.message)
+      Log.error &.emit("Error batch dequeuing jobs", queue: queue_name, error: ex.message)
       [] of String
     end
 
-    def release_job_claim(queue_name : String, worker_id : String) : Nil
-      processing_key = processing_queue(queue_name)
-      worker_claim_key = "#{processing_key}:#{worker_id}"
-
-      # Remove the worker's claim
-      redis.del(worker_claim_key)
-    rescue ex
-      Log.error &.emit("Error releasing job claim", queue: queue_name, worker: worker_id, error: ex.message)
-    end
-
-    # Batch release job claims for improved performance
-    def release_job_claims_batch(queue_name : String, worker_id : String, job_count : Int32) : Nil
-      processing_key = processing_queue(queue_name)
-      worker_claim_key = "#{processing_key}:#{worker_id}"
-
-      # Use cached script if available, otherwise fall back to EVAL
-      if script_sha = @@release_claims_batch_script_sha
-        begin
-          redis.evalsha(script_sha, [worker_claim_key], [job_count.to_s])
-        rescue
-          # Script not found, fall back to EVAL and recache
-          cache_lua_scripts
-          redis.eval(release_claims_batch_lua_script, [worker_claim_key], [job_count.to_s])
-        end
-      else
-        redis.eval(release_claims_batch_lua_script, [worker_claim_key], [job_count.to_s])
-      end
-    rescue ex
-      Log.error &.emit("Error releasing job claims batch", queue: queue_name, worker: worker_id,
-        job_count: job_count, error: ex.message)
-    end
 
     def move_job_back_to_queue(queue_name : String) : Bool
       redis.brpoplpush(processing_queue(queue_name), queue_name, BLOCKING_TIMEOUT)
@@ -319,10 +303,12 @@ module JoobQ
 
     def mark_as_dead(job : Job, expiration_time : Int64) : Nil
       redis.zadd DEAD_LETTER, expiration_time, job.to_json
+      invalidate_dead_cache
     end
 
     def schedule(job : Job, delay_in_ms : Int64, delay_set : String = DELAYED_SET) : Nil
       redis.zadd delay_set, delay_in_ms, job.to_json
+      invalidate_delayed_cache
     end
 
     def fetch_due_jobs(
@@ -333,7 +319,10 @@ module JoobQ
     ) : Array(String)
       score = current_time.to_unix_ms
       jobs = redis.zrangebyscore(delay_set, 0, score, with_scores: false, limit: [0, limit])
-      redis.zremrangebyscore(delay_set, "-inf", score) if remove
+      if remove
+        redis.zremrangebyscore(delay_set, "-inf", score)
+        invalidate_delayed_cache
+      end
       jobs.map &.as(String)
     end
 
@@ -345,99 +334,107 @@ module JoobQ
       redis.zcard(set_name)
     end
 
-    # Batch job cleanup with pipelining for improved performance
-    def cleanup_jobs_batch_pipelined(worker_id : String, job_ids : Array(String), queue_name : String) : Nil
-      return if job_ids.empty?
+    # Simplified job cleanup for BRPOPLPUSH pattern - just remove from processing queue
+    def cleanup_job(job_json : String, queue_name : String) : Nil
+      with_retry("cleanup_job") do
+        processing_key = processing_queue(queue_name)
 
-      processing_key = processing_queue(queue_name)
-      worker_claim_key = "#{processing_key}:#{worker_id}"
-
-      redis.pipelined do |pipe|
-        # Release all job claims
-        job_ids.each_with_index do |_, index|
-          pipe.del("#{worker_claim_key}:#{index + 1}")
+        # Extract job ID for logging
+        job_id = nil
+        begin
+          parsed = JSON.parse(job_json)
+          job_id = parsed["jid"]?.try(&.as_s)
+        rescue
+          # Continue without job_id if parsing fails
         end
 
-        # Remove jobs from processing queue
-        job_ids.each do |job_id|
-          pipe.lrem(processing_key, 1, job_id)
+        redis.pipelined do |pipe|
+          # Remove job from processing queue (all occurrences)
+          pipe.lrem(processing_key, 0, job_json)
+
+          # Update statistics
+          pipe.hincrby("joobq:stats:processed", queue_name, 1)
+          pipe.hincrby("joobq:stats:total_processed", "global", 1)
         end
 
-        # Update processing statistics
-        pipe.hincrby("joobq:stats:processed", queue_name, job_ids.size)
-        pipe.hincrby("joobq:stats:total_processed", "global", job_ids.size)
+        Log.debug &.emit("Job cleanup successful",
+          queue: queue_name,
+          job_id: job_id || "unknown"
+        )
       end
     rescue ex
-      Log.error &.emit("Error in batch job cleanup", queue: queue_name, worker: worker_id,
-        job_count: job_ids.size, error: ex.message)
+      Log.error &.emit("Error cleaning up job",
+        queue: queue_name,
+        error: ex.message
+      )
     end
 
-    # Enhanced job processing cleanup with pipelining and job ID lock release
-    # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
-    def cleanup_job_processing_pipelined(worker_id : String, job_json : String, queue_name : String) : Nil
-      processing_key = processing_queue(queue_name)
-      worker_claim_key = "#{processing_key}:#{worker_id}"
+    # Batch job cleanup for high performance
+    def cleanup_jobs_batch(job_jsons : Array(String), queue_name : String) : Nil
+      return if job_jsons.empty?
 
-      # Extract job ID for lock release
-      begin
-        parsed = JSON.parse(job_json)
-        job_id = parsed["jid"]?.try(&.as_s)
-      rescue
-        job_id = nil
-      end
+      with_retry("cleanup_jobs_batch") do
+        processing_key = processing_queue(queue_name)
 
-      redis.pipelined do |pipe|
-        pipe.del(worker_claim_key)                               # Release worker claim
-        pipe.lrem(processing_key, 0, job_json)                   # Remove ALL occurrences from processing
+        redis.pipelined do |pipe|
+          # Remove all jobs from processing queue
+          job_jsons.each do |job_json|
+            pipe.lrem(processing_key, 0, job_json)
+          end
 
-        # Release job lock by job ID
-        if job_id
-          pipe.del("joobq:job_lock:#{job_id}")
+          # Update statistics
+          pipe.hincrby("joobq:stats:processed", queue_name, job_jsons.size)
+          pipe.hincrby("joobq:stats:total_processed", "global", job_jsons.size)
         end
 
-        pipe.hincrby("joobq:stats:processed", queue_name, 1)     # Update stats
-        pipe.hincrby("joobq:stats:total_processed", "global", 1) # Update global stats
+        Log.debug &.emit("Batch job cleanup successful",
+          queue: queue_name,
+          job_count: job_jsons.size
+        )
       end
     rescue ex
-      Log.error &.emit("Error in pipelined job cleanup", queue: queue_name, worker: worker_id,
-        job_data_length: job_json.size, error: ex.message)
+      Log.error &.emit("Error in batch job cleanup",
+        queue: queue_name,
+        job_count: job_jsons.size,
+        error: ex.message
+      )
     end
 
-    # Enhanced job processing cleanup for successful completion with job ID lock release
-    # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
-    def cleanup_completed_job_pipelined(worker_id : String, job_json : String, queue_name : String) : Nil
-      processing_key = processing_queue(queue_name)
-      worker_claim_key = "#{processing_key}:#{worker_id}"
+    # Mark job as completed with statistics
+    def mark_job_completed(job_json : String, queue_name : String) : Nil
+      with_retry("mark_job_completed") do
+        processing_key = processing_queue(queue_name)
 
-      # Extract job ID for lock release
-      begin
-        parsed = JSON.parse(job_json)
-        job_id = parsed["jid"]?.try(&.as_s)
-      rescue
+        # Extract job ID for logging
         job_id = nil
-      end
-
-      redis.pipelined do |pipe|
-        # Release worker claim
-        pipe.del(worker_claim_key)
-
-        # Remove ALL occurrences of job from processing queue (ensures uniqueness)
-        pipe.lrem(processing_key, 0, job_json)
-
-        # Release job lock by job ID
-        if job_id
-          pipe.del("joobq:job_lock:#{job_id}")
+        begin
+          parsed = JSON.parse(job_json)
+          job_id = parsed["jid"]?.try(&.as_s)
+        rescue
+          # Continue without job_id if parsing fails
         end
 
-        # Update completion statistics
-        pipe.hincrby("joobq:stats:completed", queue_name, 1)
-        pipe.hincrby("joobq:stats:total_completed", "global", 1)
-        pipe.hincrby("joobq:stats:processed", queue_name, 1)
-        pipe.hincrby("joobq:stats:total_processed", "global", 1)
+        redis.pipelined do |pipe|
+          # Remove job from processing queue
+          pipe.lrem(processing_key, 0, job_json)
+
+          # Update completion statistics
+          pipe.hincrby("joobq:stats:completed", queue_name, 1)
+          pipe.hincrby("joobq:stats:total_completed", "global", 1)
+          pipe.hincrby("joobq:stats:processed", queue_name, 1)
+          pipe.hincrby("joobq:stats:total_processed", "global", 1)
+        end
+
+        Log.debug &.emit("Job marked as completed",
+          queue: queue_name,
+          job_id: job_id || "unknown"
+        )
       end
     rescue ex
-      Log.error &.emit("Error in completed job cleanup", queue: queue_name, worker: worker_id,
-        job_data_length: job_json.size, error: ex.message)
+      Log.error &.emit("Error marking job as completed",
+        queue: queue_name,
+        error: ex.message
+      )
     end
 
     def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
@@ -554,30 +551,67 @@ module JoobQ
     end
 
     def processing_list(pattern : String = "#{PROCESSING_QUEUE}:*", limit : Int32 = 100) : Array(String)
+      processing_list_paginated(0, limit)
+    end
+
+    # Get processing jobs with pagination support
+    def processing_list_paginated(offset : Int32, limit : Int32) : Array(String)
       jobs_collected = [] of String
+      current_offset = 0
+      target_offset = offset
 
-      # Step 1: Get all processing queue keys matching the pattern
-      processing_keys = redis.keys(pattern)
+      # Step 1: Use SCAN instead of KEYS to avoid blocking Redis
+      # SCAN is O(1) per call and doesn't block the server
+      cursor = 0_i64
+      processing_keys = [] of String
 
-      # Step 2: Collect jobs from each processing queue until the limit is reached
-      processing_keys.each do |processing_key|
+      loop do
+        # SCAN returns [new_cursor, [keys]]
+        result = redis.scan(cursor, match: "#{PROCESSING_QUEUE}:*", count: 100)
+        cursor = result[0].as(String).to_i64
+        keys = result[1].as(Array)
+
+        keys.each do |key|
+          key_str = key.as(String)
+          # Only process actual processing queue keys (not worker claim keys)
+          if key_str.count(':') == 2
+            processing_keys << key_str
+          end
+        end
+
+        # Break if cursor is back to 0 (full iteration complete)
+        break if cursor == 0
+      end
+
+      # Step 2: Collect jobs from each processing queue with pagination
+      processing_keys.each do |key_string|
         break if jobs_collected.size >= limit # Stop if we've collected enough jobs
 
-        key_string = processing_key.as(String)
-
-        # Skip worker claim keys (they have the pattern joobq:processing:queue_name:worker_id)
-        # Only process actual processing queue keys (joobq:processing:queue_name)
-        next if key_string.count(':') > 2
-
-        # Check if the key is a list before trying to perform lrange
+        # Check if the key is a list
         key_type = redis.type(key_string)
         next unless key_type == "list"
 
-        # Calculate remaining jobs to fetch
-        remaining = limit - jobs_collected.size
-        # Convert RedisValue to String and fetch jobs from the current processing queue
-        queue_jobs = redis.lrange(key_string, 0, remaining - 1)
-        jobs_collected.concat(queue_jobs.map &.as(String))
+        # Get the total length of this queue
+        queue_length = redis.llen(key_string).to_i
+
+        # Skip this queue if we haven't reached the target offset yet
+        if current_offset + queue_length <= target_offset
+          current_offset += queue_length
+          next
+        end
+
+        # Calculate how many jobs to skip from this queue
+        queue_skip = [target_offset - current_offset, 0].max
+        remaining_needed = limit - jobs_collected.size
+        queue_take = [queue_length - queue_skip, remaining_needed].min
+
+        if queue_take > 0
+          # Get jobs from this queue with proper offset and limit
+          queue_jobs = redis.lrange(key_string, queue_skip, queue_skip + queue_take - 1)
+          jobs_collected.concat(queue_jobs.map &.as(String))
+        end
+
+        current_offset += queue_length
       end
 
       jobs_collected
@@ -613,77 +647,32 @@ module JoobQ
       0i64
     end
 
-    # Atomic operation: Move job from processing to dead letter queue
-    # Uses Lua script to remove by job ID (not JSON matching) for reliability
-    # IMPORTANT: Removes job from ALL queues by job ID to prevent re-enqueuing
-    def move_to_dead_letter_atomic(job : Job, queue_name : String) : Nil
-      processing_key = processing_queue(queue_name)
-      retry_lock_key = "joobq:retry_lock:#{job.jid}"
-      current_timestamp = Time.local.to_unix_ms
-      modified_job_json = job.to_json
-      job_id = job.jid.to_s
+    # High-performance move to dead letter queue using pipelined operations
+    def move_to_dead_letter(job : Job, queue_name : String) : Nil
+      with_retry("move_to_dead_letter") do
+        processing_key = processing_queue(queue_name)
+        current_timestamp = Time.local.to_unix_ms
+        job_json = job.to_json
 
-      # Lua script to remove job by ID from all locations and release all locks
-      lua_script = <<-LUA
-        local queue_name = KEYS[1]
-        local processing_key = KEYS[2]
-        local delayed_set = KEYS[3]
-        local dead_letter = KEYS[4]
-        local retry_lock_key = KEYS[5]
-        local job_id = ARGV[1]
-        local modified_job_json = ARGV[2]
-        local current_timestamp = ARGV[3]
-        local job_lock_key = 'joobq:job_lock:' .. job_id
+        redis.pipelined do |pipe|
+          # Remove from processing queue
+          pipe.lrem(processing_key, 0, job_json)
 
-        -- Remove from main queue by job ID
-        local main_jobs = redis.call('LRANGE', queue_name, 0, -1)
-        for i, job_json in ipairs(main_jobs) do
-          if string.find(job_json, job_id, 1, true) then
-            redis.call('LREM', queue_name, 0, job_json)
-          end
+          # Add to dead letter queue
+          pipe.zadd(DEAD_LETTER, current_timestamp, job_json)
+
+          # Update statistics
+          pipe.hincrby("joobq:stats:dead_letter", queue_name, 1)
+          pipe.hincrby("joobq:stats:total_dead_letter", "global", 1)
         end
 
-        -- Remove from processing queue by job ID
-        local processing_jobs = redis.call('LRANGE', processing_key, 0, -1)
-        for i, job_json in ipairs(processing_jobs) do
-          if string.find(job_json, job_id, 1, true) then
-            redis.call('LREM', processing_key, 0, job_json)
-          end
-        end
-
-        -- Remove from delayed set by job ID
-        local delayed_jobs = redis.call('ZRANGE', delayed_set, 0, -1)
-        for i, job_json in ipairs(delayed_jobs) do
-          if string.find(job_json, job_id, 1, true) then
-            redis.call('ZREM', delayed_set, job_json)
-          end
-        end
-
-        -- Add to dead letter queue
-        redis.call('ZADD', dead_letter, current_timestamp, modified_job_json)
-
-        -- Remove both retry lock and job lock
-        redis.call('DEL', retry_lock_key)
-        redis.call('DEL', job_lock_key)
-
-        -- Update statistics
-        redis.call('HINCRBY', 'joobq:stats:dead_letter', queue_name, 1)
-        redis.call('HINCRBY', 'joobq:stats:total_dead_letter', 'global', 1)
-
-        return 1
-      LUA
-
-      redis.eval(lua_script,
-        [queue_name, processing_key, DELAYED_SET, DEAD_LETTER, retry_lock_key],
-        [job_id, modified_job_json, current_timestamp.to_s]
-      )
-
-      Log.debug &.emit("Job moved to dead letter queue atomically (removed by ID from all queues)",
-        job_id: job.jid.to_s,
-        queue: queue_name
-      )
+        Log.debug &.emit("Job moved to dead letter queue",
+          job_id: job.jid.to_s,
+          queue: queue_name
+        )
+      end
     rescue ex
-      Log.error &.emit("Failed to move job to dead letter queue atomically",
+      Log.error &.emit("Failed to move job to dead letter queue",
         job_id: job.jid.to_s,
         queue: queue_name,
         error: ex.message
@@ -691,131 +680,70 @@ module JoobQ
       raise ex
     end
 
-    # Atomic operation: Move job from processing to retry/delayed queue
-    # Uses Lua script to remove by job ID (not JSON matching) for reliability
-    # IMPORTANT: Removes job from ALL queues by job ID to prevent re-enqueuing
-    def move_to_retry_atomic(job : Job, queue_name : String, delay_ms : Int64) : Bool
-      processing_key = processing_queue(queue_name)
-      retry_lock_key = "joobq:retry_lock:#{job.jid}"
-      schedule_time = Time.local.to_unix_ms + delay_ms
-      modified_job_json = job.to_json
-      job_id = job.jid.to_s
+    # High-performance move to retry queue using pipelined operations
+    def move_to_retry(job : Job, queue_name : String, delay_ms : Int64) : Bool
+      with_retry("move_to_retry") do
+        processing_key = processing_queue(queue_name)
+        schedule_time = Time.local.to_unix_ms + delay_ms
+        job_json = job.to_json
 
-      # Lua script to remove job by ID from all locations atomically and release job lock
-      lua_script = <<-LUA
-        local queue_name = KEYS[1]
-        local processing_key = KEYS[2]
-        local delayed_set = KEYS[3]
-        local job_id = ARGV[1]
-        local modified_job_json = ARGV[2]
-        local schedule_time = ARGV[3]
-        local job_lock_key = 'joobq:job_lock:' .. job_id
+        redis.pipelined do |pipe|
+          # Remove from processing queue
+          pipe.lrem(processing_key, 0, job_json)
 
-        -- Remove from main queue by job ID
-        local main_jobs = redis.call('LRANGE', queue_name, 0, -1)
-        for i, job_json in ipairs(main_jobs) do
-          if string.find(job_json, job_id, 1, true) then
-            redis.call('LREM', queue_name, 0, job_json)
-          end
+          # Add to delayed queue with future timestamp
+          pipe.zadd(DELAYED_SET, schedule_time, job_json)
+
+          # Update statistics
+          pipe.hincrby("joobq:stats:retries", queue_name, 1)
+          pipe.hincrby("joobq:stats:total_retries", "global", 1)
         end
 
-        -- Remove from processing queue by job ID
-        local processing_jobs = redis.call('LRANGE', processing_key, 0, -1)
-        for i, job_json in ipairs(processing_jobs) do
-          if string.find(job_json, job_id, 1, true) then
-            redis.call('LREM', processing_key, 0, job_json)
-          end
-        end
+        Log.debug &.emit("Job moved to retry queue",
+          job_id: job.jid.to_s,
+          queue: queue_name,
+          delay_ms: delay_ms,
+          schedule_time: schedule_time
+        )
 
-        -- Remove from delayed set by job ID
-        local delayed_jobs = redis.call('ZRANGE', delayed_set, 0, -1)
-        for i, job_json in ipairs(delayed_jobs) do
-          if string.find(job_json, job_id, 1, true) then
-            redis.call('ZREM', delayed_set, job_json)
-          end
-        end
+        # Invalidate caches since data has changed
+        invalidate_processing_cache
+        invalidate_delayed_cache
 
-        -- Release existing job lock (will be re-acquired when job is claimed again)
-        redis.call('DEL', job_lock_key)
-
-        -- Add to delayed queue with new timestamp
-        redis.call('ZADD', delayed_set, schedule_time, modified_job_json)
-
-        -- Update statistics
-        redis.call('HINCRBY', 'joobq:stats:retries', queue_name, 1)
-        redis.call('HINCRBY', 'joobq:stats:total_retries', 'global', 1)
-
-        return 1
-      LUA
-
-      redis.eval(lua_script,
-        [queue_name, processing_key, DELAYED_SET],
-        [job_id, modified_job_json, schedule_time.to_s]
-      )
-
-      Log.debug &.emit("Job moved to retry queue atomically (removed by ID from all queues)",
-        job_id: job.jid.to_s,
-        queue: queue_name,
-        delay_ms: delay_ms,
-        schedule_time: schedule_time
-      )
-
-      true
-    rescue ex
-      Log.error &.emit("Failed to move job to retry queue atomically",
-        job_id: job.jid.to_s,
-        queue: queue_name,
-        error: ex.message
-      )
-      # Remove retry lock on failure to allow future retry attempts
-      redis.del(retry_lock_key) rescue nil
-      false
-    end
-
-    # Atomic operation: Cleanup retry lock
-    def cleanup_retry_lock_atomic(job_id : UUID) : Nil
-      retry_lock_key = "joobq:retry_lock:#{job_id}"
-      redis.del(retry_lock_key)
-    rescue ex
-      Log.error &.emit("Failed to cleanup retry lock",
-        job_id: job_id.to_s,
-        error: ex.message
-      )
-    end
-
-    # Schedule delayed retry (job status is already set to Retrying)
-    # This method moves the job from processing queue to delayed queue
-    def schedule_delayed_retry(job : Job, queue_name : String, delay_ms : Int64) : Bool
-      processing_key = processing_queue(queue_name)
-      schedule_time = Time.local.to_unix_ms + delay_ms
-      job_json = job.to_json
-
-      redis.pipelined do |pipe|
-        # Remove from processing queue
-        pipe.lrem(processing_key, 0, job_json)
-
-        # Add to delayed queue with future timestamp
-        pipe.zadd(DELAYED_SET, schedule_time, job_json)
-
-        # Update statistics
-        pipe.hincrby("joobq:stats:delayed_retries", queue_name, 1)
+        true
       end
-
-      Log.debug &.emit("Job scheduled for delayed retry",
-        job_id: job.jid.to_s,
-        queue: queue_name,
-        delay_ms: delay_ms,
-        schedule_time: schedule_time
-      )
-
-      true
     rescue ex
-      Log.error &.emit("Failed to schedule delayed retry",
+      Log.error &.emit("Failed to move job to retry queue",
         job_id: job.jid.to_s,
         queue: queue_name,
         error: ex.message
       )
       false
+    end
+
+    # Schedule delayed retry - simplified version of move_to_retry
+    def schedule_delayed_retry(job : Job, queue_name : String, delay_ms : Int64) : Bool
+      move_to_retry(job, queue_name, delay_ms)
+    end
+
+    # Implement abstract method - use dequeue with BRPOPLPUSH
+    def claim_job(queue_name : String, worker_id : String, klass : Class) : String?
+      dequeue(queue_name, klass)
+    end
+
+    # Implement abstract method - use batch dequeue
+    def claim_jobs_batch(queue_name : String, worker_id : String, klass : Class, batch_size : Int32 = 5) : Array(String)
+      dequeue_batch(queue_name, klass, batch_size)
+    end
+
+    # Implement abstract method - no-op for BRPOPLPUSH pattern
+    def release_job_claim(queue_name : String, worker_id : String) : Nil
+      # No-op: BRPOPLPUSH pattern doesn't require explicit claim release
+    end
+
+    # Implement abstract method - no-op for BRPOPLPUSH pattern
+    def release_job_claims_batch(queue_name : String, worker_id : String, job_count : Int32) : Nil
+      # No-op: BRPOPLPUSH pattern doesn't require explicit claim release
     end
 
     # Process due jobs from delayed queue and move them back to main queue
@@ -940,6 +868,196 @@ module JoobQ
 
     private def processing_queue(name : String)
       "#{PROCESSING_QUEUE}:#{name}"
+    end
+
+    # Cache invalidation helpers
+    private def invalidate_processing_cache : Nil
+      JoobQ.api_cache.invalidate_processing_jobs
+    rescue ex
+      Log.warn &.emit("Failed to invalidate processing cache", error: ex.message)
+    end
+
+    private def invalidate_delayed_cache : Nil
+      JoobQ.api_cache.invalidate_delayed_jobs
+    rescue ex
+      Log.warn &.emit("Failed to invalidate delayed cache", error: ex.message)
+    end
+
+    private def invalidate_dead_cache : Nil
+      JoobQ.api_cache.invalidate_dead_jobs
+    rescue ex
+      Log.warn &.emit("Failed to invalidate dead cache", error: ex.message)
+    end
+
+    # Optimized method to get processing jobs count across all processing queues
+    def get_processing_jobs_count : Int32
+      total_count = 0
+      cursor = 0_i64
+
+      loop do
+        # Use SCAN to get processing queue keys without blocking Redis
+        result = redis.scan(cursor, match: "joobq:processing:*", count: 100)
+        cursor = result[0].as(String).to_i64
+        keys = result[1].as(Array)
+
+        # Use pipelining to get counts from multiple queues at once
+        if !keys.empty?
+          counts = redis.pipelined do |pipe|
+            keys.each do |key|
+              # Only count actual processing queue keys (not worker claim keys)
+              if key.as(String).count(':') == 2
+                pipe.llen(key.as(String))
+              else
+                 pipe.echo("0") # Placeholder for non-queue keys
+              end
+            end
+          end
+
+          total_count += counts.sum { |count| count.as(Int64).to_i }
+        end
+
+        # Break if cursor is back to 0 (full iteration complete)
+        break if cursor == 0
+      end
+
+      total_count
+    rescue ex
+      Log.warn &.emit("Error getting processing jobs count", error: ex.message)
+      0
+    end
+
+    # Simple retrying jobs count - get all delayed jobs and count those with Retrying status
+    def get_retrying_jobs_count : Int32
+      all_jobs = redis.zrange(DELAYED_SET, 0, -1)
+      retrying_count = 0
+
+      all_jobs.each do |job_json|
+        if job_json.as(String).includes?("\"status\":\"Retrying\"")
+          retrying_count += 1
+        end
+      end
+
+      retrying_count
+    rescue ex
+      Log.warn &.emit("Error getting retrying jobs count", error: ex.message)
+      0
+    end
+
+    # Simple retrying jobs pagination - filter and paginate in memory
+    def get_retrying_jobs_paginated(page : Int32, per_page : Int32) : Array(String)
+      offset = (page - 1) * per_page
+      all_jobs = redis.zrange(DELAYED_SET, 0, -1)
+      retrying_jobs = [] of String
+
+      all_jobs.each do |job_json|
+        if job_json.as(String).includes?("\"status\":\"Retrying\"")
+          retrying_jobs << job_json.as(String)
+        end
+      end
+
+      retrying_jobs[offset, per_page]
+    rescue ex
+      Log.warn &.emit("Error getting retrying jobs paginated", error: ex.message)
+      [] of String
+    end
+
+    # Simplified batch job lookup - search in all known locations
+    def find_jobs_batch(jids : Array(String)) : Hash(String, String?)
+      results = {} of String => String?
+      jids.each { |jid| results[jid] = nil }
+
+      # Search in main locations: delayed set, dead letter, and main queues
+      locations = [DELAYED_SET, DEAD_LETTER]
+      JoobQ.queues.each do |queue_name, _|
+        locations << queue_name
+      end
+
+      locations.each do |location|
+        key_type = redis.type(location)
+
+        jobs = case key_type
+               when "list"
+                 redis.lrange(location, 0, -1)
+               when "zset"
+                 redis.zrange(location, 0, -1)
+               else
+                 [] of Redis::RedisValue
+               end
+
+        jobs.each do |job_json|
+          job_str = job_json.as(String)
+          jids.each do |jid|
+            if job_str.includes?(jid) && results[jid].nil?
+              results[jid] = job_str
+            end
+          end
+        end
+      end
+
+      results
+    rescue ex
+      Log.warn &.emit("Error in batch job lookup", error: ex.message)
+      results
+    end
+
+    # Optimized method to get job counts for multiple states at once
+    def get_multiple_state_counts(states : Array(String)) : Hash(String, Int32)
+      results = {} of String => Int32
+      states.each { |state| results[state] = 0 }
+
+      # Use pipelining to get all counts at once
+      pipe_results = redis.pipelined do |pipe|
+        states.each do |state|
+          case state
+          when "processing"
+            # We'll handle processing separately as it needs SCAN
+            pipe.echo("0") # Placeholder
+          when "delayed"
+            pipe.zcard(DELAYED_SET)
+          when "retrying"
+            pipe.echo("0") # Placeholder - handled separately
+          when "failed"
+            pipe.zcard("joobq:failed_jobs")
+          when "dead"
+            pipe.zcard(DEAD_LETTER)
+          when "queued"
+            pipe.echo("0") # Placeholder - handled separately
+          else
+            pipe.echo("0")
+          end
+        end
+      end
+
+      # Process results
+      states.each_with_index do |state, index|
+        case state
+        when "processing"
+          results[state] = get_processing_jobs_count
+        when "delayed"
+          results[state] = pipe_results[index].as(Int64).to_i
+        when "retrying"
+          results[state] = get_retrying_jobs_count
+        when "failed"
+          results[state] = pipe_results[index].as(Int64).to_i
+        when "dead"
+          results[state] = pipe_results[index].as(Int64).to_i
+        when "queued"
+          # Get queued jobs count from all queues
+          queue_counts = redis.pipelined do |pipe|
+            JoobQ.queues.each do |queue_name, _|
+              pipe.llen(queue_name)
+            end
+          end
+          results[state] = queue_counts.sum { |count| count.as(Int64).to_i }
+        else
+          results[state] = 0
+        end
+      end
+
+      results
+    rescue ex
+      Log.warn &.emit("Error getting multiple state counts", error: ex.message)
+      results
     end
   end
 end

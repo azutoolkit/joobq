@@ -5,9 +5,9 @@ require "./jobs_spec"
 # Define job classes for testing
 class Job1
   include JoobQ::Job
-  @queue = "single"
 
   def initialize
+    @queue = "single"
   end
 
   def perform
@@ -17,11 +17,11 @@ end
 
 class ExampleJob
   include JoobQ::Job
-  @queue = "example"
 
   getter x : Int32
 
   def initialize(@x : Int32 = 0)
+    @queue = "example"
   end
 
   def perform
@@ -31,9 +31,9 @@ end
 
 class FailJob
   include JoobQ::Job
-  @queue = "failed"
 
   def initialize
+    @queue = "failed"
   end
 
   def perform

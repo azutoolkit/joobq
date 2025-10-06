@@ -5,11 +5,11 @@ struct RetryTestJob
   include JoobQ::Job
 
   property x : Int32
-  @queue = "example"
-  @retries = 3
-  @max_retries = 3
 
   def initialize(@x : Int32)
+    @queue = "example"
+    @retries = 3
+    @max_retries = 3
   end
 
   def perform
@@ -21,11 +21,11 @@ struct FailingRetryJob
   include JoobQ::Job
 
   property fail_count : Int32
-  @queue = "example"
-  @retries = 3
-  @max_retries = 3
 
   def initialize(@fail_count : Int32 = 0)
+    @queue = "example"
+    @retries = 3
+    @max_retries = 3
   end
 
   def perform
@@ -36,11 +36,10 @@ end
 struct NoRetryFailJob
   include JoobQ::Job
 
-  @queue = "example"
-  @retries = 0
-  @max_retries = 0
-
   def initialize
+    @queue = "example"
+    @retries = 0
+    @max_retries = 0
   end
 
   def perform
@@ -229,9 +228,9 @@ module JoobQ
         due_jobs = store.process_due_delayed_jobs(queue_name)
 
         # Should not process future jobs
-        due_jobs.select { |j|
+        due_jobs.count { |j|
           JSON.parse(j)["queue"]?.try(&.as_s) == queue_name
-        }.size.should eq 0
+        }.should eq 0
 
         # Job should still be in delayed queue
         store.set_size(RedisStore::DELAYED_SET).should eq 1

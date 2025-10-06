@@ -1,43 +1,37 @@
-require "spec"
-require "../src/joobq"
+require "./spec_helper"
 
-struct FailJob
+class TestJob
   include JoobQ::Job
 
+  getter x
   @queue = "example"
-  @retries = 0
 
-  def initialize
+  def initialize(@x : Int32 = 0)
   end
 
   def perform
-    raise "Bad"
+    @x += 1
   end
 end
 
-struct ExampleJob
-  include JoobQ::Job
+module JoobQ
+  describe Job do
+    before_each do
+      JoobQ.reset
+    end
 
-  property x : Int32
-  @retries = 3
+    it "performs jobs at later time" do
+      job_id = ExampleJob.delay(for: 1.hour, x: 1)
+      job_id.should be_a UUID
 
-  def initialize(@x : Int32)
-    @queue = "example"
-  end
+      JoobQ.store.set_size("joobq:delayed_jobs").should eq 1
+    end
 
-  def perform
-    x + 1
-  end
-end
-
-struct Job1
-  include JoobQ::Job
-  @retries = 0
-  @queue = "single"
-
-  def initialize
-  end
-
-  def perform
+    it "performs jobs every one second" do
+      JoobQ.store.reset
+      job = TestJob.schedule(every: 1.second, x: 1)
+      sleep 2.seconds
+      job.x.should eq 3
+    end
   end
 end

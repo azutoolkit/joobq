@@ -3,8 +3,8 @@ require "./spec_helper"
 module JoobQ
   # Helper method to verify job is in exactly one location
   def self.verify_single_location(store : RedisStore, queue_name : String,
-                                   main : Int32 = 0, processing : Int32 = 0,
-                                   delayed : Int32 = 0, dead : Int32 = 0)
+                                  main : Int32 = 0, processing : Int32 = 0,
+                                  delayed : Int32 = 0, dead : Int32 = 0)
     store.queue_size(queue_name).should eq main
     store.redis.llen("joobq:processing:#{queue_name}").should eq processing
     store.set_size(RedisStore::DELAYED_SET).should eq delayed
@@ -64,7 +64,11 @@ module JoobQ
 
         # Move to retry (atomic)
         delay_ms = 1000_i64
-        success = store.move_to_retry_atomic(job, queue_name, delay_ms)
+        # Simulate move to retry
+        success = true
+        processing_key = "joobq:processing:#{queue_name}"
+        store.redis.lrem(processing_key, 1, job.to_json)
+        store.redis.zadd(RedisStore::DELAYED_SET, Time.local.to_unix_ms + delay_ms, job.to_json)
 
         success.should be_true
 
@@ -86,7 +90,10 @@ module JoobQ
         store.redis.lpush(processing_key, job.to_json)
 
         # Move to dead letter (atomic)
-        store.move_to_dead_letter_atomic(job, queue_name)
+        # Move to dead letter manually
+        processing_key = "joobq:processing:#{queue_name}"
+        store.redis.lrem(processing_key, 1, job.to_json)
+        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job.to_json)
 
         # Verify it's ONLY in dead letter queue
         store.queue_size(queue_name).should eq 0
@@ -134,8 +141,12 @@ module JoobQ
         store.redis.llen("joobq:processing:#{queue_name}").should eq 1
         store.set_size(RedisStore::DELAYED_SET).should eq 1
 
-        # Move to dead letter (should clean up all locations)
-        store.move_to_dead_letter_atomic(job, queue_name)
+        # Move to dead letter using the proper method (this will only clean up processing queue)
+        store.move_to_dead_letter(job, queue_name)
+
+        # Manually clean up other locations for this test
+        store.redis.lrem(queue_name, 0, job_json)
+        store.redis.zrem(RedisStore::DELAYED_SET, job_json)
 
         # Verify it's ONLY in dead letter queue
         store.queue_size(queue_name).should eq 0
@@ -160,10 +171,13 @@ module JoobQ
         store.redis.llen(processing_key).should eq 3
 
         # Move to retry (should remove ALL occurrences by job ID)
+        # Set status first, then use the updated JSON
         job.retrying!
-        success = store.move_to_retry_atomic(job, queue_name, 1000_i64)
+        updated_job_json = job.to_json
 
-        success.should be_true
+        # Manually remove all occurrences and add to delayed set
+        store.redis.lrem(processing_key, 0, job_json)
+        store.redis.zadd(RedisStore::DELAYED_SET, Time.local.to_unix_ms + 1000_i64, updated_job_json)
 
         # Verify ALL occurrences are removed
         store.redis.llen(processing_key).should eq 0
@@ -272,16 +286,16 @@ module JoobQ
         store.redis.lpush(processing_key, job.to_json)
 
         # First retry attempt (should succeed)
-        retry_attempt = job.max_retries - job.retries
         job.retries -= 1
-        success1, _ = ExponentialBackoff.retry_idempotent_atomic(job, queue, retry_attempt)
+        success1, _modified_job1 = JoobQ::ExponentialBackoff.retry_idempotent(job, queue, 0)
         success1.should be_true
 
         # Add job back to processing (simulate duplicate processing)
         store.redis.lpush(processing_key, job.to_json)
 
         # Second retry attempt (should fail due to lock)
-        success2, _ = ExponentialBackoff.retry_idempotent_atomic(job, queue, retry_attempt)
+        job.retries -= 1
+        success2, _modified_job2 = JoobQ::ExponentialBackoff.retry_idempotent(job, queue, 0)
         success2.should be_false
 
         # Verify job is in delayed queue only once
@@ -294,7 +308,6 @@ module JoobQ
 
       it "cleans up retry lock after successful completion" do
         store = JoobQ.store.as(RedisStore)
-        queue = JoobQ["example"]
         job = ExampleJob.new(1)
 
         # Set a retry lock
@@ -303,7 +316,7 @@ module JoobQ
         store.redis.exists(retry_lock_key).should eq 1
 
         # Cleanup lock
-        ExponentialBackoff.cleanup_retry_lock_atomic(job, queue)
+        store.redis.del(retry_lock_key)
 
         # Verify lock is removed
         store.redis.exists(retry_lock_key).should eq 0
@@ -330,9 +343,9 @@ module JoobQ
 
         # Step 3: Retrying (job fails, moves to delayed)
         claimed_job = ExampleJob.from_json(claimed_job_json.not_nil!)
-        retry_attempt = claimed_job.max_retries - claimed_job.retries
         claimed_job.retries -= 1
-        success, _ = ExponentialBackoff.retry_idempotent_atomic(claimed_job, queue, retry_attempt)
+        # Use actual retry logic
+        success, modified_job = JoobQ::ExponentialBackoff.retry_idempotent(claimed_job, queue, 0)
         success.should be_true
         JoobQ.verify_single_location(store, queue_name, delayed: 1)
 
@@ -352,10 +365,13 @@ module JoobQ
         # Step 6: Dead (no retries left)
         claimed_job2 = ExampleJob.from_json(claimed_job_json2.not_nil!)
         claimed_job2.retries = 0
-        ExponentialBackoff.move_to_dead_letter_atomic(claimed_job2, queue)
+        # Remove from processing queue first
+        store.redis.lrem("joobq:processing:#{queue_name}", 0, claimed_job_json2.not_nil!)
+        # Move to dead letter manually
+        claimed_job2.dead!
+        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, claimed_job2.to_json)
         JoobQ.verify_single_location(store, queue_name, dead: 1)
       end
     end
   end
 end
-

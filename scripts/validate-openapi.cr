@@ -23,9 +23,7 @@ def validate_openapi_spec(file_path : String)
       errors << "Missing 'openapi' field"
     end
 
-    unless spec["info"]?
-      errors << "Missing 'info' field"
-    else
+    if spec["info"]?
       info = spec["info"]
       unless info["title"]?
         errors << "Missing 'info.title' field"
@@ -33,15 +31,17 @@ def validate_openapi_spec(file_path : String)
       unless info["version"]?
         errors << "Missing 'info.version' field"
       end
+    else
+      errors << "Missing 'info' field"
     end
 
-    unless spec["paths"]?
-      errors << "Missing 'paths' field"
-    else
+    if spec["paths"]?
       paths = spec["paths"]
       if paths.as_h.empty?
         warnings << "No paths defined"
       end
+    else
+      errors << "Missing 'paths' field"
     end
 
     # Check for required JoobQ endpoints
@@ -62,7 +62,7 @@ def validate_openapi_spec(file_path : String)
         method, path = endpoint.split(" ", 2)
         found = false
 
-        paths.as_h.each do |key, value|
+        paths.as_h.each do |key, _|
           if key.to_s == path
             found = true
             break
@@ -76,13 +76,13 @@ def validate_openapi_spec(file_path : String)
     end
 
     # Check components
-    unless spec["components"]?
-      warnings << "No components section defined"
-    else
+    if spec["components"]?
       components = spec["components"]
       unless components["schemas"]?
         warnings << "No schemas defined in components"
       end
+    else
+      warnings << "No components section defined"
     end
 
     # Report results

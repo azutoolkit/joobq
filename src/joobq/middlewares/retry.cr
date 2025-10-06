@@ -88,7 +88,6 @@ module JoobQ
           has_backtrace: !error_context.backtrace.empty?
         )
       end
-
     end
   end
 

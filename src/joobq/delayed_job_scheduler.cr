@@ -49,7 +49,7 @@ module JoobQ
       redis_store = @store.as(RedisStore)
 
       # Process delayed jobs for all configured queues
-      JoobQ.config.queues.each do |queue_name, queue_config|
+      JoobQ.config.queues.each do |queue_name, _|
         begin
           due_jobs = redis_store.process_due_delayed_jobs(queue_name)
 

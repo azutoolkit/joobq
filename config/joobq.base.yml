@@ -1,0 +1,23 @@
+joobq:
+  settings:
+    expires: "7 days"
+    failed_ttl: "1 hour"
+    dead_letter_ttl: "30 days"
+
+  middlewares:
+    - type: "throttle"
+    - type: "retry"
+    - type: "timeout"
+
+  error_monitoring:
+    alert_thresholds:
+      error: 10
+      warn: 50
+      info: 100
+    time_window: "5 minutes"
+    max_recent_errors: 100
+
+  pipeline:
+    batch_size: 100
+    timeout: 1.0
+    max_commands: 1000

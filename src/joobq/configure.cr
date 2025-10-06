@@ -104,5 +104,39 @@ module JoobQ
       error_monitor.time_window = time_window if time_window
       error_monitor.max_recent_errors = max_recent_errors if max_recent_errors
     end
+
+    # YAML configuration loading methods
+    def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure
+      if path
+        YamlConfigLoader.load_with_env_overrides(path, env)
+      else
+        YamlConfigLoader.load_auto
+      end
+    end
+
+    # Hybrid configuration - YAML + programmatic
+    def self.load_hybrid(yaml_path : String? = nil, &)
+      # Start with YAML configuration
+      config = if yaml_path
+                 YamlConfigLoader.load_from_file(yaml_path)
+               else
+                 YamlConfigLoader.load_auto
+               end
+
+      # Apply programmatic overrides
+      yield config
+
+      config
+    end
+
+    # Load from multiple YAML sources with merging
+    def self.load_from_yaml_sources(sources : Array(String)) : Configure
+      YamlConfigLoader.load_from_sources(sources)
+    end
+
+    # Load from CLI arguments
+    def self.load_from_cli_args(args : Array(String)) : Configure
+      YamlConfigLoader.load_from_cli_args(args)
+    end
   end
 end

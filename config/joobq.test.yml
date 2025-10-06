@@ -1,0 +1,33 @@
+joobq:
+  settings:
+    default_queue: "test"
+    retries: 1
+    timeout: "2 seconds"
+    timezone: "UTC"
+    worker_batch_size: 1
+
+  queues:
+    test_queue:
+      job_class: "TestJob"
+      workers: 1
+
+  middlewares:
+    - type: "retry"
+    - type: "timeout"
+
+  error_monitoring:
+    alert_thresholds:
+      error: 1
+      warn: 5
+    time_window: "30 seconds"
+    max_recent_errors: 10
+
+  features:
+    rest_api: false
+    stats: false
+
+  redis:
+    host: "localhost"
+    port: 6379
+    pool_size: 5
+    pool_timeout: 1.0

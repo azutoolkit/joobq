@@ -55,9 +55,7 @@ module JoobQ
       result = ValidationResult.new(true)
 
       # Required fields validation
-      unless payload["queue"]?
-        result.add_error("queue", "Queue name is required")
-      else
+      if payload["queue"]?
         queue_name = payload["queue"].to_s
         if queue_name.empty?
           result.add_error("queue", "Queue name cannot be empty")
@@ -66,25 +64,27 @@ module JoobQ
         elsif !queue_exists?(queue_name)
           result.add_error("queue", "Queue '#{queue_name}' does not exist", JSON::Any.new(queue_name), "queue_not_found")
         end
+      else
+        result.add_error("queue", "Queue name is required")
       end
 
-      unless payload["job_type"]?
-        result.add_error("job_type", "Job type is required")
-      else
+      if payload["job_type"]?
         job_type = payload["job_type"].to_s
         if job_type.empty?
           result.add_error("job_type", "Job type cannot be empty")
         elsif !valid_job_type?(job_type)
           result.add_error("job_type", "Job type contains invalid characters", JSON::Any.new(job_type), "invalid_format")
         end
+      else
+        result.add_error("job_type", "Job type is required")
       end
 
-      unless payload["data"]?
-        result.add_error("data", "Job data is required")
-      else
+      if payload["data"]?
         unless payload["data"].as_h?
           result.add_error("data", "Job data must be an object")
         end
+      else
+        result.add_error("data", "Job data is required")
       end
 
       # Optional fields validation

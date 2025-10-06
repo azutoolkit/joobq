@@ -52,7 +52,7 @@ module JoobQ
 
     # Public API methods with type-specific caching
 
-    def get_processing_jobs(limit : Int32 = 100, &block : -> Array(String)) : Array(String)
+    def get_processing_jobs(limit : Int32 = 100, & : -> Array(String)) : Array(String)
       @mutex.synchronize do
         entry = @processing_jobs_cache
         if entry && !entry.expired?
@@ -68,7 +68,7 @@ module JoobQ
       end
     end
 
-    def get_delayed_jobs(limit : Int32 = 1000, &block : -> Array(String)) : Array(String)
+    def get_delayed_jobs(limit : Int32 = 1000, & : -> Array(String)) : Array(String)
       @mutex.synchronize do
         entry = @delayed_jobs_cache
         if entry && !entry.expired?
@@ -84,7 +84,7 @@ module JoobQ
       end
     end
 
-    def get_dead_jobs(limit : Int32 = 50, &block : -> Array(String)) : Array(String)
+    def get_dead_jobs(limit : Int32 = 50, & : -> Array(String)) : Array(String)
       @mutex.synchronize do
         entry = @dead_jobs_cache
         if entry && !entry.expired?
@@ -100,7 +100,7 @@ module JoobQ
       end
     end
 
-    def get_error_stats(&block : -> Hash(String, Int32)) : Hash(String, Int32)
+    def get_error_stats(& : -> Hash(String, Int32)) : Hash(String, Int32)
       @mutex.synchronize do
         entry = @error_stats_cache
         if entry && !entry.expired?
@@ -116,7 +116,7 @@ module JoobQ
       end
     end
 
-    def get_recent_errors(limit : Int32 = 20, &block : -> Array(ErrorContext)) : Array(ErrorContext)
+    def get_recent_errors(limit : Int32 = 20, & : -> Array(ErrorContext)) : Array(ErrorContext)
       @mutex.synchronize do
         entry = @recent_errors_cache
         if entry && !entry.expired?
@@ -132,7 +132,7 @@ module JoobQ
       end
     end
 
-    def get_queue_metrics(&block : -> Hash(String, RedisStore::QueueMetrics)) : Hash(String, RedisStore::QueueMetrics)
+    def get_queue_metrics(& : -> Hash(String, RedisStore::QueueMetrics)) : Hash(String, RedisStore::QueueMetrics)
       @mutex.synchronize do
         entry = @queue_metrics_cache
         if entry && !entry.expired?
@@ -238,4 +238,3 @@ module JoobQ
     end
   end
 end
-

@@ -1,0 +1,38 @@
+joobq:
+  settings:
+    default_queue: "development"
+    retries: 1
+    timeout: "5 seconds"
+    timezone: "America/New_York"
+
+  queues:
+    email:
+      job_class: "EmailJob"
+      workers: 2
+      throttle:
+        limit: 10
+        period: "1 minute"
+
+    image:
+      job_class: "ImageProcessingJob"
+      workers: 1
+
+  middlewares:
+    - type: "retry"
+    - type: "timeout"
+
+  error_monitoring:
+    alert_thresholds:
+      error: 5
+      warn: 10
+    time_window: "2 minutes"
+    max_recent_errors: 50
+
+  features:
+    rest_api: false
+    stats: true
+
+  redis:
+    host: "localhost"
+    port: 6379
+    pool_size: 10

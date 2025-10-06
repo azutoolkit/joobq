@@ -1,7 +1,45 @@
 require "spec"
 require "../src/joobq"
 require "./jobs_spec"
-require "./jobs"
+
+# Define job classes for testing
+class Job1
+  include JoobQ::Job
+  @queue = "single"
+
+  def initialize
+  end
+
+  def perform
+    # Simple test job
+  end
+end
+
+class ExampleJob
+  include JoobQ::Job
+  @queue = "example"
+
+  getter x : Int32
+
+  def initialize(@x : Int32 = 0)
+  end
+
+  def perform
+    @x += 1
+  end
+end
+
+class FailJob
+  include JoobQ::Job
+  @queue = "failed"
+
+  def initialize
+  end
+
+  def perform
+    raise "This job always fails"
+  end
+end
 
 JoobQ.configure do
   queue "single", 10, Job1

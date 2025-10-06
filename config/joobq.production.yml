@@ -1,0 +1,69 @@
+joobq:
+  settings:
+    default_queue: "default"
+    retries: 5
+    timeout: "30 seconds"
+    timezone: "UTC"
+    worker_batch_size: 50
+
+  queues:
+    email:
+      job_class: "EmailJob"
+      workers: 10
+      throttle:
+        limit: 100
+        period: "1 minute"
+
+    image:
+      job_class: "ImageProcessingJob"
+      workers: 5
+      throttle:
+        limit: 20
+        period: "1 minute"
+
+    priority:
+      job_class: "PriorityJob"
+      workers: 20
+
+  middlewares:
+    - type: "throttle"
+    - type: "retry"
+    - type: "timeout"
+
+  error_monitoring:
+    alert_thresholds:
+      error: 10
+      warn: 50
+      info: 100
+    time_window: "5 minutes"
+    max_recent_errors: 200
+
+  schedulers:
+    - timezone: "UTC"
+      cron_jobs:
+        - pattern: "0 */6 * * *"
+          job: "CleanupJob"
+          args: {}
+        - pattern: "0 0 * * *"
+          job: "DailyReportJob"
+          args: { report_type: "daily" }
+      recurring_jobs:
+        - interval: "5 minutes"
+          job: "HealthCheckJob"
+          args: {}
+
+  features:
+    rest_api: true
+    stats: true
+
+  redis:
+    host: "redis.example.com"
+    port: 6379
+    password: "secret"
+    pool_size: 500
+    pool_timeout: 2.0
+
+  pipeline:
+    batch_size: 500
+    timeout: 2.0
+    max_commands: 2000

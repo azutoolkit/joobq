@@ -178,34 +178,32 @@ module JoobQ
     end
 
     private def move_to_dead_letter(job_data : String, reason : String)
-      begin
-        # Try to parse job to get basic info
-        job_json = JSON.parse(job_data)
-        job_id = job_json["jid"]? || "unknown"
+      # Try to parse job to get basic info
+      job_json = JSON.parse(job_data)
+      job_id = job_json["jid"]? || "unknown"
 
-        Log.warn &.emit(
-          "Moving invalid job to dead letter",
-          job_id: job_id.to_s,
-          reason: reason,
-          job_data_length: job_data.size.to_s
-        )
+      Log.warn &.emit(
+        "Moving invalid job to dead letter",
+        job_id: job_id.to_s,
+        reason: reason,
+        job_data_length: job_data.size.to_s
+      )
 
-        # Cannot store corrupted job data in dead letter
-        # Just log the error since we can't create a valid Job object
-        Log.error &.emit(
-          "Cannot move corrupted job to dead letter - data is unparseable",
-          reason: reason,
-          job_data_length: job_data.size.to_s,
-          job_id: job_id.to_s
-        )
-      rescue
-        # If we can't even parse the job, just log it
-        Log.error &.emit(
-          "Could not process corrupted job data",
-          reason: reason,
-          job_data_length: job_data.size.to_s
-        )
-      end
+      # Cannot store corrupted job data in dead letter
+      # Just log the error since we can't create a valid Job object
+      Log.error &.emit(
+        "Cannot move corrupted job to dead letter - data is unparseable",
+        reason: reason,
+        job_data_length: job_data.size.to_s,
+        job_id: job_id.to_s
+      )
+    rescue
+      # If we can't even parse the job, just log it
+      Log.error &.emit(
+        "Could not process corrupted job data",
+        reason: reason,
+        job_data_length: job_data.size.to_s
+      )
     end
   end
 end

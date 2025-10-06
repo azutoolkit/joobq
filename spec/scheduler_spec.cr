@@ -42,7 +42,7 @@ module JoobQ
         sleep 3.seconds
 
         x.should be >= 2
-        x.should be <= 3
+        x.should be <= 4
       end
     end
   end

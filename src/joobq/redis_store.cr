@@ -36,7 +36,6 @@ module JoobQ
         pool_size: @pool_size,
         pool_timeout: @pool_timeout
       )
-
     end
 
     # Connection pool health check with detailed metrics
@@ -49,20 +48,20 @@ module JoobQ
         response_time = (Time.monotonic - start_time).total_milliseconds
 
         {
-          "status" => "healthy",
+          "status"           => "healthy",
           "response_time_ms" => response_time.round(2),
-          "pool_size" => @pool_size,
-          "pool_timeout" => @pool_timeout,
-          "connected" => true,
-          "pipeline_stats" => @@pipeline_stats.to_json,
+          "pool_size"        => @pool_size,
+          "pool_timeout"     => @pool_timeout,
+          "connected"        => true,
+          "pipeline_stats"   => @@pipeline_stats.to_json,
         }
       rescue ex
         {
-          "status" => "unhealthy",
-          "error" => ex.message || "Unknown error",
-          "pool_size" => @pool_size,
-          "pool_timeout" => @pool_timeout,
-          "connected" => false,
+          "status"         => "unhealthy",
+          "error"          => ex.message || "Unknown error",
+          "pool_size"      => @pool_size,
+          "pool_timeout"   => @pool_timeout,
+          "connected"      => false,
           "pipeline_stats" => @@pipeline_stats.to_json,
         }
       end
@@ -71,7 +70,7 @@ module JoobQ
     # Enhanced retry logic with exponential backoff
     private def with_retry(operation_name : String, max_retries : Int32 = 5, &)
       attempt = 0
-      base_delay = 0.1
+      base_delay = 1.milliseconds
 
       loop do
         begin
@@ -90,12 +89,12 @@ module JoobQ
           end
 
           # Exponential backoff with jitter
-          delay = base_delay * (2 ** (attempt - 1)) + rand * 0.1
+          delay = base_delay * (2 ** (attempt - 1)) + Time::Span.new(nanoseconds: (rand * 0.1 * 1_000_000_000).to_i64)
           Log.warn &.emit("Operation failed, retrying",
             operation: operation_name,
             attempt: attempt,
             max_retries: max_retries,
-            delay_seconds: delay.round(3),
+            delay_seconds: delay.total_seconds.round(3),
             error: ex.message
           )
 
@@ -103,8 +102,6 @@ module JoobQ
         end
       end
     end
-
-
 
     def reset : Nil
       with_retry("reset_database") do
@@ -250,7 +247,6 @@ module JoobQ
       Log.error &.emit("Error batch dequeuing jobs", queue: queue_name, error: ex.message)
       [] of String
     end
-
 
     def move_job_back_to_queue(queue_name : String) : Bool
       redis.brpoplpush(processing_queue(queue_name), queue_name, BLOCKING_TIMEOUT)
@@ -598,7 +594,7 @@ module JoobQ
       return [] of Redis::RedisValue if operations.empty?
 
       with_retry("execute_read_operations_batch") do
-        results = redis.pipelined do |pipe|
+        results = redis.pipelined do |_|
           operations.each do |operation|
             # Note: This is a simplified approach - in practice, you'd need to adapt
             # the operations to work with the pipeline interface
@@ -674,11 +670,11 @@ module JoobQ
     end
 
     def processing_list(pattern : String = "#{PROCESSING_QUEUE}:*", limit : Int32 = 100) : Array(String)
-      processing_list_paginated(0, limit)
+      processing_list_paginated(0, limit, pattern)
     end
 
     # Get processing jobs with pagination support
-    def processing_list_paginated(offset : Int32, limit : Int32) : Array(String)
+    def processing_list_paginated(offset : Int32, limit : Int32, pattern : String = "#{PROCESSING_QUEUE}:*") : Array(String)
       jobs_collected = [] of String
       current_offset = 0
       target_offset = offset
@@ -690,7 +686,7 @@ module JoobQ
 
       loop do
         # SCAN returns [new_cursor, [keys]]
-        result = redis.scan(cursor, match: "#{PROCESSING_QUEUE}:*", count: 100)
+        result = redis.scan(cursor, match: pattern, count: 100)
         cursor = result[0].as(String).to_i64
         keys = result[1].as(Array)
 
@@ -770,19 +766,47 @@ module JoobQ
       0i64
     end
 
+    # Remove job from processing queue by job ID (more reliable than JSON match)
+    private def remove_job_from_processing_by_id(job_id : String, queue_name : String) : Bool
+      processing_key = processing_queue(queue_name)
+
+      # Get all jobs from processing queue
+      jobs = redis.lrange(processing_key, 0, -1)
+
+      # Find and remove the job with matching ID
+      jobs.each do |job_json|
+        begin
+          job_data = JSON.parse(job_json.to_s)
+          if job_data["jid"]?.to_s == job_id
+            redis.lrem(processing_key, 0, job_json.to_s)
+            return true
+          end
+        rescue
+          # Skip invalid JSON entries
+          next
+        end
+      end
+
+      false
+    end
+
     # High-performance move to dead letter queue using pipelined operations
     def move_to_dead_letter(job : Job, queue_name : String) : Nil
       with_retry("move_to_dead_letter") do
         processing_key = processing_queue(queue_name)
         current_timestamp = Time.local.to_unix_ms
         job_json = job.to_json
+        retry_lock_key = "joobq:retry_lock:#{job.jid}"
+
+        # Remove job by ID from processing queue (more reliable than JSON match)
+        remove_job_from_processing_by_id(job.jid.to_s, queue_name)
 
         redis.pipelined do |pipe|
-          # Remove from processing queue
-          pipe.lrem(processing_key, 0, job_json)
-
           # Add to dead letter queue
           pipe.zadd(DEAD_LETTER, current_timestamp, job_json)
+
+          # Clean up retry lock if it exists
+          pipe.del(retry_lock_key)
 
           # Update statistics
           pipe.hincrby("joobq:stats:dead_letter", queue_name, 1)
@@ -810,10 +834,10 @@ module JoobQ
         schedule_time = Time.local.to_unix_ms + delay_ms
         job_json = job.to_json
 
-        redis.pipelined do |pipe|
-          # Remove from processing queue
-          pipe.lrem(processing_key, 0, job_json)
+        # Remove job by ID from processing queue (more reliable than JSON match)
+        removed = remove_job_from_processing_by_id(job.jid.to_s, queue_name)
 
+        redis.pipelined do |pipe|
           # Add to delayed queue with future timestamp
           pipe.zadd(DELAYED_SET, schedule_time, job_json)
 
@@ -941,10 +965,10 @@ module JoobQ
     # Returns a hash with the job's locations
     def verify_job_uniqueness(job_jid : String, queue_name : String) : Hash(String, Int32)
       locations = {
-        "main_queue"    => 0,
-        "processing"    => 0,
-        "delayed"       => 0,
-        "dead_letter"   => 0,
+        "main_queue"  => 0,
+        "processing"  => 0,
+        "delayed"     => 0,
+        "dead_letter" => 0,
       }
 
       # Check main queue
@@ -1020,13 +1044,13 @@ module JoobQ
       cache_operations = cache_types.map do |cache_type|
         case cache_type
         when "processing"
-          ->{ invalidate_processing_cache }
+          -> { invalidate_processing_cache }
         when "delayed"
-          ->{ invalidate_delayed_cache }
+          -> { invalidate_delayed_cache }
         when "dead"
-          ->{ invalidate_dead_cache }
+          -> { invalidate_dead_cache }
         else
-          ->{ } # No-op for unknown cache types
+          -> { } # No-op for unknown cache types
         end
       end
 
@@ -1057,7 +1081,7 @@ module JoobQ
               if key.as(String).count(':') == 2
                 pipe.llen(key.as(String))
               else
-                 pipe.echo("0") # Placeholder for non-queue keys
+                pipe.echo("0") # Placeholder for non-queue keys
               end
             end
           end
@@ -1178,21 +1202,21 @@ module JoobQ
 
       states.each_with_index do |state, index|
         results[state] = case state
-                        when "processing"
-                          get_processing_jobs_count
-                        when "delayed"
-                          pipe_results[index].as(Int64).to_i
-                        when "retrying"
-                          get_retrying_jobs_count
-                        when "failed"
-                          pipe_results[index].as(Int64).to_i
-                        when "dead"
-                          pipe_results[index].as(Int64).to_i
-                        when "queued"
-                          get_queued_jobs_count
-                        else
-                          0
-                        end
+                         when "processing"
+                           get_processing_jobs_count
+                         when "delayed"
+                           pipe_results[index].as(Int64).to_i
+                         when "retrying"
+                           get_retrying_jobs_count
+                         when "failed"
+                           pipe_results[index].as(Int64).to_i
+                         when "dead"
+                           pipe_results[index].as(Int64).to_i
+                         when "queued"
+                           get_queued_jobs_count
+                         else
+                           0
+                         end
       end
 
       results

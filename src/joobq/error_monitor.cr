@@ -247,11 +247,9 @@ module JoobQ
 
     # Redis storage methods
     private def store_error_in_redis(error_context : ErrorContext) : Nil
-      begin
-        store_error_in_redis_pipelined(error_context)
-      rescue ex
-        Log.warn &.emit("Failed to store error in Redis", error: ex.message)
-      end
+      store_error_in_redis_pipelined(error_context)
+    rescue ex
+      Log.warn &.emit("Failed to store error in Redis", error: ex.message)
     end
 
     private def store_error_in_redis_pipelined(error_context : ErrorContext) : Nil
@@ -286,40 +284,39 @@ module JoobQ
     end
 
     private def perform_redis_load : Nil
-      begin
-        store = JoobQ.store.as(RedisStore)
+      store = JoobQ.store.as(RedisStore)
 
-        # Load error counts
-        error_counts_data = store.redis.hgetall(ERROR_COUNTS_KEY)
-        @error_counts.clear
-        error_counts_data.each do |key, value|
-          @error_counts[key] = value.to_i
-        end
+      # Load error counts
+      error_counts_data = store.redis.hgetall(ERROR_COUNTS_KEY)
+      @error_counts.clear
+      error_counts_data.each do |key, value|
+        @error_counts[key] = value.to_i
+      end
 
-        # Load recent errors
-        @recent_errors.clear
-        error_ids = store.redis.zrange(ERROR_INDEX_KEY, 0, -1)
-        error_ids.each do |error_id|
-          error_json = store.redis.hget(RECENT_ERRORS_KEY, error_id)
-          if error_json
-            begin
-              error_context = ErrorContext.from_json(error_json)
-              @recent_errors << error_context
-            rescue ex
-              Log.warn &.emit("Failed to parse error from Redis", error_id: error_id, error: ex.message)
-            end
+      # Load recent errors
+      @recent_errors.clear
+      error_ids = store.redis.zrange(ERROR_INDEX_KEY, 0, -1)
+      error_ids.each do |error_id|
+        error_json = store.redis.hget(RECENT_ERRORS_KEY, error_id)
+        if error_json
+          begin
+            error_context = ErrorContext.from_json(error_json)
+            @recent_errors << error_context
+          rescue ex
+            Log.warn &.emit("Failed to parse error from Redis", error_id: error_id, error: ex.message)
           end
         end
-
-        # Sort by occurred_at timestamp
-        @recent_errors.sort_by! { |error| error.occurred_at }
-
-        @redis_loaded = true
-        Log.debug &.emit("Loaded #{@recent_errors.size} errors from Redis")
-      rescue ex
-        Log.warn &.emit("Failed to load errors from Redis", error: ex.message)
-        @redis_loaded = true # Mark as loaded even if failed to avoid retrying
       end
+
+      # Sort by occurred_at timestamp
+      @recent_errors.sort_by!(&.occurred_at)
+
+      @redis_loaded = true
+      Log.debug &.emit("Loaded #{@recent_errors.size} errors from Redis")
+    rescue ex
+      Log.warn &.emit("Failed to load errors from Redis", error: ex.message)
+      @redis_loaded = true # Mark as loaded even if failed to avoid retrying
+
     end
 
     private def ensure_redis_loaded : Nil
@@ -327,12 +324,10 @@ module JoobQ
     end
 
     def clear_redis_errors : Nil
-      begin
-        store = JoobQ.store.as(RedisStore)
-        store.redis.del(ERROR_COUNTS_KEY, RECENT_ERRORS_KEY, ERROR_INDEX_KEY)
-      rescue ex
-        Log.warn &.emit("Failed to clear Redis errors", error: ex.message)
-      end
+      store = JoobQ.store.as(RedisStore)
+      store.redis.del(ERROR_COUNTS_KEY, RECENT_ERRORS_KEY, ERROR_INDEX_KEY)
+    rescue ex
+      Log.warn &.emit("Failed to clear Redis errors", error: ex.message)
     end
 
     # Batch error storage for improved performance

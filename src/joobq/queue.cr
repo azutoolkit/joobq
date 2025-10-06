@@ -111,7 +111,7 @@ module JoobQ
     def retry(job : String)
       job_data = JSON.parse(job)
       retries = job_data["retries"]?.try(&.as_i) || 0
-      delay_ms = (2 ** retries) * 1000_i64 # Delay in ms
+      delay_ms = (2 ** retries) * 1000_i64             # Delay in ms
       schedule_time = Time.local.to_unix_ms + delay_ms # Calculate when job should run
 
       # Use Redis store directly to schedule the job string

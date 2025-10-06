@@ -12,14 +12,84 @@ require "./joobq/api_cache"
 require "./joobq/**"
 
 module JoobQ
-  CONFIG = Configure.new
+  # Configuration instance with lazy loading
+  @@config : Configure? = nil
+  @@config_initialized = false
 
-  def self.config
-    CONFIG
+  def self.config : Configure
+    initialize_config unless @@config_initialized
+    @@config.not_nil!
   end
 
   def self.configure(&)
-    with CONFIG yield CONFIG
+    with config yield config
+  end
+
+  # Initialize configuration with auto-discovery
+  def self.initialize_config : Nil
+    return if @@config_initialized
+
+    @@config = load_auto
+    @@config_initialized = true
+    Log.info { "JoobQ configuration initialized with auto-discovery" }
+  end
+
+  # Initialize configuration with specific loading method
+  def self.initialize_config_with(loading_method : Symbol, *args, **kwargs) : Nil
+    return if @@config_initialized
+
+    case loading_method
+    when :yaml
+      @@config = load_from_yaml(*args, **kwargs)
+    when :file
+      # load_from_file only takes a path argument
+      path = args.first?.to_s || raise ArgumentError.new("File path required for :file loading method")
+      @@config = load_from_file(path)
+    when :string
+      # load_from_string takes content and optional source_path
+      content = args.first?.to_s || raise ArgumentError.new("YAML content required for :string loading method")
+      source_path = args[1]?.to_s
+      @@config = load_from_string(content, source_path)
+    when :sources
+      # Convert args to Array(String) for sources
+      sources = Array(String).new
+      args.each { |arg| sources << arg.to_s }
+      @@config = load_from_yaml_sources(sources)
+    when :cli_args
+      # Convert args to Array(String) for CLI args
+      cli_args = Array(String).new
+      args.each { |arg| cli_args << arg.to_s }
+      @@config = load_from_cli_args(cli_args)
+    when :env_overrides
+      @@config = load_with_env_overrides(*args, **kwargs)
+    else
+      raise ArgumentError.new("Unknown loading method: #{loading_method}")
+    end
+
+    @@config_initialized = true
+    Log.info { "JoobQ configuration initialized with #{loading_method}" }
+  end
+
+  # Initialize configuration with hybrid loading method (requires block)
+  def self.initialize_config_with(loading_method : Symbol, *args, **kwargs, &block) : Nil
+    return if @@config_initialized
+
+    case loading_method
+    when :hybrid
+      @@config = load_hybrid(*args, **kwargs) { |cfg| yield cfg }
+    else
+      raise ArgumentError.new("Loading method #{loading_method} does not support blocks")
+    end
+
+    @@config_initialized = true
+    Log.info { "JoobQ configuration initialized with #{loading_method}" }
+  end
+
+  # Reset configuration (useful for testing)
+  def self.reset_config : Nil
+    @@config = nil
+    @@config_initialized = false
+    Log.info { "JoobQ configuration reset" }
   end
 
   def self.store

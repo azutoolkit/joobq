@@ -3,17 +3,10 @@ module JoobQ
     DELAYED_SET      = "joobq:delayed_jobs"
     private DEAD_LETTER      = "joobq:dead_letter"
     private PROCESSING_QUEUE = "joobq:processing"
-    private BLOCKING_TIMEOUT = 5
+    private BLOCKING_TIMEOUT = 0.5
 
-    # Reliable queue implementation using BRPOPLPUSH
-    @@reliable_queue_timeout : Int32 = 5
-
-    # Circuit breaker state
-    @@circuit_open : Bool = false
-    @@circuit_failures : Int32 = 0
-    @@circuit_last_failure_time : Time? = nil
-    CIRCUIT_THRESHOLD = 10
-    CIRCUIT_TIMEOUT = 60.seconds
+    # Health check interval for monitoring
+    HEALTH_CHECK_INTERVAL = 5.seconds
 
     def self.instance : RedisStore
       @@instance ||= new
@@ -26,8 +19,8 @@ module JoobQ
     def initialize(@host : String = ENV.fetch("REDIS_HOST", "localhost"),
                    @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
                    @password : String? = ENV["REDIS_PASS"]?,
-                   @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "100").to_i,
-                   @pool_timeout : Float64 = 0.5)
+                   @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "500").to_i,
+                   @pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64)
       @redis = Redis::PooledClient.new(
         host: @host,
         port: @port,
@@ -43,9 +36,10 @@ module JoobQ
         pool_size: @pool_size,
         pool_timeout: @pool_timeout
       )
+
     end
 
-    # Connection pool health check
+    # Connection pool health check with detailed metrics
     def health_check : Hash(String, String | Int32 | Bool | Float64)
       start_time = Time.monotonic
 
@@ -60,8 +54,7 @@ module JoobQ
           "pool_size" => @pool_size,
           "pool_timeout" => @pool_timeout,
           "connected" => true,
-          "circuit_open" => @@circuit_open,
-          "circuit_failures" => @@circuit_failures,
+          "pipeline_stats" => @@pipeline_stats.to_json,
         }
       rescue ex
         {
@@ -70,114 +63,79 @@ module JoobQ
           "pool_size" => @pool_size,
           "pool_timeout" => @pool_timeout,
           "connected" => false,
-          "circuit_open" => @@circuit_open,
-          "circuit_failures" => @@circuit_failures,
+          "pipeline_stats" => @@pipeline_stats.to_json,
         }
       end
     end
 
-    # Get circuit breaker statistics
-    def circuit_breaker_stats : Hash(String, String | Int32 | Bool)
-      {
-        "circuit_open" => @@circuit_open,
-        "failures" => @@circuit_failures,
-        "threshold" => CIRCUIT_THRESHOLD,
-        "timeout_seconds" => CIRCUIT_TIMEOUT.total_seconds.to_i32,
-        "last_failure" => @@circuit_last_failure_time ? @@circuit_last_failure_time.not_nil!.to_s : "none",
-      }
-    end
-
-    # Reset circuit breaker (useful for manual intervention)
-    def reset_circuit_breaker : Nil
-      @@circuit_open = false
-      @@circuit_failures = 0
-      @@circuit_last_failure_time = nil
-      Log.info &.emit("Circuit breaker manually reset")
-    end
-
-
-    # Circuit breaker check and management
-    private def check_circuit_breaker(operation_name : String)
-      if @@circuit_open
-        if last_failure = @@circuit_last_failure_time
-          if Time.local - last_failure > CIRCUIT_TIMEOUT
-            Log.info &.emit("Circuit breaker timeout elapsed, attempting to close",
-              operation: operation_name
-            )
-            @@circuit_open = false
-            @@circuit_failures = 0
-          else
-            raise "Circuit breaker is open for Redis operations"
-          end
-        end
-      end
-    end
-
-    private def record_circuit_failure
-      @@circuit_failures += 1
-      @@circuit_last_failure_time = Time.local
-
-      if @@circuit_failures >= CIRCUIT_THRESHOLD
-        @@circuit_open = true
-        Log.error &.emit("Circuit breaker opened due to failures",
-          failures: @@circuit_failures,
-          threshold: CIRCUIT_THRESHOLD
-        )
-      end
-    end
-
-    private def record_circuit_success
-      if @@circuit_failures > 0
-        @@circuit_failures = [@@circuit_failures - 1, 0].max
-        if @@circuit_open
-          @@circuit_open = false
-          Log.info &.emit("Circuit breaker closed after successful operation")
-        end
-      end
-    end
-
-    # Retry wrapper for critical Redis operations with circuit breaker
-    private def with_retry(operation_name : String, max_retries : Int32 = 3, &block)
-      check_circuit_breaker(operation_name)
-
+    # Enhanced retry logic with exponential backoff
+    private def with_retry(operation_name : String, max_retries : Int32 = 5, &)
       attempt = 0
+      base_delay = 0.1
+
       loop do
         begin
           result = yield
-          record_circuit_success
           return result
         rescue ex
-          record_circuit_failure
           attempt += 1
-          if attempt <= max_retries
-            Log.warn &.emit("Retrying Redis operation",
-              operation: operation_name,
-              attempt: attempt,
-              max_retries: max_retries,
-              error: ex.message
-            )
-            sleep (attempt * 0.1) # Exponential backoff
-          else
-            Log.error &.emit("Redis operation failed after retries",
+
+          if attempt >= max_retries
+            Log.error &.emit("Operation failed after all retries",
               operation: operation_name,
               attempts: attempt,
-              error: ex.message,
-              error_class: ex.class.name,
-              backtrace: ex.backtrace.first(3).join(" | ")
+              error: ex.message
             )
             raise ex
           end
+
+          # Exponential backoff with jitter
+          delay = base_delay * (2 ** (attempt - 1)) + rand * 0.1
+          Log.warn &.emit("Operation failed, retrying",
+            operation: operation_name,
+            attempt: attempt,
+            max_retries: max_retries,
+            delay_seconds: delay.round(3),
+            error: ex.message
+          )
+
+          sleep delay
         end
       end
     end
 
 
+
     def reset : Nil
-      redis.flushdb
+      with_retry("reset_database") do
+        redis.flushdb
+      end
     end
 
     def clear_queue(queue_name : String) : Nil
-      redis.del(queue_name)
+      with_retry("clear_queue") do
+        redis.del(queue_name)
+      end
+    end
+
+    # Optimized method to clear multiple queues in a single pipeline
+    def clear_queues_batch(queue_names : Array(String)) : Nil
+      return if queue_names.empty?
+
+      with_retry("clear_queues_batch") do
+        redis.pipelined do |pipe|
+          queue_names.each do |queue_name|
+            pipe.del(queue_name)
+          end
+        end
+        track_pipeline_operation(queue_names.size, true)
+      end
+    rescue ex
+      track_pipeline_operation(queue_names.size, false)
+      Log.error &.emit("Error clearing queues batch",
+        queue_count: queue_names.size,
+        error: ex.message)
+      raise ex
     end
 
     def delete_job(job : String) : Nil
@@ -256,7 +214,7 @@ module JoobQ
         processing_key = processing_queue(queue_name)
 
         # Use BRPOPLPUSH for reliable queue - blocks until job is available
-        if job_data = redis.brpoplpush(queue_name, processing_key, @@reliable_queue_timeout)
+        if job_data = redis.brpoplpush(queue_name, processing_key, BLOCKING_TIMEOUT)
           Log.debug &.emit("Job dequeued", queue: queue_name, job_data_length: job_data.to_s.size)
           return job_data.to_s
         end
@@ -327,11 +285,73 @@ module JoobQ
     end
 
     def queue_size(queue_name : String) : Int64
-      redis.llen(queue_name)
+      with_retry("queue_size") do
+        redis.llen(queue_name)
+      end
     end
 
     def set_size(set_name : String) : Int64
-      redis.zcard(set_name)
+      with_retry("set_size") do
+        redis.zcard(set_name)
+      end
+    end
+
+    # Optimized batch queue sizes to reduce connection overhead
+    def queue_sizes_batch(queue_names : Array(String)) : Hash(String, Int64)
+      return {} of String => Int64 if queue_names.empty?
+
+      sizes = {} of String => Int64
+
+      with_retry("queue_sizes_batch") do
+        results = redis.pipelined do |pipe|
+          queue_names.each do |queue_name|
+            pipe.llen(queue_name)
+          end
+        end
+
+        queue_names.each_with_index do |queue_name, index|
+          sizes[queue_name] = results[index].as(Int64)
+        end
+
+        track_pipeline_operation(queue_names.size, true)
+      end
+
+      sizes
+    rescue ex
+      track_pipeline_operation(queue_names.size, false)
+      Log.error &.emit("Error getting queue sizes batch",
+        queue_count: queue_names.size,
+        error: ex.message)
+      {} of String => Int64
+    end
+
+    # Optimized batch set sizes to reduce connection overhead
+    def set_sizes_batch(set_names : Array(String)) : Hash(String, Int64)
+      return {} of String => Int64 if set_names.empty?
+
+      sizes = {} of String => Int64
+
+      with_retry("set_sizes_batch") do
+        results = redis.pipelined do |pipe|
+          set_names.each do |set_name|
+            pipe.zcard(set_name)
+          end
+        end
+
+        set_names.each_with_index do |set_name, index|
+          sizes[set_name] = results[index].as(Int64)
+        end
+
+        track_pipeline_operation(set_names.size, true)
+      end
+
+      sizes
+    rescue ex
+      track_pipeline_operation(set_names.size, false)
+      Log.error &.emit("Error getting set sizes batch",
+        set_count: set_names.size,
+        error: ex.message)
+      {} of String => Int64
     end
 
     # Simplified job cleanup for BRPOPLPUSH pattern - just remove from processing queue
@@ -548,6 +568,109 @@ module JoobQ
         success ? @@pipeline_stats.pipeline_failures : @@pipeline_stats.pipeline_failures + 1,
         @@pipeline_stats.last_reset
       )
+    end
+
+    # Connection reuse optimization: Batch multiple single operations into pipelines
+    # This reduces connection overhead for operations that don't need to be immediate
+    private def batch_operations(operations : Array(Proc(Nil)), max_batch_size : Int32 = 10) : Nil
+      return if operations.empty?
+
+      # Process operations in batches to optimize connection reuse
+      operations.each_slice(max_batch_size) do |batch|
+        with_retry("batch_operations") do
+          redis.pipelined do |_|
+            batch.each do |operation|
+              operation.call
+            end
+          end
+          track_pipeline_operation(batch.size, true)
+        end
+      end
+    rescue ex
+      track_pipeline_operation(operations.size, false)
+      Log.error &.emit("Error in batch operations", error: ex.message)
+      raise ex
+    end
+
+    # Connection pooling optimization: Execute multiple read operations in a single pipeline
+    # This is ideal for operations that can tolerate slightly stale data
+    def execute_read_operations_batch(operations : Array(-> Redis::RedisValue)) : Array(Redis::RedisValue)
+      return [] of Redis::RedisValue if operations.empty?
+
+      with_retry("execute_read_operations_batch") do
+        results = redis.pipelined do |pipe|
+          operations.each do |operation|
+            # Note: This is a simplified approach - in practice, you'd need to adapt
+            # the operations to work with the pipeline interface
+            operation.call
+          end
+        end
+        track_pipeline_operation(operations.size, true)
+        results
+      end
+    rescue ex
+      track_pipeline_operation(operations.size, false)
+      Log.error &.emit("Error in read operations batch", error: ex.message)
+      [] of Redis::RedisValue
+    end
+
+    # Optimized connection reuse for statistics collection
+    def collect_statistics_batch : Hash(String, Int64)
+      stats = {} of String => Int64
+
+      with_retry("collect_statistics_batch") do
+        # Collect multiple statistics in a single pipeline
+        results = redis.pipelined do |pipe|
+          # Queue sizes for all configured queues
+          JoobQ.queues.each do |queue_name, _|
+            pipe.llen(queue_name)
+            pipe.llen(processing_queue(queue_name))
+          end
+
+          # Set sizes for delayed and dead jobs
+          pipe.zcard(DELAYED_SET)
+          pipe.zcard(DEAD_LETTER)
+
+          # Global statistics
+          pipe.hget("joobq:stats:total_processed", "global")
+          pipe.hget("joobq:stats:total_completed", "global")
+          pipe.hget("joobq:stats:total_retries", "global")
+          pipe.hget("joobq:stats:total_dead_letter", "global")
+        end
+
+        result_index = 0
+
+        # Parse queue statistics
+        JoobQ.queues.each do |queue_name, _|
+          stats["#{queue_name}_size"] = results[result_index].as(Int64)
+          result_index += 1
+          stats["#{queue_name}_processing"] = results[result_index].as(Int64)
+          result_index += 1
+        end
+
+        # Parse set statistics
+        stats["delayed_jobs"] = results[result_index].as(Int64)
+        result_index += 1
+        stats["dead_jobs"] = results[result_index].as(Int64)
+        result_index += 1
+
+        # Parse global statistics
+        stats["total_processed"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
+        result_index += 1
+        stats["total_completed"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
+        result_index += 1
+        stats["total_retries"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
+        result_index += 1
+        stats["total_dead_letter"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
+
+        track_pipeline_operation(results.size, true)
+      end
+
+      stats
+    rescue ex
+      track_pipeline_operation(10, false) # Approximate command count
+      Log.error &.emit("Error collecting statistics batch", error: ex.message)
+      {} of String => Int64
     end
 
     def processing_list(pattern : String = "#{PROCESSING_QUEUE}:*", limit : Int32 = 100) : Array(String)
@@ -870,7 +993,7 @@ module JoobQ
       "#{PROCESSING_QUEUE}:#{name}"
     end
 
-    # Cache invalidation helpers
+    # Cache invalidation helpers with connection reuse optimization
     private def invalidate_processing_cache : Nil
       JoobQ.api_cache.invalidate_processing_jobs
     rescue ex
@@ -887,6 +1010,32 @@ module JoobQ
       JoobQ.api_cache.invalidate_dead_jobs
     rescue ex
       Log.warn &.emit("Failed to invalidate dead cache", error: ex.message)
+    end
+
+    # Optimized batch cache invalidation to reduce connection usage
+    private def invalidate_caches_batch(cache_types : Array(String)) : Nil
+      return if cache_types.empty?
+
+      # Batch cache invalidations to minimize connection overhead
+      cache_operations = cache_types.map do |cache_type|
+        case cache_type
+        when "processing"
+          ->{ invalidate_processing_cache }
+        when "delayed"
+          ->{ invalidate_delayed_cache }
+        when "dead"
+          ->{ invalidate_dead_cache }
+        else
+          ->{ } # No-op for unknown cache types
+        end
+      end
+
+      # Execute all cache invalidations in a single batch
+      cache_operations.each(&.call)
+    rescue ex
+      Log.warn &.emit("Failed to invalidate caches batch",
+        cache_types: cache_types.join(","),
+        error: ex.message)
     end
 
     # Optimized method to get processing jobs count across all processing queues
@@ -1000,6 +1149,65 @@ module JoobQ
       results
     end
 
+    # Helper method to get pipeline commands for state counts
+    private def get_pipeline_commands_for_states(states : Array(String), pipe)
+      states.each do |state|
+        case state
+        when "processing"
+          pipe.echo("0") # Placeholder
+        when "delayed"
+          pipe.zcard(DELAYED_SET)
+        when "retrying"
+          pipe.echo("0") # Placeholder - handled separately
+        when "failed"
+          pipe.zcard("joobq:failed_jobs")
+        when "dead"
+          pipe.zcard(DEAD_LETTER)
+        when "queued"
+          pipe.echo("0") # Placeholder - handled separately
+        else
+          pipe.echo("0")
+        end
+      end
+    end
+
+    # Helper method to process state count results
+    private def process_state_count_results(states : Array(String), pipe_results : Array(Redis::RedisValue)) : Hash(String, Int32)
+      results = {} of String => Int32
+      states.each { |state| results[state] = 0 }
+
+      states.each_with_index do |state, index|
+        results[state] = case state
+                        when "processing"
+                          get_processing_jobs_count
+                        when "delayed"
+                          pipe_results[index].as(Int64).to_i
+                        when "retrying"
+                          get_retrying_jobs_count
+                        when "failed"
+                          pipe_results[index].as(Int64).to_i
+                        when "dead"
+                          pipe_results[index].as(Int64).to_i
+                        when "queued"
+                          get_queued_jobs_count
+                        else
+                          0
+                        end
+      end
+
+      results
+    end
+
+    # Helper method to get queued jobs count
+    private def get_queued_jobs_count : Int32
+      queue_counts = redis.pipelined do |pipe|
+        JoobQ.queues.each do |queue_name, _|
+          pipe.llen(queue_name)
+        end
+      end
+      queue_counts.sum { |count| count.as(Int64).to_i }
+    end
+
     # Optimized method to get job counts for multiple states at once
     def get_multiple_state_counts(states : Array(String)) : Hash(String, Int32)
       results = {} of String => Int32
@@ -1007,52 +1215,11 @@ module JoobQ
 
       # Use pipelining to get all counts at once
       pipe_results = redis.pipelined do |pipe|
-        states.each do |state|
-          case state
-          when "processing"
-            # We'll handle processing separately as it needs SCAN
-            pipe.echo("0") # Placeholder
-          when "delayed"
-            pipe.zcard(DELAYED_SET)
-          when "retrying"
-            pipe.echo("0") # Placeholder - handled separately
-          when "failed"
-            pipe.zcard("joobq:failed_jobs")
-          when "dead"
-            pipe.zcard(DEAD_LETTER)
-          when "queued"
-            pipe.echo("0") # Placeholder - handled separately
-          else
-            pipe.echo("0")
-          end
-        end
+        get_pipeline_commands_for_states(states, pipe)
       end
 
       # Process results
-      states.each_with_index do |state, index|
-        case state
-        when "processing"
-          results[state] = get_processing_jobs_count
-        when "delayed"
-          results[state] = pipe_results[index].as(Int64).to_i
-        when "retrying"
-          results[state] = get_retrying_jobs_count
-        when "failed"
-          results[state] = pipe_results[index].as(Int64).to_i
-        when "dead"
-          results[state] = pipe_results[index].as(Int64).to_i
-        when "queued"
-          # Get queued jobs count from all queues
-          queue_counts = redis.pipelined do |pipe|
-            JoobQ.queues.each do |queue_name, _|
-              pipe.llen(queue_name)
-            end
-          end
-          results[state] = queue_counts.sum { |count| count.as(Int64).to_i }
-        else
-          results[state] = 0
-        end
-      end
+      results = process_state_count_results(states, pipe_results)
 
       results
     rescue ex

@@ -154,17 +154,17 @@ module JoobQ
         job = ExampleJob.new(1)
         job_json = job.to_json
         processing_key = "joobq:processing:#{queue_name}"
-        
+
         # Add job multiple times to processing (shouldn't happen, but test cleanup)
         3.times { store.redis.lpush(processing_key, job_json) }
         store.redis.llen(processing_key).should eq 3
-        
+
         # Move to retry (should remove ALL occurrences by job ID)
         job.retrying!
         success = store.move_to_retry_atomic(job, queue_name, 1000_i64)
-        
+
         success.should be_true
-        
+
         # Verify ALL occurrences are removed
         store.redis.llen(processing_key).should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 1
@@ -276,10 +276,10 @@ module JoobQ
         job.retries -= 1
         success1, _ = ExponentialBackoff.retry_idempotent_atomic(job, queue, retry_attempt)
         success1.should be_true
-        
+
         # Add job back to processing (simulate duplicate processing)
         store.redis.lpush(processing_key, job.to_json)
-        
+
         # Second retry attempt (should fail due to lock)
         success2, _ = ExponentialBackoff.retry_idempotent_atomic(job, queue, retry_attempt)
         success2.should be_false

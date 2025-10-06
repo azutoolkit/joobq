@@ -1,13 +1,5 @@
 version: 2.0
 shards:
-  any_hash:
-    git: https://github.com/sija/any_hash.cr.git
-    version: 0.2.5
-
-  backtracer:
-    git: https://github.com/sija/backtracer.cr.git
-    version: 1.2.2
-
   cron_parser:
     git: https://github.com/kostya/cron_parser.git
     version: 0.4.0
@@ -15,10 +7,6 @@ shards:
   pool:
     git: https://github.com/ysbaddaden/pool.git
     version: 0.2.4
-
-  raven:
-    git: https://github.com/sija/raven.cr.git
-    version: 1.9.4
 
   redis:
     git: https://github.com/stefanwille/crystal-redis.git

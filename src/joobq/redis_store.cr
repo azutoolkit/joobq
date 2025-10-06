@@ -67,66 +67,24 @@ module JoobQ
       end
     end
 
-    # Enhanced retry logic with exponential backoff
-    private def with_retry(operation_name : String, max_retries : Int32 = 5, &)
-      attempt = 0
-      base_delay = 1.milliseconds
-
-      loop do
-        begin
-          result = yield
-          return result
-        rescue ex
-          attempt += 1
-
-          if attempt >= max_retries
-            Log.error &.emit("Operation failed after all retries",
-              operation: operation_name,
-              attempts: attempt,
-              error: ex.message
-            )
-            raise ex
-          end
-
-          # Exponential backoff with jitter
-          delay = base_delay * (2 ** (attempt - 1)) + Time::Span.new(nanoseconds: (rand * 0.1 * 1_000_000_000).to_i64)
-          Log.warn &.emit("Operation failed, retrying",
-            operation: operation_name,
-            attempt: attempt,
-            max_retries: max_retries,
-            delay_seconds: delay.total_seconds.round(3),
-            error: ex.message
-          )
-
-          sleep delay
-        end
-      end
-    end
-
     def reset : Nil
-      with_retry("reset_database") do
-        redis.flushdb
-      end
+      redis.flushdb
     end
 
     def clear_queue(queue_name : String) : Nil
-      with_retry("clear_queue") do
-        redis.del(queue_name)
-      end
+      redis.del(queue_name)
     end
 
     # Optimized method to clear multiple queues in a single pipeline
     def clear_queues_batch(queue_names : Array(String)) : Nil
       return if queue_names.empty?
 
-      with_retry("clear_queues_batch") do
-        redis.pipelined do |pipe|
-          queue_names.each do |queue_name|
-            pipe.del(queue_name)
-          end
+      redis.pipelined do |pipe|
+        queue_names.each do |queue_name|
+          pipe.del(queue_name)
         end
-        track_pipeline_operation(queue_names.size, true)
       end
+      track_pipeline_operation(queue_names.size, true)
     rescue ex
       track_pipeline_operation(queue_names.size, false)
       Log.error &.emit("Error clearing queues batch",
@@ -136,35 +94,31 @@ module JoobQ
     end
 
     def delete_job(job : String) : Nil
-      with_retry("delete_job") do
-        parsed_job = JSON.parse(job)
-        queue_name = parsed_job["queue"]?.try(&.as_s)
-        return unless queue_name
+      parsed_job = JSON.parse(job)
+      queue_name = parsed_job["queue"]?.try(&.as_s)
+      return unless queue_name
 
-        processing_key = processing_queue(queue_name)
+      processing_key = processing_queue(queue_name)
 
-        # Remove job from processing queue (all occurrences)
-        redis.lrem(processing_key, 0, job)
+      # Remove job from processing queue (all occurrences)
+      redis.lrem(processing_key, 0, job)
 
-        Log.debug &.emit("Job deleted",
-          queue: queue_name,
-          job_data_length: job.size
-        )
-      end
+      Log.debug &.emit("Job deleted",
+        queue: queue_name,
+        job_data_length: job.size
+      )
     rescue ex
       Log.error &.emit("Error deleting job", error: ex.message)
     end
 
     def enqueue(job : Job) : String
-      with_retry("enqueue_job") do
-        redis.rpush job.queue, job.to_json
+      redis.rpush job.queue, job.to_json
 
-        # Invalidate processing jobs cache
-        invalidate_processing_cache
+      # Invalidate processing jobs cache
+      invalidate_processing_cache
 
-        Log.debug &.emit("Job enqueued", job_id: job.jid.to_s, queue: job.queue)
-        job.jid.to_s
-      end
+      Log.debug &.emit("Job enqueued", job_id: job.jid.to_s, queue: job.queue)
+      job.jid.to_s
     end
 
     def enqueue_batch(jobs : Array(Job), batch_size : Int32 = 1000) : Nil
@@ -178,14 +132,12 @@ module JoobQ
 
       begin
         jobs.each_slice(batch_size) do |batch_jobs|
-          with_retry("enqueue_batch") do
-            redis.pipelined do |pipe|
-              batch_jobs.each do |job|
-                pipe.rpush job.queue, job.to_json
-              end
+          redis.pipelined do |pipe|
+            batch_jobs.each do |job|
+              pipe.rpush job.queue, job.to_json
             end
-            total_enqueued += batch_jobs.size
           end
+          total_enqueued += batch_jobs.size
         end
 
         duration = Time.monotonic - start_time
@@ -207,17 +159,15 @@ module JoobQ
 
     # High-performance reliable queue using BRPOPLPUSH
     def dequeue(queue_name : String, klass : Class) : String?
-      with_retry("dequeue_job") do
-        processing_key = processing_queue(queue_name)
+      processing_key = processing_queue(queue_name)
 
-        # Use BRPOPLPUSH for reliable queue - blocks until job is available
-        if job_data = redis.brpoplpush(queue_name, processing_key, BLOCKING_TIMEOUT)
-          Log.debug &.emit("Job dequeued", queue: queue_name, job_data_length: job_data.to_s.size)
-          return job_data.to_s
-        end
-
-        nil
+      # Use BRPOPLPUSH for reliable queue - blocks until job is available
+      if job_data = redis.brpoplpush(queue_name, processing_key, BLOCKING_TIMEOUT)
+        Log.debug &.emit("Job dequeued", queue: queue_name, job_data_length: job_data.to_s.size)
+        return job_data.to_s
       end
+
+      nil
     rescue ex
       Log.error &.emit("Error dequeuing job", queue: queue_name, error: ex.message)
       nil
@@ -225,24 +175,22 @@ module JoobQ
 
     # Batch dequeue for high performance - uses non-blocking operations
     def dequeue_batch(queue_name : String, klass : Class, batch_size : Int32 = 10) : Array(String)
-      with_retry("dequeue_batch") do
-        processing_key = processing_queue(queue_name)
-        jobs = [] of String
+      processing_key = processing_queue(queue_name)
+      jobs = [] of String
 
-        # Use pipelined RPOPLPUSH for batch operations
-        redis.pipelined do |pipe|
-          batch_size.times do
-            pipe.rpoplpush(queue_name, processing_key)
-          end
-        end.each do |result|
-          if result && !result.to_s.empty?
-            jobs << result.to_s
-          end
+      # Use pipelined RPOPLPUSH for batch operations
+      redis.pipelined do |pipe|
+        batch_size.times do
+          pipe.rpoplpush(queue_name, processing_key)
         end
-
-        Log.debug &.emit("Batch dequeued jobs", queue: queue_name, count: jobs.size)
-        jobs
+      end.each do |result|
+        if result && !result.to_s.empty?
+          jobs << result.to_s
+        end
       end
+
+      Log.debug &.emit("Batch dequeued jobs", queue: queue_name, count: jobs.size)
+      jobs
     rescue ex
       Log.error &.emit("Error batch dequeuing jobs", queue: queue_name, error: ex.message)
       [] of String
@@ -281,15 +229,11 @@ module JoobQ
     end
 
     def queue_size(queue_name : String) : Int64
-      with_retry("queue_size") do
-        redis.llen(queue_name)
-      end
+      redis.llen(queue_name)
     end
 
     def set_size(set_name : String) : Int64
-      with_retry("set_size") do
-        redis.zcard(set_name)
-      end
+      redis.zcard(set_name)
     end
 
     # Optimized batch queue sizes to reduce connection overhead
@@ -298,20 +242,17 @@ module JoobQ
 
       sizes = {} of String => Int64
 
-      with_retry("queue_sizes_batch") do
-        results = redis.pipelined do |pipe|
-          queue_names.each do |queue_name|
-            pipe.llen(queue_name)
-          end
+      results = redis.pipelined do |pipe|
+        queue_names.each do |queue_name|
+          pipe.llen(queue_name)
         end
-
-        queue_names.each_with_index do |queue_name, index|
-          sizes[queue_name] = results[index].as(Int64)
-        end
-
-        track_pipeline_operation(queue_names.size, true)
       end
 
+      queue_names.each_with_index do |queue_name, index|
+        sizes[queue_name] = results[index].as(Int64)
+      end
+
+      track_pipeline_operation(queue_names.size, true)
       sizes
     rescue ex
       track_pipeline_operation(queue_names.size, false)
@@ -327,20 +268,17 @@ module JoobQ
 
       sizes = {} of String => Int64
 
-      with_retry("set_sizes_batch") do
-        results = redis.pipelined do |pipe|
-          set_names.each do |set_name|
-            pipe.zcard(set_name)
-          end
+      results = redis.pipelined do |pipe|
+        set_names.each do |set_name|
+          pipe.zcard(set_name)
         end
-
-        set_names.each_with_index do |set_name, index|
-          sizes[set_name] = results[index].as(Int64)
-        end
-
-        track_pipeline_operation(set_names.size, true)
       end
 
+      set_names.each_with_index do |set_name, index|
+        sizes[set_name] = results[index].as(Int64)
+      end
+
+      track_pipeline_operation(set_names.size, true)
       sizes
     rescue ex
       track_pipeline_operation(set_names.size, false)
@@ -352,32 +290,30 @@ module JoobQ
 
     # Simplified job cleanup for BRPOPLPUSH pattern - just remove from processing queue
     def cleanup_job(job_json : String, queue_name : String) : Nil
-      with_retry("cleanup_job") do
-        processing_key = processing_queue(queue_name)
+      processing_key = processing_queue(queue_name)
 
-        # Extract job ID for logging
-        job_id = nil
-        begin
-          parsed = JSON.parse(job_json)
-          job_id = parsed["jid"]?.try(&.as_s)
-        rescue
-          # Continue without job_id if parsing fails
-        end
-
-        redis.pipelined do |pipe|
-          # Remove job from processing queue (all occurrences)
-          pipe.lrem(processing_key, 0, job_json)
-
-          # Update statistics
-          pipe.hincrby("joobq:stats:processed", queue_name, 1)
-          pipe.hincrby("joobq:stats:total_processed", "global", 1)
-        end
-
-        Log.debug &.emit("Job cleanup successful",
-          queue: queue_name,
-          job_id: job_id || "unknown"
-        )
+      # Extract job ID for logging
+      job_id = nil
+      begin
+        parsed = JSON.parse(job_json)
+        job_id = parsed["jid"]?.try(&.as_s)
+      rescue
+        # Continue without job_id if parsing fails
       end
+
+      redis.pipelined do |pipe|
+        # Remove job from processing queue (all occurrences)
+        pipe.lrem(processing_key, 0, job_json)
+
+        # Update statistics
+        pipe.hincrby("joobq:stats:processed", queue_name, 1)
+        pipe.hincrby("joobq:stats:total_processed", "global", 1)
+      end
+
+      Log.debug &.emit("Job cleanup successful",
+        queue: queue_name,
+        job_id: job_id || "unknown"
+      )
     rescue ex
       Log.error &.emit("Error cleaning up job",
         queue: queue_name,
@@ -389,25 +325,23 @@ module JoobQ
     def cleanup_jobs_batch(job_jsons : Array(String), queue_name : String) : Nil
       return if job_jsons.empty?
 
-      with_retry("cleanup_jobs_batch") do
-        processing_key = processing_queue(queue_name)
+      processing_key = processing_queue(queue_name)
 
-        redis.pipelined do |pipe|
-          # Remove all jobs from processing queue
-          job_jsons.each do |job_json|
-            pipe.lrem(processing_key, 0, job_json)
-          end
-
-          # Update statistics
-          pipe.hincrby("joobq:stats:processed", queue_name, job_jsons.size)
-          pipe.hincrby("joobq:stats:total_processed", "global", job_jsons.size)
+      redis.pipelined do |pipe|
+        # Remove all jobs from processing queue
+        job_jsons.each do |job_json|
+          pipe.lrem(processing_key, 0, job_json)
         end
 
-        Log.debug &.emit("Batch job cleanup successful",
-          queue: queue_name,
-          job_count: job_jsons.size
-        )
+        # Update statistics
+        pipe.hincrby("joobq:stats:processed", queue_name, job_jsons.size)
+        pipe.hincrby("joobq:stats:total_processed", "global", job_jsons.size)
       end
+
+      Log.debug &.emit("Batch job cleanup successful",
+        queue: queue_name,
+        job_count: job_jsons.size
+      )
     rescue ex
       Log.error &.emit("Error in batch job cleanup",
         queue: queue_name,
@@ -418,34 +352,32 @@ module JoobQ
 
     # Mark job as completed with statistics
     def mark_job_completed(job_json : String, queue_name : String) : Nil
-      with_retry("mark_job_completed") do
-        processing_key = processing_queue(queue_name)
+      processing_key = processing_queue(queue_name)
 
-        # Extract job ID for logging
-        job_id = nil
-        begin
-          parsed = JSON.parse(job_json)
-          job_id = parsed["jid"]?.try(&.as_s)
-        rescue
-          # Continue without job_id if parsing fails
-        end
-
-        redis.pipelined do |pipe|
-          # Remove job from processing queue
-          pipe.lrem(processing_key, 0, job_json)
-
-          # Update completion statistics
-          pipe.hincrby("joobq:stats:completed", queue_name, 1)
-          pipe.hincrby("joobq:stats:total_completed", "global", 1)
-          pipe.hincrby("joobq:stats:processed", queue_name, 1)
-          pipe.hincrby("joobq:stats:total_processed", "global", 1)
-        end
-
-        Log.debug &.emit("Job marked as completed",
-          queue: queue_name,
-          job_id: job_id || "unknown"
-        )
+      # Extract job ID for logging
+      job_id = nil
+      begin
+        parsed = JSON.parse(job_json)
+        job_id = parsed["jid"]?.try(&.as_s)
+      rescue
+        # Continue without job_id if parsing fails
       end
+
+      redis.pipelined do |pipe|
+        # Remove job from processing queue
+        pipe.lrem(processing_key, 0, job_json)
+
+        # Update completion statistics
+        pipe.hincrby("joobq:stats:completed", queue_name, 1)
+        pipe.hincrby("joobq:stats:total_completed", "global", 1)
+        pipe.hincrby("joobq:stats:processed", queue_name, 1)
+        pipe.hincrby("joobq:stats:total_processed", "global", 1)
+      end
+
+      Log.debug &.emit("Job marked as completed",
+        queue: queue_name,
+        job_id: job_id || "unknown"
+      )
     rescue ex
       Log.error &.emit("Error marking job as completed",
         queue: queue_name,
@@ -573,14 +505,12 @@ module JoobQ
 
       # Process operations in batches to optimize connection reuse
       operations.each_slice(max_batch_size) do |batch|
-        with_retry("batch_operations") do
-          redis.pipelined do |_|
-            batch.each do |operation|
-              operation.call
-            end
+        redis.pipelined do |_|
+          batch.each do |operation|
+            operation.call
           end
-          track_pipeline_operation(batch.size, true)
         end
+        track_pipeline_operation(batch.size, true)
       end
     rescue ex
       track_pipeline_operation(operations.size, false)
@@ -593,17 +523,15 @@ module JoobQ
     def execute_read_operations_batch(operations : Array(-> Redis::RedisValue)) : Array(Redis::RedisValue)
       return [] of Redis::RedisValue if operations.empty?
 
-      with_retry("execute_read_operations_batch") do
-        results = redis.pipelined do |_|
-          operations.each do |operation|
-            # Note: This is a simplified approach - in practice, you'd need to adapt
-            # the operations to work with the pipeline interface
-            operation.call
-          end
+      results = redis.pipelined do |_|
+        operations.each do |operation|
+          # Note: This is a simplified approach - in practice, you'd need to adapt
+          # the operations to work with the pipeline interface
+          operation.call
         end
-        track_pipeline_operation(operations.size, true)
-        results
       end
+      track_pipeline_operation(operations.size, true)
+      results
     rescue ex
       track_pipeline_operation(operations.size, false)
       Log.error &.emit("Error in read operations batch", error: ex.message)
@@ -614,54 +542,51 @@ module JoobQ
     def collect_statistics_batch : Hash(String, Int64)
       stats = {} of String => Int64
 
-      with_retry("collect_statistics_batch") do
-        # Collect multiple statistics in a single pipeline
-        results = redis.pipelined do |pipe|
-          # Queue sizes for all configured queues
-          JoobQ.queues.each do |queue_name, _|
-            pipe.llen(queue_name)
-            pipe.llen(processing_queue(queue_name))
-          end
-
-          # Set sizes for delayed and dead jobs
-          pipe.zcard(DELAYED_SET)
-          pipe.zcard(DEAD_LETTER)
-
-          # Global statistics
-          pipe.hget("joobq:stats:total_processed", "global")
-          pipe.hget("joobq:stats:total_completed", "global")
-          pipe.hget("joobq:stats:total_retries", "global")
-          pipe.hget("joobq:stats:total_dead_letter", "global")
-        end
-
-        result_index = 0
-
-        # Parse queue statistics
+      # Collect multiple statistics in a single pipeline
+      results = redis.pipelined do |pipe|
+        # Queue sizes for all configured queues
         JoobQ.queues.each do |queue_name, _|
-          stats["#{queue_name}_size"] = results[result_index].as(Int64)
-          result_index += 1
-          stats["#{queue_name}_processing"] = results[result_index].as(Int64)
-          result_index += 1
+          pipe.llen(queue_name)
+          pipe.llen(processing_queue(queue_name))
         end
 
-        # Parse set statistics
-        stats["delayed_jobs"] = results[result_index].as(Int64)
-        result_index += 1
-        stats["dead_jobs"] = results[result_index].as(Int64)
-        result_index += 1
+        # Set sizes for delayed and dead jobs
+        pipe.zcard(DELAYED_SET)
+        pipe.zcard(DEAD_LETTER)
 
-        # Parse global statistics
-        stats["total_processed"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
-        result_index += 1
-        stats["total_completed"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
-        result_index += 1
-        stats["total_retries"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
-        result_index += 1
-        stats["total_dead_letter"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
-
-        track_pipeline_operation(results.size, true)
+        # Global statistics
+        pipe.hget("joobq:stats:total_processed", "global")
+        pipe.hget("joobq:stats:total_completed", "global")
+        pipe.hget("joobq:stats:total_retries", "global")
+        pipe.hget("joobq:stats:total_dead_letter", "global")
       end
 
+      result_index = 0
+
+      # Parse queue statistics
+      JoobQ.queues.each do |queue_name, _|
+        stats["#{queue_name}_size"] = results[result_index].as(Int64)
+        result_index += 1
+        stats["#{queue_name}_processing"] = results[result_index].as(Int64)
+        result_index += 1
+      end
+
+      # Parse set statistics
+      stats["delayed_jobs"] = results[result_index].as(Int64)
+      result_index += 1
+      stats["dead_jobs"] = results[result_index].as(Int64)
+      result_index += 1
+
+      # Parse global statistics
+      stats["total_processed"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
+      result_index += 1
+      stats["total_completed"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
+      result_index += 1
+      stats["total_retries"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
+      result_index += 1
+      stats["total_dead_letter"] = results[result_index]?.try(&.as(String).to_i64) || 0i64
+
+      track_pipeline_operation(results.size, true)
       stats
     rescue ex
       track_pipeline_operation(10, false) # Approximate command count
@@ -792,32 +717,29 @@ module JoobQ
 
     # High-performance move to dead letter queue using pipelined operations
     def move_to_dead_letter(job : Job, queue_name : String) : Nil
-      with_retry("move_to_dead_letter") do
-        processing_key = processing_queue(queue_name)
-        current_timestamp = Time.local.to_unix_ms
-        job_json = job.to_json
-        retry_lock_key = "joobq:retry_lock:#{job.jid}"
+      current_timestamp = Time.local.to_unix_ms
+      job_json = job.to_json
+      retry_lock_key = "joobq:retry_lock:#{job.jid}"
 
-        # Remove job by ID from processing queue (more reliable than JSON match)
-        remove_job_from_processing_by_id(job.jid.to_s, queue_name)
+      # Remove job by ID from processing queue (more reliable than JSON match)
+      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
 
-        redis.pipelined do |pipe|
-          # Add to dead letter queue
-          pipe.zadd(DEAD_LETTER, current_timestamp, job_json)
+      redis.pipelined do |pipe|
+        # Add to dead letter queue
+        pipe.zadd(DEAD_LETTER, current_timestamp, job_json)
 
-          # Clean up retry lock if it exists
-          pipe.del(retry_lock_key)
+        # Clean up retry lock if it exists
+        pipe.del(retry_lock_key)
 
-          # Update statistics
-          pipe.hincrby("joobq:stats:dead_letter", queue_name, 1)
-          pipe.hincrby("joobq:stats:total_dead_letter", "global", 1)
-        end
-
-        Log.debug &.emit("Job moved to dead letter queue",
-          job_id: job.jid.to_s,
-          queue: queue_name
-        )
+        # Update statistics
+        pipe.hincrby("joobq:stats:dead_letter", queue_name, 1)
+        pipe.hincrby("joobq:stats:total_dead_letter", "global", 1)
       end
+
+      Log.debug &.emit("Job moved to dead letter queue",
+        job_id: job.jid.to_s,
+        queue: queue_name
+      )
     rescue ex
       Log.error &.emit("Failed to move job to dead letter queue",
         job_id: job.jid.to_s,
@@ -829,36 +751,33 @@ module JoobQ
 
     # High-performance move to retry queue using pipelined operations
     def move_to_retry(job : Job, queue_name : String, delay_ms : Int64) : Bool
-      with_retry("move_to_retry") do
-        processing_key = processing_queue(queue_name)
-        schedule_time = Time.local.to_unix_ms + delay_ms
-        job_json = job.to_json
+      schedule_time = Time.local.to_unix_ms + delay_ms
+      job_json = job.to_json
 
-        # Remove job by ID from processing queue (more reliable than JSON match)
-        removed = remove_job_from_processing_by_id(job.jid.to_s, queue_name)
+      # Remove job by ID from processing queue (more reliable than JSON match)
+      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
 
-        redis.pipelined do |pipe|
-          # Add to delayed queue with future timestamp
-          pipe.zadd(DELAYED_SET, schedule_time, job_json)
+      redis.pipelined do |pipe|
+        # Add to delayed queue with future timestamp
+        pipe.zadd(DELAYED_SET, schedule_time, job_json)
 
-          # Update statistics
-          pipe.hincrby("joobq:stats:retries", queue_name, 1)
-          pipe.hincrby("joobq:stats:total_retries", "global", 1)
-        end
-
-        Log.debug &.emit("Job moved to retry queue",
-          job_id: job.jid.to_s,
-          queue: queue_name,
-          delay_ms: delay_ms,
-          schedule_time: schedule_time
-        )
-
-        # Invalidate caches since data has changed
-        invalidate_processing_cache
-        invalidate_delayed_cache
-
-        true
+        # Update statistics
+        pipe.hincrby("joobq:stats:retries", queue_name, 1)
+        pipe.hincrby("joobq:stats:total_retries", "global", 1)
       end
+
+      Log.debug &.emit("Job moved to retry queue",
+        job_id: job.jid.to_s,
+        queue: queue_name,
+        delay_ms: delay_ms,
+        schedule_time: schedule_time
+      )
+
+      # Invalidate caches since data has changed
+      invalidate_processing_cache
+      invalidate_delayed_cache
+
+      true
     rescue ex
       Log.error &.emit("Failed to move job to retry queue",
         job_id: job.jid.to_s,

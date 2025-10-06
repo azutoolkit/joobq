@@ -2,6 +2,14 @@ require "./queue"
 
 module JoobQ
   # Maps YAML configuration data to JoobQ Configure instances
+  #
+  # This class handles the conversion of YAML configuration files into JoobQ Configure
+  # instances. Since JoobQ uses strongly-typed queues with compile-time job class
+  # resolution, this mapper stores configuration data for later use rather than
+  # creating queues immediately.
+  #
+  # The actual queue creation should be handled by the application after job classes
+  # are available, using the helper methods in the Configure class.
   class ConfigMapper
     def self.map_to_configure(yaml_data : YAML::Any) : Configure
       config = Configure.new
@@ -95,14 +103,14 @@ module JoobQ
           throttle = parse_throttle(throttle_config)
         end
 
-        # Create queue with job class name
-        # Use the existing queue macro functionality through a workaround
-        # Since we can't call the macro directly, we'll create the queue manually
-        queue = create_queue_for_job_class(job_class_name, queue_name.as_s, workers, throttle)
-        config.queues[queue_name.as_s] = queue
-
-        # Note: Job class registration would need to be handled differently
-        # since we can't resolve the class at compile time
+        # Store queue configuration for later use
+        # The actual queue creation will be handled by the application
+        # when job classes are available
+        config.queue_configs[queue_name.as_s] = {
+          job_class_name: job_class_name,
+          workers:        workers,
+          throttle:       throttle,
+        }
       end
     end
 
@@ -147,45 +155,56 @@ module JoobQ
       schedulers.as_a.each do |scheduler_config|
         timezone = scheduler_config["timezone"]?.try(&.as_s) || "America/New_York"
 
-        config.scheduler(Time::Location.load(timezone)) do
-          # Map cron jobs
-          if cron_jobs = scheduler_config["cron_jobs"]?
-            cron_jobs.as_a.each do |cron_job|
-              pattern = cron_job["pattern"].as_s
-              job_class_name = cron_job["job"].as_s
-              job_args = {} of String => YAML::Any
-              if args_config = cron_job["args"]?
-                if args_config.as_h?
-                  job_args = convert_yaml_args_to_hash(args_config.as_h)
-                end
-              end
+        # Store scheduler configuration for later use
+        # The actual scheduler setup will be handled by the application
+        # when job classes are available
+        scheduler_config_data = {
+          timezone:      timezone,
+          cron_jobs:     [] of NamedTuple(pattern: String, job: String, args: Hash(String, YAML::Any)),
+          recurring_jobs: [] of NamedTuple(interval: Time::Span, job: String, args: Hash(String, YAML::Any)),
+        }
 
-              cron(pattern) do
-                # Note: Job class resolution would need to be handled at runtime
-                # For now, we'll skip the actual job enqueuing since we can't resolve classes
-                Log.debug { "Cron job '#{job_class_name}' would be enqueued with args: #{job_args}" }
+        # Map cron jobs
+        if cron_jobs = scheduler_config["cron_jobs"]?
+          cron_jobs.as_a.each do |cron_job|
+            pattern = cron_job["pattern"].as_s
+            job_class_name = cron_job["job"].as_s
+            job_args = {} of String => YAML::Any
+            if args_config = cron_job["args"]?
+              if args_config.as_h?
+                job_args = convert_yaml_args_to_hash(args_config.as_h)
               end
             end
-          end
 
-          # Map recurring jobs
-          if recurring_jobs = scheduler_config["recurring_jobs"]?
-            recurring_jobs.as_a.each do |recurring_job|
-              interval = parse_time_span(recurring_job["interval"].as_s)
-              job_class_name = recurring_job["job"].as_s
-              job_args = {} of String => YAML::Any
-              if args_config = recurring_job["args"]?
-                if args_config.as_h?
-                  job_args = convert_yaml_args_to_hash(args_config.as_h)
-                end
-              end
-
-              # Note: Job class resolution would need to be handled at runtime
-              # For now, we'll skip the actual job scheduling since we can't resolve classes
-              Log.debug { "Recurring job '#{job_class_name}' would be scheduled with interval: #{interval}, args: #{job_args}" }
-            end
+            scheduler_config_data[:cron_jobs] << {
+              pattern: pattern,
+              job:     job_class_name,
+              args:    job_args,
+            }
           end
         end
+
+        # Map recurring jobs
+        if recurring_jobs = scheduler_config["recurring_jobs"]?
+          recurring_jobs.as_a.each do |recurring_job|
+            interval = parse_time_span(recurring_job["interval"].as_s)
+            job_class_name = recurring_job["job"].as_s
+            job_args = {} of String => YAML::Any
+            if args_config = recurring_job["args"]?
+              if args_config.as_h?
+                job_args = convert_yaml_args_to_hash(args_config.as_h)
+              end
+            end
+
+            scheduler_config_data[:recurring_jobs] << {
+              interval: interval,
+              job:      job_class_name,
+              args:     job_args,
+            }
+          end
+        end
+
+        config.scheduler_configs << scheduler_config_data
       end
     end
 
@@ -273,21 +292,6 @@ module JoobQ
       }
     end
 
-    private def self.resolve_job_class(class_name : String) : Class
-      # This is a simplified job class resolution
-      # In a real implementation, you might want to maintain a registry of job classes
-      # or use a more sophisticated resolution mechanism
-
-      # For now, we'll raise an error if the job class can't be resolved
-      # This will force users to ensure their job classes are properly registered
-      raise ConfigValidationError.new("Job class '#{class_name}' not found. Ensure job classes are properly defined and available.")
-    end
-
-    private def self.create_queue_for_job_class(job_class_name : String, queue_name : String, workers : Int32, throttle : NamedTuple(limit: Int32, period: Time::Span)?)
-      # Create a generic queue that can handle any job type
-      # This is a workaround since we can't use the macro directly
-      GenericQueue.new(queue_name, workers, job_class_name, throttle)
-    end
 
     private def self.convert_yaml_args_to_hash(yaml_args : Hash(YAML::Any, YAML::Any)) : Hash(String, YAML::Any)
       # Convert YAML::Any values to proper types for job arguments
@@ -300,96 +304,4 @@ module JoobQ
     end
   end
 
-  # Generic worker manager for dynamic job class handling
-  class GenericWorkerManager
-    getter total_workers : Int32
-    getter queue : GenericQueue
-
-    def initialize(@total_workers : Int32, @queue : GenericQueue)
-    end
-
-    def restart(worker, ex : Exception)
-      # Placeholder implementation for restart
-      Log.debug { "GenericWorkerManager would restart worker after exception: #{ex.message}" }
-    end
-  end
-
-  # Generic queue implementation for dynamic job class handling
-  class GenericQueue
-    include BaseQueue
-    getter name : String
-    getter job_type : String
-    getter total_workers : Int32
-    getter throttle_limit : NamedTuple(limit: Int32, period: Time::Span)?
-
-    def initialize(@name : String, @total_workers : Int32, @job_class_name : String, @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
-      @job_type = @job_class_name
-    end
-
-    def add(job : String)
-      # Parse and enqueue the job
-      # Note: This is a placeholder implementation
-      # In a real implementation, this would enqueue the job properly
-      Log.debug { "Would enqueue job to queue #{name}: #{job}" }
-    end
-
-    def start
-      # Start workers for this queue
-      # This would need to be implemented based on the actual worker management system
-      Log.info { "Starting #{total_workers} workers for queue #{name}" }
-    end
-
-    def stop!
-      # Stop workers for this queue
-      Log.info { "Stopping workers for queue #{name}" }
-    end
-
-    def size : Int64
-      # Get queue size from store
-      # Note: This is a placeholder implementation
-      # In a real implementation, this would return the actual queue size
-      0_i64
-    end
-
-    def running_workers : Int32
-      # Return number of running workers
-      # This would need to be tracked by the worker manager
-      0
-    end
-
-    def status : String
-      # Return queue status
-      "active"
-    end
-
-    def claim_jobs_batch(worker_id : String, batch_size : Int32) : Array(String)
-      # Placeholder implementation for claim_jobs_batch
-      # In a real implementation, this would claim jobs from the queue
-      Log.debug { "GenericQueue would claim #{batch_size} jobs for worker #{worker_id}" }
-      [] of String
-    end
-
-    def store
-      # Return the global store instance
-      JoobQ.store
-    end
-
-    def cleanup_completed_job_pipelined(worker_id : String, job : String)
-      # Placeholder implementation for cleanup_completed_job_pipelined
-      Log.debug { "GenericQueue would cleanup completed job #{job} for worker #{worker_id}" }
-    end
-
-    def cleanup_job_processing_pipelined(worker_id : String, job : String)
-      # Placeholder implementation for cleanup_job_processing_pipelined
-      Log.debug { "GenericQueue would cleanup job processing #{job} for worker #{worker_id}" }
-    end
-
-    def worker_manager
-      # Create a generic worker manager for this queue
-      # Since we don't have a specific job type, we'll use a placeholder
-      @worker_manager ||= GenericWorkerManager.new(total_workers, self)
-    end
-
-    private getter job_class_name : String
-  end
 end

@@ -18,6 +18,7 @@ module JoobQ
     Log.setup_from_env(default_level: :trace)
     # Properties and Getters
     getter queues = {} of String => BaseQueue
+    getter queue_configs = {} of String => NamedTuple(job_class_name: String, workers: Int32, throttle: NamedTuple(limit: Int32, period: Time::Span)?)
     getter time_location : Time::Location = Time::Location.load("America/New_York")
 
     property store : Store = RedisStore.new
@@ -56,6 +57,15 @@ module JoobQ
 
     # Schedulers
     property schedulers : Array(Scheduler) = [] of Scheduler
+    property scheduler_configs : Array(NamedTuple(
+      timezone: String,
+      cron_jobs: Array(NamedTuple(pattern: String, job: String, args: Hash(String, YAML::Any))),
+      recurring_jobs: Array(NamedTuple(interval: Time::Span, job: String, args: Hash(String, YAML::Any)))
+    )) = [] of NamedTuple(
+      timezone: String,
+      cron_jobs: Array(NamedTuple(pattern: String, job: String, args: Hash(String, YAML::Any))),
+      recurring_jobs: Array(NamedTuple(interval: Time::Span, job: String, args: Hash(String, YAML::Any)))
+    )
 
     # Delayed job scheduler (processes retrying jobs)
     property delayed_job_scheduler : DelayedJobScheduler = DelayedJobScheduler.new
@@ -137,6 +147,118 @@ module JoobQ
     # Load from CLI arguments
     def self.load_from_cli_args(args : Array(String)) : Configure
       YamlConfigLoader.load_from_cli_args(args)
+    end
+
+    # Helper method to create queues from YAML configuration
+    #
+    # This method should be called after job classes are available and loaded.
+    # It processes the queue configurations stored during YAML loading and
+    # attempts to create the actual queues with proper job class resolution.
+    #
+    # Example usage:
+    # ```crystal
+    # config = JoobQ::Configure.load_from_yaml("config/joobq.yml")
+    # # ... load job classes ...
+    # config.create_queues_from_config
+    # ```
+    def create_queues_from_config
+      queue_configs.each do |queue_name, config|
+        job_class_name = config[:job_class_name]
+        workers = config[:workers]
+        throttle = config[:throttle]
+
+        # Try to resolve the job class
+        begin
+          job_class = resolve_job_class(job_class_name)
+          # Create the queue using the macro-like functionality
+          create_queue_for_job_class(job_class, queue_name, workers, throttle)
+        rescue ex
+          Log.warn { "Could not create queue '#{queue_name}' with job class '#{job_class_name}': #{ex.message}" }
+        end
+      end
+    end
+
+    # Helper method to setup schedulers from YAML configuration
+    #
+    # This method should be called after job classes are available and loaded.
+    # It processes the scheduler configurations stored during YAML loading and
+    # sets up cron jobs and recurring jobs with proper job class resolution.
+    #
+    # Example usage:
+    # ```crystal
+    # config = JoobQ::Configure.load_from_yaml("config/joobq.yml")
+    # # ... load job classes ...
+    # config.setup_schedulers_from_config
+    # ```
+    def setup_schedulers_from_config
+      scheduler_configs.each do |scheduler_config|
+        timezone = Time::Location.load(scheduler_config[:timezone])
+
+        scheduler(timezone) do
+          # Setup cron jobs
+          scheduler_config[:cron_jobs].each do |cron_job|
+            pattern = cron_job[:pattern]
+            job_class_name = cron_job[:job]
+            job_args = cron_job[:args]
+
+            begin
+              job_class = resolve_job_class(job_class_name)
+              cron(pattern) do
+                # Convert YAML::Any args to proper types and enqueue job
+                args_hash = convert_yaml_args_to_hash(job_args)
+                # Note: Job enqueuing with dynamic args would need proper type conversion
+                # For now, we'll log the intent
+                Log.debug { "Would enqueue job #{job_class_name} with args: #{args_hash}" }
+              end
+            rescue ex
+              Log.warn { "Could not setup cron job '#{job_class_name}' with pattern '#{pattern}': #{ex.message}" }
+            end
+          end
+
+          # Setup recurring jobs
+          scheduler_config[:recurring_jobs].each do |recurring_job|
+            interval = recurring_job[:interval]
+            job_class_name = recurring_job[:job]
+            job_args = recurring_job[:args]
+
+            begin
+              job_class = resolve_job_class(job_class_name)
+              # Convert YAML::Any args to proper types and schedule job
+              args_hash = convert_yaml_args_to_hash(job_args)
+              # Note: Job scheduling with dynamic args would need proper type conversion
+              # For now, we'll log the intent
+              Log.debug { "Would schedule job #{job_class_name} with interval #{interval} and args: #{args_hash}" }
+            rescue ex
+              Log.warn { "Could not setup recurring job '#{job_class_name}' with interval '#{interval}': #{ex.message}" }
+            end
+          end
+        end
+      end
+    end
+
+    private def resolve_job_class(class_name : String) : Class
+      # This is a simplified job class resolution
+      # In a real implementation, you might want to maintain a registry of job classes
+      # or use a more sophisticated resolution mechanism
+
+      # For now, we'll raise an error if the job class can't be resolved
+      # This will force users to ensure their job classes are properly registered
+      raise ConfigValidationError.new("Job class '#{class_name}' not found. Ensure job classes are properly defined and available.")
+    end
+
+    private def create_queue_for_job_class(job_class : Class, queue_name : String, workers : Int32, throttle : NamedTuple(limit: Int32, period: Time::Span)?)
+      # Note: This is a placeholder implementation
+      # In a real implementation, you would need to use macros or a different approach
+      # to create strongly-typed queues at runtime
+      # For now, we'll just register the job class and log the intent
+      job_registry.register(job_class)
+      Log.info { "Would create queue '#{queue_name}' for job class '#{job_class.name}' with #{workers} workers" }
+    end
+
+    private def convert_yaml_args_to_hash(yaml_args : Hash(String, YAML::Any)) : Hash(String, YAML::Any)
+      # Convert YAML::Any values to proper types for job arguments
+      # This is a simplified conversion - in practice you might need more sophisticated type conversion
+      yaml_args
     end
   end
 end

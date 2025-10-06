@@ -19,7 +19,13 @@ describe "YamlConfigLoader" do
       config.default_queue.should eq("test")
       config.retries.should eq(5)
       config.timeout.should eq(30.seconds)
-      config.queues.size.should eq(1)
+      config.queue_configs.size.should eq(1)
+
+      # Check that the queue configuration was stored correctly
+      queue_config = config.queue_configs["test_queue"]
+      queue_config[:job_class_name].should eq("TestJob")
+      queue_config[:workers].should eq(3)
+      queue_config[:throttle].should be_nil
     end
 
     it "loads configuration with throttling" do
@@ -35,12 +41,12 @@ describe "YamlConfigLoader" do
       YAML
 
       config = JoobQ::YamlConfigLoader.load_from_string(yaml)
-      config.queues.size.should eq(1)
+      config.queue_configs.size.should eq(1)
 
-      queue = config.queues["throttled_queue"]
-      queue.throttle_limit.should_not be_nil
-      queue.throttle_limit.not_nil![:limit].should eq(10)
-      queue.throttle_limit.not_nil![:period].should eq(1.minute)
+      queue_config = config.queue_configs["throttled_queue"]
+      queue_config[:throttle].should_not be_nil
+      queue_config[:throttle].not_nil![:limit].should eq(10)
+      queue_config[:throttle].not_nil![:period].should eq(1.minute)
     end
 
     it "loads middleware configuration" do
@@ -318,7 +324,7 @@ describe "ConfigMapper" do
       # Should use defaults
       config.default_queue.should eq("default")
       config.retries.should eq(3)
-      config.queues.size.should eq(0)
+      config.queue_configs.size.should eq(0)
     end
   end
 end

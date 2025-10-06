@@ -158,7 +158,7 @@ module JoobQ
       if config_path
         load_with_env_overrides(config_path, environment)
       else
-        load_with_env_overrides(environment: environment)
+        load_with_env_overrides(env: environment)
       end
     end
 
@@ -220,9 +220,9 @@ module JoobQ
       merged.pipeline_batch_size = base.pipeline_batch_size
       merged.pipeline_timeout = base.pipeline_timeout
       merged.pipeline_max_commands = base.pipeline_max_commands
-      merged.rest_api_enabled = base.rest_api_enabled
-      merged.stats_enabled = base.stats_enabled
-      merged.time_location = base.time_location
+      merged.rest_api_enabled = base.rest_api_enabled?
+      merged.stats_enabled = base.stats_enabled?
+      merged.time_location = base.time_location.name
 
       # Merge queues (override takes precedence)
       base.queues.each { |name, queue| merged.queues[name] = queue }
@@ -254,9 +254,8 @@ module JoobQ
         merged.error_monitor.max_recent_errors = base.error_monitor.max_recent_errors
       end
 
-      # Override store if specified
-      merged.store = override.store unless override.store.is_a?(RedisStore) &&
-                                           override.store.redis.host == "localhost" && override.store.redis.port == 6379
+      # Override store if specified (avoid default RedisStore comparison)
+      merged.store = override.store unless override.store.is_a?(RedisStore)
 
       # Merge schedulers
       merged.schedulers = base.schedulers + override.schedulers

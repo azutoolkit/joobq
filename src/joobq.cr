@@ -54,6 +54,43 @@ module JoobQ
     APICache.instance
   end
 
+  # Configuration loading methods
+  def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure
+    Configure.load_from_yaml(path, env)
+  end
+
+  def self.load_hybrid(yaml_path : String? = nil, &)
+    Configure.load_hybrid(yaml_path) { |config| yield config }
+  end
+
+  def self.load_from_yaml_sources(sources : Array(String)) : Configure
+    Configure.load_from_yaml_sources(sources)
+  end
+
+  def self.load_from_cli_args(args : Array(String)) : Configure
+    Configure.load_from_cli_args(args)
+  end
+
+  def self.load_auto : Configure
+    YamlConfigLoader.load_auto
+  end
+
+  def self.load_from_file(path : String) : Configure
+    YamlConfigLoader.load_from_file(path)
+  end
+
+  def self.load_from_string(yaml_content : String, source_path : String? = nil) : Configure
+    YamlConfigLoader.load_from_string(yaml_content, source_path)
+  end
+
+  def self.load_with_env_overrides(base_path : String? = nil, env : String? = nil) : Configure
+    YamlConfigLoader.load_with_env_overrides(base_path, env)
+  end
+
+  def self.find_config_file : String?
+    YamlConfigLoader.find_config_file
+  end
+
   def self.forge
     Log.info { "JoobQ starting..." }
 

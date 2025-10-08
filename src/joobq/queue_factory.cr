@@ -4,20 +4,32 @@ module JoobQ
   # This factory solves the problem of instantiating generic Queue(T) classes
   # when the job type T is only known as a string at runtime (from YAML config).
   #
-  # Usage:
+  # ## Basic Usage:
+  #
   # ```
   # # 1. Register job types at compile-time (in your application code)
   # QueueFactory.register_job_type(EmailJob)
   # QueueFactory.register_job_type(ImageProcessingJob)
   #
-  # # 2. Create queues using string names (from YAML)
+  # # 2a. Create queues individually using string names (from YAML)
   # queue = QueueFactory.create_queue(
   #   name: "email_queue",
   #   job_class_name: "EmailJob",
   #   workers: 5,
   #   throttle: {limit: 10, period: 1.minute}
   # )
+  #
+  # # 2b. Or get all instantiated queues from configuration (memoized)
+  # all_queues = QueueFactory.queues  # Reads from JoobQ.config and caches
   # ```
+  #
+  # ## Memoization Pattern:
+  #
+  # The `queues` method integrates with `Configure` and `YamlConfigLoader` to:
+  # - Read queue configurations from `JoobQ.config.queue_configs`
+  # - Instantiate all configured queues on first access
+  # - Cache the queue instances for subsequent calls
+  # - Support cache clearing via `clear_queues_cache` or `clear_registry`
   #
   # ## The Crystal Limitation
   #
@@ -37,6 +49,7 @@ module JoobQ
   # 2. The factory uses a hash mapping string names to factory procs
   # 3. Each factory proc creates the correctly-typed queue
   # 4. We return BaseQueue interface to hide the generic type
+  # 5. Queues are instantiated lazily and memoized from configuration
   class QueueFactory
     # Type alias for the factory function
     alias FactoryProc = Proc(String, Int32, NamedTuple(limit: Int32, period: Time::Span)?, BaseQueue)
@@ -48,6 +61,9 @@ module JoobQ
     # Registry of job class names to schema registry functions
     # Used to populate JobSchemaRegistry after config reset
     @@schema_registry_procs = {} of String => RegistryProc
+
+    # Memoized queues cache
+    @@queues_cache : Hash(String, BaseQueue)? = nil
 
     # Register a job type for queue creation
     #
@@ -70,6 +86,49 @@ module JoobQ
           registry.register({{job_class.id}})
         }
       )
+    end
+
+    # Get all instantiated queues from configuration
+    #
+    # This method instantiates and memoizes all queues based on the queue_configs
+    # defined in the Configure instance. Queues are created lazily on first access
+    # and cached for subsequent calls.
+    #
+    # The method:
+    # 1. Checks if queues are already cached
+    # 2. If not, retrieves queue_configs from JoobQ.config
+    # 3. Creates queue instances using the factory registry
+    # 4. Caches and returns the queue hash indexed by queue name
+    #
+    # Returns: Hash(String, BaseQueue) - queues indexed by queue name
+    #
+    # Example:
+    # ```
+    # # After registering job types and loading YAML config
+    # QueueFactory.register_job_type(EmailJob)
+    # QueueFactory.register_job_type(ImageProcessingJob)
+    # config = Configure.load_from_yaml("config/joobq.yml")
+    #
+    # # Get all instantiated queues
+    # all_queues = QueueFactory.queues
+    # email_queue = all_queues["email_queue"]?
+    # ```
+    def self.queues : Hash(String, BaseQueue)
+      return @@queues_cache.not_nil! if @@queues_cache
+
+      # Get queue configurations from Configure instance
+      config = JoobQ.config
+      queue_configs = config.queue_configs
+
+      # Create queues from configuration
+      created_queues = create_queues_from_config(queue_configs)
+
+      # Cache the queues hash
+      @@queues_cache = created_queues
+
+      Log.info { "Memoized #{@@queues_cache.not_nil!.size} queues from configuration" }
+
+      @@queues_cache.not_nil!
     end
 
     # Internal method to add a factory function to the registry
@@ -155,10 +214,17 @@ module JoobQ
       @@registry.has_key?(job_class_name)
     end
 
-    # Clear the registry (mainly for testing)
+    # Clear the registry and queues cache (mainly for testing or config reload)
     def self.clear_registry
       @@registry.clear
       @@schema_registry_procs.clear
+      @@queues_cache = nil
+    end
+
+    # Clear only the queues cache (forces re-instantiation on next access)
+    def self.clear_queues_cache
+      @@queues_cache = nil
+      Log.debug { "Cleared queues cache - queues will be re-instantiated on next access" }
     end
 
     # Populate a JobSchemaRegistry with all registered job types

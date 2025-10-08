@@ -108,7 +108,8 @@ module JoobQ
   end
 
   def self.queues
-    config.queues
+    # Load all queues from QueueFactory
+    QueueFactory.queues
   end
 
   def self.add(job)

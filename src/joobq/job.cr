@@ -144,10 +144,12 @@ module JoobQ
         #   QueueFactory.register_job_type(MyJob)
         #
         # For programmatic queue creation, registration happens automatically via Configure.queue macro
+
         {% job_name = @type.id.stringify %}
         ::JoobQ::QueueFactory.add_to_registry(
           {{job_name}},
           ->(name : String, workers : Int32, throttle : NamedTuple(limit: Int32, period: Time::Span)?) {
+            ::JoobQ.config.queue({{@type.id}}, workers, job, throttle)
             ::JoobQ::Queue({{@type.id}}).new(name, workers, throttle).as(::JoobQ::BaseQueue)
           },
           ->(registry : ::JoobQ::JobSchemaRegistry) {

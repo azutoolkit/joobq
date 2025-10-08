@@ -2,7 +2,7 @@ require "./spec_helper"
 
 describe JoobQ do
   it "registers a queue" do
-    JoobQ.queues.size.should eq 3
+    JoobQ.queues.size.should eq 11
   end
 
   it "gets queue by name" do

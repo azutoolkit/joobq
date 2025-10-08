@@ -40,9 +40,14 @@ module JoobQ
   class QueueFactory
     # Type alias for the factory function
     alias FactoryProc = Proc(String, Int32, NamedTuple(limit: Int32, period: Time::Span)?, BaseQueue)
+    alias RegistryProc = Proc(JobSchemaRegistry, Nil)
 
     # Registry of job class names to queue factory functions
     @@registry = {} of String => FactoryProc
+
+    # Registry of job class names to schema registry functions
+    # Used to populate JobSchemaRegistry after config reset
+    @@schema_registry_procs = {} of String => RegistryProc
 
     # Register a job type for queue creation
     #
@@ -60,13 +65,17 @@ module JoobQ
         {{job_name}},
         ->(name : String, workers : Int32, throttle : NamedTuple(limit: Int32, period: Time::Span)?) {
           ::JoobQ::Queue({{job_class.id}}).new(name, workers, throttle).as(::JoobQ::BaseQueue)
+        },
+        ->(registry : ::JoobQ::JobSchemaRegistry) {
+          registry.register({{job_class.id}})
         }
       )
     end
 
     # Internal method to add a factory function to the registry
-    def self.add_to_registry(job_class_name : String, factory : FactoryProc)
+    def self.add_to_registry(job_class_name : String, factory : FactoryProc, schema_proc : RegistryProc)
       @@registry[job_class_name] = factory
+      @@schema_registry_procs[job_class_name] = schema_proc
     end
 
     # Create a queue based on string job class name
@@ -149,6 +158,15 @@ module JoobQ
     # Clear the registry (mainly for testing)
     def self.clear_registry
       @@registry.clear
+      @@schema_registry_procs.clear
+    end
+
+    # Populate a JobSchemaRegistry with all registered job types
+    # This is useful after config reset to repopulate the job_registry
+    def self.populate_schema_registry(registry : JobSchemaRegistry)
+      @@schema_registry_procs.each_value do |proc|
+        proc.call(registry)
+      end
     end
   end
 

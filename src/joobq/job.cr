@@ -135,6 +135,26 @@ module JoobQ
       @[JSON::Field(ignore: true)]
       property enqueue_time = Time.monotonic
 
+      macro finalized
+        # Register the job type with QueueFactory for YAML-based queue creation
+        # This allows queues to be created from configuration files
+        #
+        # Note: In Crystal, finalized macros may not execute reliably for registration.
+        # For applications using YAML configuration, explicitly register job types:
+        #   QueueFactory.register_job_type(MyJob)
+        #
+        # For programmatic queue creation, registration happens automatically via Configure.queue macro
+        {% job_name = @type.id.stringify %}
+        ::JoobQ::QueueFactory.add_to_registry(
+          {{job_name}},
+          ->(name : String, workers : Int32, throttle : NamedTuple(limit: Int32, period: Time::Span)?) {
+            ::JoobQ::Queue({{@type.id}}).new(name, workers, throttle).as(::JoobQ::BaseQueue)
+          },
+          ->(registry : ::JoobQ::JobSchemaRegistry) {
+            registry.register({{@type.id}})
+          }
+        )
+      end
 
       {% for status in Status.constants %}
         # Methods for checking

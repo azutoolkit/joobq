@@ -159,8 +159,8 @@ module JoobQ
         # The actual scheduler setup will be handled by the application
         # when job classes are available
         scheduler_config_data = {
-          timezone:      timezone,
-          cron_jobs:     [] of NamedTuple(pattern: String, job: String, args: Hash(String, YAML::Any)),
+          timezone:       timezone,
+          cron_jobs:      [] of NamedTuple(pattern: String, job: String, args: Hash(String, YAML::Any)),
           recurring_jobs: [] of NamedTuple(interval: Time::Span, job: String, args: Hash(String, YAML::Any)),
         }
 
@@ -209,11 +209,11 @@ module JoobQ
     end
 
     private def self.map_redis_config(config : Configure, redis_config : YAML::Any)
-      host = "localhost"
-      port = 6379
-      password = nil
-      pool_size = 500
-      pool_timeout = 2.0
+      host = ENV.fetch("REDIS_HOST", "localhost")
+      port = ENV.fetch("REDIS_PORT", "6379").to_i
+      password = ENV["REDIS_PASS"]?
+      pool_size = ENV.fetch("REDIS_POOL_SIZE", "500").to_i
+      pool_timeout = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64
 
       if host_val = redis_config["host"]?
         host = host_val.as_s
@@ -235,10 +235,8 @@ module JoobQ
         pool_timeout = pool_timeout_val.as_f
       end
 
-      # Create Redis store with proper parameters
-      # Note: This is a simplified implementation for YAML config
-      # In practice, you might want to use the existing RedisStore.new method
-      config.store = RedisStore.new
+      # Create Redis store with proper parameters from YAML config and ENV overrides
+      config.store = RedisStore.new(host, port, password, pool_size, pool_timeout)
     end
 
     private def self.map_pipeline_config(config : Configure, pipeline_config : YAML::Any)
@@ -292,7 +290,6 @@ module JoobQ
       }
     end
 
-
     private def self.convert_yaml_args_to_hash(yaml_args : Hash(YAML::Any, YAML::Any)) : Hash(String, YAML::Any)
       # Convert YAML::Any values to proper types for job arguments
       # This is a simplified conversion - in practice you might need more sophisticated type conversion
@@ -303,5 +300,4 @@ module JoobQ
       result
     end
   end
-
 end

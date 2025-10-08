@@ -189,6 +189,9 @@ module JoobQ
             pipe.lpush(queue_name, job_to_retry.as(String))
           end
 
+          # Allow time for pipelined operations to complete
+          sleep 0.1.seconds
+
           # Verify move
           store.redis.zcard("joobq:dead_letter").should eq 0
           store.queue_size(queue_name).should eq 1
@@ -240,6 +243,9 @@ module JoobQ
             pipe.zrem("joobq:dead_letter", job_to_retry.as(String))
             pipe.lpush(queue_name, job_to_retry.as(String))
           end
+
+          # Allow time for pipelined operations to complete
+          sleep 0.1.seconds
 
           # Verify it went to the correct queue
           queue_name.should eq "example"

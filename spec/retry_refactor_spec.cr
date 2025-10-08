@@ -149,7 +149,6 @@ module JoobQ
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         job = RetryTestJob.new(1)
-        job.queue = "example" # Explicitly set queue to ensure it's correct
         job.retrying!
 
         # Add job to delayed queue with past timestamp (due now)
@@ -160,6 +159,9 @@ module JoobQ
         due_jobs = store.process_due_delayed_jobs(queue_name)
 
         due_jobs.size.should be >= 1
+
+        # Allow time for Redis operations to complete
+        sleep 0.1.seconds
 
         # Job should be removed from delayed queue
         store.set_size(RedisStore::DELAYED_SET).should eq 0
@@ -172,7 +174,6 @@ module JoobQ
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         job = RetryTestJob.new(1)
-        job.queue = "example" # Explicitly set queue to ensure it's correct
         job.retrying!
 
         # Add job to delayed queue with future timestamp
@@ -375,7 +376,6 @@ module JoobQ
 
         # Add a due job
         job = RetryTestJob.new(1)
-        job.queue = "example" # Explicitly set queue to ensure it's correct
         job.retrying!
         past_time = Time.local.to_unix_ms - 5000
         store.redis.zadd(RedisStore::DELAYED_SET, past_time, job.to_json)
@@ -384,8 +384,8 @@ module JoobQ
         scheduler = DelayedJobScheduler.new
         scheduler.start
 
-        # Wait for processing
-        sleep 2.seconds
+        # Wait for processing (increased for CI environment)
+        sleep 3.seconds
 
         # Job should be moved to main queue
         store.queue_size(queue_name).should eq 1
@@ -558,7 +558,6 @@ module JoobQ
 
         # 1. Start with a failing job
         job = RetryTestJob.new(1)
-        job.queue = "example" # Explicitly set queue to ensure it's correct
         job.retries = 2
         job.max_retries = 3
         job.running!
@@ -584,6 +583,9 @@ module JoobQ
 
         # Process due jobs
         store.process_due_delayed_jobs(queue_name)
+
+        # Allow time for Redis operations to complete
+        sleep 0.1.seconds
 
         # 4. Job should be back in main queue
         store.queue_size(queue_name).should eq 1

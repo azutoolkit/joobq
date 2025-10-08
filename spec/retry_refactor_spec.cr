@@ -149,6 +149,7 @@ module JoobQ
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         job = RetryTestJob.new(1)
+        job.queue = "example" # Explicitly set queue to ensure it's correct
         job.retrying!
 
         # Add job to delayed queue with past timestamp (due now)
@@ -171,6 +172,7 @@ module JoobQ
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         job = RetryTestJob.new(1)
+        job.queue = "example" # Explicitly set queue to ensure it's correct
         job.retrying!
 
         # Add job to delayed queue with future timestamp
@@ -373,6 +375,7 @@ module JoobQ
 
         # Add a due job
         job = RetryTestJob.new(1)
+        job.queue = "example" # Explicitly set queue to ensure it's correct
         job.retrying!
         past_time = Time.local.to_unix_ms - 5000
         store.redis.zadd(RedisStore::DELAYED_SET, past_time, job.to_json)
@@ -555,6 +558,7 @@ module JoobQ
 
         # 1. Start with a failing job
         job = RetryTestJob.new(1)
+        job.queue = "example" # Explicitly set queue to ensure it's correct
         job.retries = 2
         job.max_retries = 3
         job.running!

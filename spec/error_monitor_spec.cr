@@ -1,7 +1,6 @@
 require "spec"
 require "../src/joobq"
 
-
 # Use existing configuration from spec_helper
 
 module JoobQ

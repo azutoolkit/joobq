@@ -1,6 +1,5 @@
 require "./spec_helper"
 
-
 module JoobQ
   describe "Retry Refactor" do
     before_each do

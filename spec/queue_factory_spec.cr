@@ -1,6 +1,5 @@
 require "./spec_helper"
 
-
 describe JoobQ::QueueFactory do
   before_each do
     # Clear the registry before each test

@@ -1,4 +1,3 @@
-
 # Define job classes for testing BEFORE loading configuration
 class Job1
   include JoobQ::Job
@@ -37,6 +36,7 @@ class FailJob
     raise "This job always fails"
   end
 end
+
 class TestJob
   include JoobQ::Job
 
@@ -50,6 +50,7 @@ class TestJob
     @x += 1
   end
 end
+
 # Test jobs for retry refactor tests
 struct RetryTestJob
   include JoobQ::Job
@@ -96,6 +97,7 @@ struct NoRetryFailJob
     raise "Immediate failure"
   end
 end
+
 # Define test job classes
 class ErrorMonitorTestJob
   include JoobQ::Job
@@ -151,4 +153,3 @@ class ThrottledFactoryTestJob
     # Test job - does nothing
   end
 end
-

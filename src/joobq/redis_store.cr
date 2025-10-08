@@ -844,8 +844,8 @@ module JoobQ
                   job_data[key] = value
                 end
 
-                # Update status to "enqueued"
-                job_data["status"] = JSON::Any.new("enqueued")
+                # Update status to "Enqueued" (capitalized to match Crystal enum serialization)
+                job_data["status"] = JSON::Any.new("Enqueued")
                 updated_job_json = job_data.to_json
 
                 # Remove from delayed queue (using original JSON)

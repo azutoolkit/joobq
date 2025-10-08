@@ -18,6 +18,61 @@ describe JoobQ do
     # jobs[ExampleJob.name].should_not be_nil
   end
 
+  describe ".forge" do
+    it "starts all registered queues" do
+      # Ensure queues are not running initially
+      JoobQ.queues.each do |name, queue|
+        queue.running?.should be_false
+      end
+
+      # Spawn forge in a separate fiber since it blocks with sleep
+      forge_fiber = spawn do
+        JoobQ.forge
+      end
+
+      # Give queues time to start
+      sleep 0.5.seconds
+
+      # Verify all queues are now running
+      JoobQ.queues.each do |name, queue|
+        queue.running?.should be_true
+        queue.running_workers.should be > 0
+      end
+
+      # Clean up - stop all queues
+      JoobQ.queues.each do |name, queue|
+        queue.stop!
+      end
+
+      # Wait for workers to stop
+      sleep 0.2.seconds
+
+      # Verify queues have stopped
+      JoobQ.queues.each do |name, queue|
+        queue.running?.should be_false
+      end
+    end
+
+    it "starts schedulers when forge is called" do
+      # Spawn forge in a separate fiber
+      forge_fiber = spawn do
+        JoobQ.forge
+      end
+
+      # Give schedulers time to start
+      sleep 0.5.seconds
+
+      # Verify schedulers are initialized
+      JoobQ.config.schedulers.should_not be_empty
+      JoobQ.config.delayed_job_scheduler.should_not be_nil
+
+      # Clean up
+      JoobQ.queues.each do |name, queue|
+        queue.stop!
+      end
+    end
+  end
+
   describe "processing_list" do
     it "returns jobs from processing queues" do
       store = JoobQ.store.as(JoobQ::RedisStore)

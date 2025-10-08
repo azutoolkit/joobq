@@ -92,6 +92,13 @@ module JoobQ
     Log.info { "JoobQ configuration reset" }
   end
 
+  # Set a custom configuration
+  def self.set_config(config : Configure) : Nil
+    @@config = config
+    @@config_initialized = true
+    Log.info { "JoobQ configuration set" }
+  end
+
   def self.store
     config.store
   end

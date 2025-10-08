@@ -60,12 +60,10 @@ module JoobQ
     property scheduler_configs : Array(NamedTuple(
       timezone: String,
       cron_jobs: Array(NamedTuple(pattern: String, job: String, args: Hash(String, YAML::Any))),
-      recurring_jobs: Array(NamedTuple(interval: Time::Span, job: String, args: Hash(String, YAML::Any)))
-    )) = [] of NamedTuple(
+      recurring_jobs: Array(NamedTuple(interval: Time::Span, job: String, args: Hash(String, YAML::Any))))) = [] of NamedTuple(
       timezone: String,
       cron_jobs: Array(NamedTuple(pattern: String, job: String, args: Hash(String, YAML::Any))),
-      recurring_jobs: Array(NamedTuple(interval: Time::Span, job: String, args: Hash(String, YAML::Any)))
-    )
+      recurring_jobs: Array(NamedTuple(interval: Time::Span, job: String, args: Hash(String, YAML::Any))))
 
     # Delayed job scheduler (processes retrying jobs)
     property delayed_job_scheduler : DelayedJobScheduler = DelayedJobScheduler.new
@@ -149,35 +147,6 @@ module JoobQ
       YamlConfigLoader.load_from_cli_args(args)
     end
 
-    # Helper method to create queues from YAML configuration
-    #
-    # This method should be called after job classes are available and loaded.
-    # It processes the queue configurations stored during YAML loading and
-    # attempts to create the actual queues with proper job class resolution.
-    #
-    # Example usage:
-    # ```crystal
-    # config = JoobQ::Configure.load_from_yaml("config/joobq.yml")
-    # # ... load job classes ...
-    # config.create_queues_from_config
-    # ```
-    def create_queues_from_config
-      queue_configs.each do |queue_name, config|
-        job_class_name = config[:job_class_name]
-        workers = config[:workers]
-        throttle = config[:throttle]
-
-        # Try to resolve the job class
-        begin
-          job_class = resolve_job_class(job_class_name)
-          # Create the queue using the macro-like functionality
-          create_queue_for_job_class(job_class, queue_name, workers, throttle)
-        rescue ex
-          Log.warn { "Could not create queue '#{queue_name}' with job class '#{job_class_name}': #{ex.message}" }
-        end
-      end
-    end
-
     # Helper method to setup schedulers from YAML configuration
     #
     # This method should be called after job classes are available and loaded.
@@ -185,7 +154,7 @@ module JoobQ
     # sets up cron jobs and recurring jobs with proper job class resolution.
     #
     # Example usage:
-    # ```crystal
+    # ```
     # config = JoobQ::Configure.load_from_yaml("config/joobq.yml")
     # # ... load job classes ...
     # config.setup_schedulers_from_config
@@ -246,19 +215,62 @@ module JoobQ
       raise ConfigValidationError.new("Job class '#{class_name}' not found. Ensure job classes are properly defined and available.")
     end
 
-    private def create_queue_for_job_class(job_class : Class, queue_name : String, workers : Int32, throttle : NamedTuple(limit: Int32, period: Time::Span)?)
-      # Note: This is a placeholder implementation
-      # In a real implementation, you would need to use macros or a different approach
-      # to create strongly-typed queues at runtime
-      # For now, we'll just register the job class and log the intent
-      job_registry.register(job_class)
-      Log.info { "Would create queue '#{queue_name}' for job class '#{job_class.name}' with #{workers} workers" }
-    end
-
     private def convert_yaml_args_to_hash(yaml_args : Hash(String, YAML::Any)) : Hash(String, YAML::Any)
       # Convert YAML::Any values to proper types for job arguments
       # This is a simplified conversion - in practice you might need more sophisticated type conversion
       yaml_args
+    end
+
+    # Create queues from stored queue_configs using the QueueFactory
+    #
+    # This method bridges YAML configuration with actual queue instantiation.
+    # It should be called after:
+    # 1. YAML configuration is loaded
+    # 2. Job classes are defined and available
+    # 3. Job types are registered with QueueFactory
+    #
+    # Example:
+    # ```
+    # # Load YAML config
+    # config = Configure.load_from_yaml("config/joobq.yml")
+    #
+    # # Register job types (must be done after job classes are defined)
+    # QueueFactory.register_job_type(EmailJob)
+    # QueueFactory.register_job_type(ImageProcessingJob)
+    #
+    # # Create queues from YAML configuration
+    # config.create_queues_from_yaml_config
+    #
+    # # Now queues are available
+    # JoobQ.start
+    # ```
+    def create_queues_from_yaml_config
+      created_queues = QueueFactory.create_queues_from_config(queue_configs)
+      created_queues.each do |name, queue|
+        queues[name] = queue
+        # Register job type in the job registry
+        if job_config = queue_configs[name]?
+          Log.debug { "Queue '#{name}' created for job type: #{job_config[:job_class_name]}" }
+        end
+      end
+
+      Log.info { "Created #{created_queues.size} queues from YAML configuration" }
+      created_queues.size
+    end
+
+    # Helper macro to register a job type and add it to the factory
+    #
+    # This combines job registry and queue factory registration in one call.
+    #
+    # Example:
+    # ```
+    # config = JoobQ.config
+    # config.register_job(EmailJob)
+    # config.register_job(ImageProcessingJob)
+    # ```
+    macro register_job(job_class)
+      job_registry.register({{job_class.id}})
+      QueueFactory.register_job_type({{job_class.id}})
     end
   end
 end

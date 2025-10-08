@@ -209,12 +209,14 @@ module JoobQ
     end
 
     private def self.map_redis_config(config : Configure, redis_config : YAML::Any)
-      host = ENV.fetch("REDIS_HOST", "localhost")
-      port = ENV.fetch("REDIS_PORT", "6379").to_i
-      password = ENV["REDIS_PASS"]?
-      pool_size = ENV.fetch("REDIS_POOL_SIZE", "500").to_i
-      pool_timeout = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64
+      # Start with YAML values as defaults
+      host = "localhost"
+      port = 6379
+      password = nil
+      pool_size = 500
+      pool_timeout = 2.0
 
+      # Override with YAML config if present
       if host_val = redis_config["host"]?
         host = host_val.as_s
       end
@@ -233,6 +235,27 @@ module JoobQ
 
       if pool_timeout_val = redis_config["pool_timeout"]?
         pool_timeout = pool_timeout_val.as_f
+      end
+
+      # Environment variables have highest priority and override YAML config
+      if env_host = ENV["REDIS_HOST"]?
+        host = env_host
+      end
+
+      if env_port = ENV["REDIS_PORT"]?
+        port = env_port.to_i
+      end
+
+      if env_password = ENV["REDIS_PASS"]?
+        password = env_password
+      end
+
+      if env_pool_size = ENV["REDIS_POOL_SIZE"]?
+        pool_size = env_pool_size.to_i
+      end
+
+      if env_pool_timeout = ENV["REDIS_POOL_TIMEOUT"]?
+        pool_timeout = env_pool_timeout.to_f64
       end
 
       # Create Redis store with proper parameters from YAML config and ENV overrides

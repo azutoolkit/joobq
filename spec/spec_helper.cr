@@ -1,54 +1,51 @@
 require "spec"
+# Set environment for test configuration BEFORE loading joobq
+ENV["JOOBQ_ENV"] = "test"
+
 require "../src/joobq"
-require "./jobs_spec"
+require "./helpers/all_test_jobs"
 
-# Define job classes for testing
-class Job1
-  include JoobQ::Job
+# Reset configuration and load from YAML file
+JoobQ.reset_config
+config_path = File.expand_path("../config/joobq.test.yml", __DIR__)
+JoobQ.initialize_config_with(:file, config_path)
 
-  def initialize
-    @queue = "single"
-  end
+# Explicitly register all test job types with QueueFactory
+# The finalized macro should handle this automatically, but for testing
+# we ensure it's done explicitly
+JoobQ::QueueFactory.register_job_type(Job1)
+JoobQ::QueueFactory.register_job_type(ExampleJob)
+JoobQ::QueueFactory.register_job_type(FailJob)
+JoobQ::QueueFactory.register_job_type(TestJob)
+JoobQ::QueueFactory.register_job_type(RetryTestJob)
+JoobQ::QueueFactory.register_job_type(FailingRetryJob)
+JoobQ::QueueFactory.register_job_type(NoRetryFailJob)
+JoobQ::QueueFactory.register_job_type(ErrorMonitorTestJob)
+JoobQ::QueueFactory.register_job_type(FactoryTestJob)
+JoobQ::QueueFactory.register_job_type(AnotherFactoryTestJob)
+JoobQ::QueueFactory.register_job_type(ThrottledFactoryTestJob)
 
-  def perform
-    # Simple test job
-  end
-end
+# Populate job_registry from QueueFactory's registered types
+JoobQ::QueueFactory.populate_schema_registry(JoobQ.config.job_registry)
 
-class ExampleJob
-  include JoobQ::Job
+# Create queues from YAML configuration
+JoobQ.config.create_queues_from_yaml_config
 
-  getter x : Int32
-
-  def initialize(@x : Int32 = 0)
-    @queue = "example"
-  end
-
-  def perform
-    @x += 1
-  end
-end
-
-class FailJob
-  include JoobQ::Job
-
-  def initialize
-    @queue = "failed"
-  end
-
-  def perform
-    raise "This job always fails"
-  end
-end
-
+# Configure schedulers programmatically (YAML scheduler config requires job class resolution)
 JoobQ.configure do
-  queue "single", 10, Job1
-  queue "example", 10, ExampleJob
-  queue "failed", 10, FailJob
-
   scheduler do
-    cron(pattern: "*/30 * * * *") { puts "Every 30 seconds #{Time.local}" }
+    # Silent cron job for testing (no output)
+    cron(pattern: "*/30 * * * *") { }
     cron(pattern: "*/5 20-23 * * *") { }
     every(1.minute, ExampleJob, x: 1)
   end
+end
+
+Spec.before_each do
+  # Stop all running workers before resetting
+  JoobQ.config.queues.each_value do |queue|
+    queue.stop! if queue.running?
+  end
+
+  JoobQ.reset
 end

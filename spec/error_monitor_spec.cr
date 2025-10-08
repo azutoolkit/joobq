@@ -1,21 +1,6 @@
 require "spec"
 require "../src/joobq"
 
-# Define test job classes
-class ErrorMonitorTestJob
-  include JoobQ::Job
-
-  getter x : Int32
-  @queue = "example"
-  @retries = 3
-
-  def initialize(@x : Int32)
-  end
-
-  def perform
-    @x + 1
-  end
-end
 
 # Use existing configuration from spec_helper
 

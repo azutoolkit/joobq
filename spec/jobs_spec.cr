@@ -1,19 +1,5 @@
 require "./spec_helper"
 
-class TestJob
-  include JoobQ::Job
-
-  getter x
-  @queue = "example"
-
-  def initialize(@x : Int32 = 0)
-  end
-
-  def perform
-    @x += 1
-  end
-end
-
 module JoobQ
   describe Job do
     before_each do

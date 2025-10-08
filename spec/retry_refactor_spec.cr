@@ -1,51 +1,5 @@
 require "./spec_helper"
 
-# Test jobs for retry refactor tests
-struct RetryTestJob
-  include JoobQ::Job
-
-  property x : Int32
-
-  def initialize(@x : Int32)
-    @queue = "example"
-    @retries = 3
-    @max_retries = 3
-  end
-
-  def perform
-    @x + 1
-  end
-end
-
-struct FailingRetryJob
-  include JoobQ::Job
-
-  property fail_count : Int32
-
-  def initialize(@fail_count : Int32 = 0)
-    @queue = "example"
-    @retries = 3
-    @max_retries = 3
-  end
-
-  def perform
-    raise "Intentional failure"
-  end
-end
-
-struct NoRetryFailJob
-  include JoobQ::Job
-
-  def initialize
-    @queue = "example"
-    @retries = 0
-    @max_retries = 0
-  end
-
-  def perform
-    raise "Immediate failure"
-  end
-end
 
 module JoobQ
   describe "Retry Refactor" do

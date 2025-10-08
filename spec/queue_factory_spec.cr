@@ -1,44 +1,5 @@
 require "./spec_helper"
 
-# Test job classes for queue factory specs
-class FactoryTestJob
-  include JoobQ::Job
-
-  property data : String
-
-  def initialize(@data : String = "test")
-  end
-
-  def perform
-    # Test job - does nothing
-  end
-end
-
-class AnotherFactoryTestJob
-  include JoobQ::Job
-
-  property value : Int32
-
-  def initialize(@value : Int32 = 42)
-  end
-
-  def perform
-    # Test job - does nothing
-  end
-end
-
-class ThrottledFactoryTestJob
-  include JoobQ::Job
-
-  property name : String
-
-  def initialize(@name : String = "throttled")
-  end
-
-  def perform
-    # Test job - does nothing
-  end
-end
 
 describe JoobQ::QueueFactory do
   before_each do

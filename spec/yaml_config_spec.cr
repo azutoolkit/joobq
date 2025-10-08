@@ -148,13 +148,13 @@ describe "YamlConfigLoader" do
   end
 
   describe ".load_auto" do
-    it "falls back to default configuration when no file found" do
-      # This test assumes no config files exist in the current directory
+    it "loads configuration from environment-specific file" do
+      # With ENV["JOOBQ_ENV"] = "test", it should load config/joobq.test.yml
       config = JoobQ::YamlConfigLoader.load_auto
       config.should be_a(JoobQ::Configure)
       # The default queue name comes from the loaded config file
-      config.default_queue.should eq("development")
-      config.retries.should eq(1)
+      config.default_queue.should eq("example")
+      config.retries.should eq(3)
     end
   end
 

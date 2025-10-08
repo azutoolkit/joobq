@@ -1,17 +1,58 @@
 joobq:
   settings:
-    default_queue: "test"
-    retries: 1
+    default_queue: "example"
+    retries: 3
     timeout: "2 seconds"
     timezone: "UTC"
-    worker_batch_size: 1
+    worker_batch_size: 10
 
   queues:
-    test_queue:
+    single:
+      job_class: "Job1"
+      workers: 10
+
+    example:
+      job_class: "ExampleJob"
+      workers: 10
+
+    failed:
+      job_class: "FailJob"
+      workers: 10
+
+    test:
       job_class: "TestJob"
-      workers: 1
+      workers: 10
+
+    retry_test:
+      job_class: "RetryTestJob"
+      workers: 10
+
+    failing_retry:
+      job_class: "FailingRetryJob"
+      workers: 10
+
+    no_retry:
+      job_class: "NoRetryFailJob"
+      workers: 10
+
+    error_monitor_test:
+      job_class: "ErrorMonitorTestJob"
+      workers: 10
+
+    factory_test:
+      job_class: "FactoryTestJob"
+      workers: 10
+
+    another_factory_test:
+      job_class: "AnotherFactoryTestJob"
+      workers: 10
+
+    throttled_factory_test:
+      job_class: "ThrottledFactoryTestJob"
+      workers: 10
 
   middlewares:
+    - type: "throttle"
     - type: "retry"
     - type: "timeout"
 
@@ -24,10 +65,10 @@ joobq:
 
   features:
     rest_api: false
-    stats: false
+    stats: true
 
   redis:
     host: "localhost"
     port: 6379
-    pool_size: 5
-    pool_timeout: 1.0
+    pool_size: 500
+    pool_timeout: 2.0

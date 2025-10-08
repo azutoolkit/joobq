@@ -2,9 +2,9 @@ name: Crystal CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 jobs:
   build:
@@ -12,25 +12,25 @@ jobs:
 
     container:
       image: crystallang/crystal
-      
+
     services:
       redis:
-        image: redislabs/redistimeseries
+        image: redislabs/redis
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-        
+
     steps:
-    - uses: actions/checkout@v2
-      
-    - name: Install dependencies
-      run: shards install
-  
-    - name: Run tests
-      run: crystal spec
-      env:
-        REDIS_URL: redis:6379
-        REDIS_HOST: redis
-        REDIS_PORT: 6379 
+      - uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Run tests
+        run: crystal spec
+        env:
+          REDIS_URL: redis:6379
+          REDIS_HOST: redis
+          REDIS_PORT: 6379

@@ -25,29 +25,56 @@ module JoobQ
     end
 
     describe "#start" do
-      pending "processes enqueued jobs" do
+      it "processes enqueued jobs" do
         total_jobs = 10
 
         total_jobs.times do |i|
           queue.add ExampleJob.new(i).to_json
         end
 
-        total_jobs.times do
-          job = FailJob.new
-          job.queue = "example"
-          job.retries = 3
-          queue.add job.to_json
-        end
-
-        queue.size.should eq(total_jobs * 2)
+        queue.size.should eq(total_jobs)
         queue.running?.should be_false
 
         queue.start
-        sleep 10
+
+        # Wait for processing to complete or timeout
+        start_time = Time.monotonic
+        while queue.size > 0 && (Time.monotonic - start_time) < 15.seconds
+          sleep 0.1.seconds
+        end
 
         queue.running?.should be_true
-        queue.size.should be < total_jobs
+        queue.size.should eq(0)  # All jobs should be processed
         queue.stop!
+      end
+
+      it "handles failing jobs with retries" do
+        total_jobs = 5
+        failed_queue = JoobQ["failed"]
+
+        # Add failing jobs that will retry
+        total_jobs.times do
+          job = FailJob.new
+          job.retries = 3
+          failed_queue.add job.to_json
+        end
+
+        # Verify jobs were added
+        failed_queue.size.should eq(total_jobs)
+        failed_queue.running?.should be_false
+
+        failed_queue.start
+
+        # Wait for processing attempts (jobs will fail and retry)
+        start_time = Time.monotonic
+        while failed_queue.size > 0 && (Time.monotonic - start_time) < 20.seconds
+          sleep 0.1.seconds
+        end
+
+        failed_queue.running?.should be_true
+        # Jobs should eventually be moved to dead letter queue after retries
+        failed_queue.size.should eq(0)
+        failed_queue.stop!
       end
     end
 

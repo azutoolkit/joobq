@@ -321,6 +321,7 @@ module JoobQ
 
     describe ".batch_enqueue" do
       it "enqueues multiple jobs" do
+        JoobQ.queues["example"].stop!
         store = JoobQ.store.as(RedisStore)
         store.clear_queue("example")
 

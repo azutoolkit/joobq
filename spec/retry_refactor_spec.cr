@@ -381,6 +381,7 @@ module JoobQ
         job.retrying!
         past_time = Time.local.to_unix_ms - 5000
         store.redis.zadd(RedisStore::DELAYED_SET, past_time, job.to_json)
+        JoobQ.queues["example"].stop!
 
         # Verify initial state
         store.set_size(RedisStore::DELAYED_SET).should eq 1

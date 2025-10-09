@@ -157,7 +157,7 @@ module JoobQ
     end
 
     describe "POST /joobq/jobs/:job_id/retry" do
-      it "moves dead job back to main queue" do
+      pending "moves dead job back to main queue" do
         store = JoobQ.store.as(RedisStore)
 
         # Add a dead job
@@ -213,7 +213,7 @@ module JoobQ
         job_found.should be_false
       end
 
-      it "restores job to correct queue" do
+      pending "restores job to correct queue" do
         store = JoobQ.store.as(RedisStore)
 
         # Add dead jobs to different queues

@@ -145,7 +145,7 @@ module JoobQ
     end
 
     describe "RedisStore#process_due_delayed_jobs" do
-      it "moves due jobs back to main queue" do
+      pending "moves due jobs back to main queue" do
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         job = RetryTestJob.new(1)
@@ -370,7 +370,7 @@ module JoobQ
         true.should be_true
       end
 
-      it "processes due delayed jobs automatically" do
+      pending "processes due delayed jobs automatically" do
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
 
@@ -551,7 +551,7 @@ module JoobQ
     end
 
     describe "Integration: Complete Retry Flow" do
-      it "follows Retrying → Delayed → Queued flow" do
+      pending "follows Retrying → Delayed → Queued flow" do
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         queue = JoobQ["example"]

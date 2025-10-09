@@ -52,7 +52,7 @@ class TestJob
 end
 
 # Test jobs for retry refactor tests
-struct RetryTestJob
+class RetryTestJob
   include JoobQ::Job
 
   property x : Int32
@@ -68,7 +68,7 @@ struct RetryTestJob
   end
 end
 
-struct FailingRetryJob
+class FailingRetryJob
   include JoobQ::Job
 
   property fail_count : Int32
@@ -84,7 +84,7 @@ struct FailingRetryJob
   end
 end
 
-struct NoRetryFailJob
+class NoRetryFailJob
   include JoobQ::Job
 
   def initialize

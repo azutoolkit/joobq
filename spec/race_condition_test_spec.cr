@@ -7,7 +7,7 @@ module JoobQ
     end
 
     describe "concurrent job enqueue" do
-      pending "handles multiple concurrent enqueues" do
+      it "handles multiple concurrent enqueues" do
         queue = JoobQ["example"]
         store = JoobQ.store.as(RedisStore)
 
@@ -15,7 +15,7 @@ module JoobQ
         store.clear_queue("example")
 
         # Enqueue 100 jobs concurrently
-        channel = Channel(UUID).new
+        channel = Channel(String).new
         100.times do |i|
           spawn do
             job = ExampleJob.new(i)
@@ -25,7 +25,7 @@ module JoobQ
         end
 
         # Collect all JIDs
-        jids = [] of UUID
+        jids = [] of String
         100.times { jids << channel.receive }
 
         # All JIDs should be unique
@@ -37,7 +37,7 @@ module JoobQ
     end
 
     describe "concurrent job processing" do
-      pending "prevents duplicate job processing" do
+      it "prevents duplicate job processing" do
         queue = Queue(ExampleJob).new("example", 5)
         store = JoobQ.store.as(RedisStore)
 
@@ -60,7 +60,7 @@ module JoobQ
     end
 
     describe "concurrent retry scheduling" do
-      pending "prevents duplicate retry scheduling" do
+      it "prevents duplicate retry scheduling" do
         queue = JoobQ["example"]
         store = JoobQ.store.as(RedisStore)
 
@@ -95,7 +95,7 @@ module JoobQ
     end
 
     describe "concurrent dead letter moves" do
-      pending "handles concurrent moves to dead letter" do
+      it "handles concurrent moves to dead letter" do
         queue = JoobQ["example"]
         store = JoobQ.store.as(RedisStore)
 
@@ -126,7 +126,7 @@ module JoobQ
     end
 
     describe "queue state transitions" do
-      pending "maintains atomicity during state changes" do
+      it "maintains atomicity during state changes" do
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
 
@@ -158,7 +158,7 @@ module JoobQ
     end
 
     describe "retry lock contention" do
-      pending "handles retry lock contention correctly" do
+      it "handles retry lock contention correctly" do
         queue = JoobQ["example"]
         store = JoobQ.store.as(RedisStore)
 
@@ -188,7 +188,7 @@ module JoobQ
     end
 
     describe "worker restart race conditions" do
-      pending "handles worker crashes during job processing" do
+      it "handles worker crashes during job processing" do
         queue = Queue(ExampleJob).new("example", 3)
         store = JoobQ.store.as(RedisStore)
 
@@ -211,7 +211,7 @@ module JoobQ
     end
 
     describe "delayed job race conditions" do
-      pending "handles concurrent delayed job processing" do
+      it "handles concurrent delayed job processing" do
         store = JoobQ.store.as(RedisStore)
 
         # Add multiple due jobs

@@ -138,9 +138,9 @@ sleep 2.seconds
 puts
 puts "Testing error filtering:"
 puts "  Total recent errors: #{JoobQ.error_monitor.get_recent_errors.size}"
-puts "  Validation errors: #{JoobQ.error_monitor.get_errors_by_type('validation_error').size}"
-puts "  Connection errors: #{JoobQ.error_monitor.get_errors_by_type('connection_error').size}"
-puts "  Unknown errors: #{JoobQ.error_monitor.get_errors_by_type('unknown_error').size}"
+puts "  Validation errors: #{JoobQ.error_monitor.get_errors_by_type("validation_error").size}"
+puts "  Connection errors: #{JoobQ.error_monitor.get_errors_by_type("connection_error").size}"
+puts "  Unknown errors: #{JoobQ.error_monitor.get_errors_by_type("unknown_error").size}"
 
 # Test error context details
 puts

@@ -225,7 +225,7 @@ module JoobQ
     end
 
     describe "Middleware Chain" do
-      pending "executes middleware in correct order" do
+      it "executes middleware in correct order" do
         queue = Queue(ExampleJob).new("example", 1)
 
         execution_order = [] of String

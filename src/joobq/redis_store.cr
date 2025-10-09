@@ -591,22 +591,22 @@ module JoobQ
 
     # Process due jobs from delayed queue and move them back to main queue
     # Jobs are moved back with "enqueued" status so workers can pick them up
-    # Returns the array of job JSON strings that were moved
+    # Returns the array of job JSON strings that were processed (including those from other queues)
     def process_due_delayed_jobs(queue_name : String) : Array(String)
       current_time = Time.local.to_unix_ms
-      due_jobs = [] of String
+      processed_jobs = [] of String
       moved_count = 0
 
       # Get jobs that are due for processing (score <= current_time)
-      jobs_result = redis.zrangebyscore(DELAYED_SET, "-inf", current_time.to_s, limit: [0, 100])
+      # Use a small limit to reduce race condition window
+      jobs_result = redis.zrangebyscore(DELAYED_SET, "-inf", current_time.to_s, limit: [0, 50])
 
-      jobs_result.each do |job_data|
-        due_jobs << job_data.as(String)
-      end
-
-      if !due_jobs.empty?
+      if !jobs_result.empty?
         redis.pipelined do |pipe|
-          due_jobs.each do |job_json|
+          jobs_result.each do |job_data|
+            job_json = job_data.as(String)
+            processed_jobs << job_json
+
             # Parse job to check if it belongs to this queue
             begin
               parsed_job = JSON.parse(job_json)
@@ -633,11 +633,16 @@ module JoobQ
 
                 moved_count += 1
               end
+              # Note: We don't remove jobs from other queues here to avoid race conditions
+              # with the scheduler. Jobs from other queues will be processed by their respective
+              # queue processors.
             rescue ex
               Log.warn &.emit("Failed to parse delayed job",
                 queue: queue_name,
                 error: ex.message
               )
+              # Remove malformed job from delayed set
+              pipe.zrem(DELAYED_SET, job_json)
             end
           end
         end
@@ -648,7 +653,7 @@ module JoobQ
         )
       end
 
-      due_jobs
+      processed_jobs
     rescue ex
       Log.error &.emit("Failed to process due delayed jobs",
         queue: queue_name,

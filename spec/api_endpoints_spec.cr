@@ -157,7 +157,7 @@ module JoobQ
     end
 
     describe "POST /joobq/jobs/:job_id/retry" do
-      pending "moves dead job back to main queue" do
+      it "moves dead job back to main queue" do
         store = JoobQ.store.as(RedisStore)
 
         # Add a dead job
@@ -170,6 +170,7 @@ module JoobQ
 
         # Verify it's in dead letter
         store.redis.zcard("joobq:dead_letter").should eq 1
+        store.queue_size("example").should eq 0
 
         # Simulate retry (find and move the job)
         dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
@@ -183,16 +184,13 @@ module JoobQ
         if job_to_retry
           queue_name = JSON.parse(job_to_retry.as(String))["queue"].as_s
 
-          # Move from dead letter to main queue
+          # Move from dead letter to main queue using atomic operations
           store.redis.pipelined do |pipe|
             pipe.zrem("joobq:dead_letter", job_to_retry.as(String))
             pipe.lpush(queue_name, job_to_retry.as(String))
           end
 
-          # Allow time for pipelined operations to complete
-          sleep 0.1.seconds
-
-          # Verify move
+          # Verify move immediately (pipelined operations are atomic)
           store.redis.zcard("joobq:dead_letter").should eq 0
           store.queue_size(queue_name).should eq 1
         end
@@ -213,7 +211,7 @@ module JoobQ
         job_found.should be_false
       end
 
-      pending "restores job to correct queue" do
+      it "restores job to correct queue" do
         store = JoobQ.store.as(RedisStore)
 
         # Add dead jobs to different queues
@@ -228,6 +226,11 @@ module JoobQ
         store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job1.to_json)
         store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job2.to_json)
 
+        # Verify initial state
+        store.redis.zcard("joobq:dead_letter").should eq 2
+        store.queue_size("example").should eq 0
+        store.queue_size("single").should eq 0
+
         # Retry job1
         job_jid = job1.jid.to_s
         dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
@@ -235,6 +238,8 @@ module JoobQ
           parsed = JSON.parse(job_data.as(String))
           parsed["jid"]?.try(&.as_s) == job_jid
         end
+
+        job_to_retry.should_not be_nil
 
         if job_to_retry
           queue_name = JSON.parse(job_to_retry.as(String))["queue"].as_s
@@ -244,13 +249,11 @@ module JoobQ
             pipe.lpush(queue_name, job_to_retry.as(String))
           end
 
-          # Allow time for pipelined operations to complete
-          sleep 0.1.seconds
-
-          # Verify it went to the correct queue
+          # Verify it went to the correct queue immediately (pipelined operations are atomic)
           queue_name.should eq "example"
           store.queue_size("example").should eq 1
           store.queue_size("single").should eq 0
+          store.redis.zcard("joobq:dead_letter").should eq 1
         end
       end
     end

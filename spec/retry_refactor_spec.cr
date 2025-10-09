@@ -145,7 +145,7 @@ module JoobQ
     end
 
     describe "RedisStore#process_due_delayed_jobs" do
-      pending "moves due jobs back to main queue" do
+      it "moves due jobs back to main queue" do
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         job = RetryTestJob.new(1)
@@ -155,13 +155,15 @@ module JoobQ
         past_time = Time.local.to_unix_ms - 5000
         store.redis.zadd(RedisStore::DELAYED_SET, past_time, job.to_json)
 
+        # Verify job is in delayed queue initially
+        store.set_size(RedisStore::DELAYED_SET).should eq 1
+        store.queue_size(queue_name).should eq 0
+
         # Process due jobs
         due_jobs = store.process_due_delayed_jobs(queue_name)
 
-        due_jobs.size.should be >= 1
-
-        # Allow time for Redis operations to complete
-        sleep 0.1.seconds
+        # Should have processed exactly 1 job
+        due_jobs.size.should eq 1
 
         # Job should be removed from delayed queue
         store.set_size(RedisStore::DELAYED_SET).should eq 0
@@ -370,7 +372,7 @@ module JoobQ
         true.should be_true
       end
 
-      pending "processes due delayed jobs automatically" do
+      it "processes due delayed jobs automatically" do
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
 
@@ -380,12 +382,24 @@ module JoobQ
         past_time = Time.local.to_unix_ms - 5000
         store.redis.zadd(RedisStore::DELAYED_SET, past_time, job.to_json)
 
+        # Verify initial state
+        store.set_size(RedisStore::DELAYED_SET).should eq 1
+        store.queue_size(queue_name).should eq 0
+
         # Start scheduler
         scheduler = DelayedJobScheduler.new
         scheduler.start
 
-        # Wait for processing (increased for CI environment)
-        sleep 3.seconds
+        # Wait for processing with retry logic for CI environment
+        max_attempts = 10
+        attempt = 0
+        while attempt < max_attempts
+          sleep 0.5.seconds
+          if store.queue_size(queue_name) == 1 && store.set_size(RedisStore::DELAYED_SET) == 0
+            break
+          end
+          attempt += 1
+        end
 
         # Job should be moved to main queue
         store.queue_size(queue_name).should eq 1
@@ -551,7 +565,7 @@ module JoobQ
     end
 
     describe "Integration: Complete Retry Flow" do
-      pending "follows Retrying → Delayed → Queued flow" do
+      it "follows Retrying → Delayed → Queued flow" do
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
         queue = JoobQ["example"]
@@ -566,6 +580,11 @@ module JoobQ
         processing_key = "joobq:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
+        # Verify initial state
+        store.redis.llen(processing_key).should eq 1
+        store.set_size(RedisStore::DELAYED_SET).should eq 0
+        store.queue_size(queue_name).should eq 0
+
         # 2. Job fails, goes to Retrying status and Delayed queue
         retry_attempt = job.max_retries - job.retries
         success, updated_job = JoobQ::ExponentialBackoff.retry_idempotent(job, queue, retry_attempt)
@@ -576,16 +595,20 @@ module JoobQ
         store.redis.llen(processing_key).should eq 0
 
         # 3. Process due jobs (simulate time passing)
-        # Manually move the job to make it due
+        # Manually move the job to make it due by removing and re-adding with past timestamp
         delayed_jobs = store.redis.zrange(RedisStore::DELAYED_SET, 0, -1)
         job_json = delayed_jobs[0].as(String)
+
+        # Remove the job and re-add with past timestamp
+        store.redis.zrem(RedisStore::DELAYED_SET, job_json)
         store.redis.zadd(RedisStore::DELAYED_SET, Time.local.to_unix_ms - 1000, job_json)
 
-        # Process due jobs
-        store.process_due_delayed_jobs(queue_name)
+        # Verify job is now due
+        store.set_size(RedisStore::DELAYED_SET).should eq 1
 
-        # Allow time for Redis operations to complete
-        sleep 0.1.seconds
+        # Process due jobs
+        due_jobs = store.process_due_delayed_jobs(queue_name)
+        due_jobs.size.should eq 1
 
         # 4. Job should be back in main queue
         store.queue_size(queue_name).should eq 1

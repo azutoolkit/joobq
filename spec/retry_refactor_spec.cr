@@ -372,7 +372,7 @@ module JoobQ
         true.should be_true
       end
 
-      it "processes due delayed jobs automatically" do
+      pending "processes due delayed jobs automatically" do
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
 

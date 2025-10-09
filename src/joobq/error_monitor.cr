@@ -65,11 +65,9 @@ module JoobQ
       # Store in Redis (outside mutex to avoid blocking)
       store_error_in_redis(error_context)
 
-
       # Check for alerts
       check_alerts(error_context)
     end
-
 
     def get_error_stats : Hash(String, Int32)
       # Ensure Redis data is loaded

@@ -133,7 +133,6 @@ module JoobQ
     config.error_monitor
   end
 
-
   # Configuration loading methods
   def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure
     Configure.load_from_yaml(path, env)

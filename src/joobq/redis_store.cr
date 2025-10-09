@@ -84,7 +84,6 @@ module JoobQ
     def enqueue(job : Job) : String
       redis.rpush job.queue, job.to_json
 
-
       Log.debug &.emit("Job enqueued", job_id: job.jid.to_s, queue: job.queue)
       job.jid.to_s
     end
@@ -554,7 +553,6 @@ module JoobQ
         delay_ms: delay_ms,
         schedule_time: schedule_time
       )
-
 
       true
     rescue ex

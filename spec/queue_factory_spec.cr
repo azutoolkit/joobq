@@ -6,6 +6,25 @@ describe JoobQ::QueueFactory do
     JoobQ::QueueFactory.clear_registry
   end
 
+  after_each do
+    # Re-register all test job types that were registered in spec_helper
+    # This ensures other tests can still access the queues
+    JoobQ::QueueFactory.register_job_type(Job1)
+    JoobQ::QueueFactory.register_job_type(ExampleJob)
+    JoobQ::QueueFactory.register_job_type(FailJob)
+    JoobQ::QueueFactory.register_job_type(TestJob)
+    JoobQ::QueueFactory.register_job_type(RetryTestJob)
+    JoobQ::QueueFactory.register_job_type(FailingRetryJob)
+    JoobQ::QueueFactory.register_job_type(NoRetryFailJob)
+    JoobQ::QueueFactory.register_job_type(ErrorMonitorTestJob)
+    JoobQ::QueueFactory.register_job_type(FactoryTestJob)
+    JoobQ::QueueFactory.register_job_type(AnotherFactoryTestJob)
+    JoobQ::QueueFactory.register_job_type(ThrottledFactoryTestJob)
+
+    # Populate job_registry from QueueFactory's registered types
+    JoobQ::QueueFactory.populate_schema_registry(JoobQ.config.job_registry)
+  end
+
   describe ".register_job_type" do
     it "registers a job type in the factory" do
       JoobQ::QueueFactory.register_job_type(FactoryTestJob)
@@ -228,6 +247,25 @@ end
 describe "YAML Configuration Integration" do
   before_each do
     JoobQ::QueueFactory.clear_registry
+  end
+
+  after_each do
+    # Re-register all test job types that were registered in spec_helper
+    # This ensures other tests can still access the queues
+    JoobQ::QueueFactory.register_job_type(Job1)
+    JoobQ::QueueFactory.register_job_type(ExampleJob)
+    JoobQ::QueueFactory.register_job_type(FailJob)
+    JoobQ::QueueFactory.register_job_type(TestJob)
+    JoobQ::QueueFactory.register_job_type(RetryTestJob)
+    JoobQ::QueueFactory.register_job_type(FailingRetryJob)
+    JoobQ::QueueFactory.register_job_type(NoRetryFailJob)
+    JoobQ::QueueFactory.register_job_type(ErrorMonitorTestJob)
+    JoobQ::QueueFactory.register_job_type(FactoryTestJob)
+    JoobQ::QueueFactory.register_job_type(AnotherFactoryTestJob)
+    JoobQ::QueueFactory.register_job_type(ThrottledFactoryTestJob)
+
+    # Populate job_registry from QueueFactory's registered types
+    JoobQ::QueueFactory.populate_schema_registry(JoobQ.config.job_registry)
   end
 
   it "loads queues from YAML configuration" do

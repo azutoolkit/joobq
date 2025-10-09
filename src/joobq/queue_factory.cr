@@ -120,6 +120,8 @@ module JoobQ
       config = JoobQ.config
       queue_configs = config.queue_configs
 
+      Log.debug { "QueueFactory.queues: Found #{queue_configs.size} queue configs" }
+
       # Create queues from configuration
       created_queues = create_queues_from_config(queue_configs)
 

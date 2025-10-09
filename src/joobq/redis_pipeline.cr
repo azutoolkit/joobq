@@ -180,6 +180,5 @@ module JoobQ
         error: ex.message
       )
     end
-
   end
 end

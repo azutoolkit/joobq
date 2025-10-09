@@ -99,7 +99,7 @@ module JoobQ
         manager.stop_workers
       end
 
-      pending "does not restart when stopped" do
+      it "does not restart when stopped" do
         queue = Queue(ExampleJob).new("example", 2)
         manager = WorkerManager(ExampleJob).new(2, queue)
 
@@ -115,7 +115,7 @@ module JoobQ
     end
 
     describe "#add_worker" do
-      pending "adds new worker to pool" do
+      it "adds new worker to pool" do
         queue = Queue(ExampleJob).new("example", 2)
         manager = WorkerManager(ExampleJob).new(2, queue)
 
@@ -207,7 +207,7 @@ module JoobQ
     end
 
     describe "thread safety" do
-      pending "handles concurrent worker operations" do
+      it "handles concurrent worker operations" do
         queue = Queue(ExampleJob).new("example", 5)
         manager = WorkerManager(ExampleJob).new(5, queue)
 

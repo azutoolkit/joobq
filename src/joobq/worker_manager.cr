@@ -71,8 +71,6 @@ module JoobQ
 
     def restart(worker, ex : Exception)
       @workers_mutex.synchronize do
-        return if stopped.get
-
         # Remove the failed worker
         @workers.delete(worker)
 

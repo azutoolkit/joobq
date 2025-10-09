@@ -76,7 +76,7 @@ module JoobQ
     end
 
     describe "#restart" do
-      pending "restarts crashed worker" do
+      it "restarts crashed worker" do
         queue = Queue(ExampleJob).new("example", 3)
         manager = WorkerManager(ExampleJob).new(3, queue)
 

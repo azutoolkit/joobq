@@ -114,13 +114,13 @@ module JoobQ
     # email_queue = all_queues["email_queue"]?
     # ```
     def self.queues : Hash(String, BaseQueue)
-      return @@queues_cache.not_nil! if @@queues_cache
+      if cached = @@queues_cache
+        return cached
+      end
 
       # Get queue configurations from Configure instance
       config = JoobQ.config
       queue_configs = config.queue_configs
-
-      Log.debug { "QueueFactory.queues: Found #{queue_configs.size} queue configs" }
 
       # Create queues from configuration
       created_queues = create_queues_from_config(queue_configs)
@@ -128,9 +128,9 @@ module JoobQ
       # Cache the queues hash
       @@queues_cache = created_queues
 
-      Log.info { "Memoized #{@@queues_cache.not_nil!.size} queues from configuration" }
+      Log.info { "Memoized #{created_queues.size} queues from configuration" }
 
-      @@queues_cache.not_nil!
+      created_queues
     end
 
     # Internal method to add a factory function to the registry

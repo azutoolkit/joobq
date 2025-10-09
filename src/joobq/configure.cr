@@ -107,10 +107,12 @@ module JoobQ
       alert_thresholds : Hash(String, Int32)? = nil,
       time_window : Time::Span? = nil,
       max_recent_errors : Int32? = nil,
+      notify_alert : Proc(Hash(String, String), Nil)? = nil,
     )
       error_monitor.alert_thresholds = alert_thresholds if alert_thresholds
       error_monitor.time_window = time_window if time_window
       error_monitor.max_recent_errors = max_recent_errors if max_recent_errors
+      error_monitor.notify_alert = notify_alert if notify_alert
     end
 
     # YAML configuration loading methods

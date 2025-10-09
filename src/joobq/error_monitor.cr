@@ -12,6 +12,7 @@ module JoobQ
     } of String => Int32
     getter time_window : Time::Span = 5.minutes
     getter max_recent_errors : Int32 = 100
+    getter notify_alert : Proc(Hash(String, String), Nil) = ->(_alert_context : Hash(String, String)) { }
 
     # Redis keys for error storage
     private ERROR_COUNTS_KEY  = "joobq:error_counts"
@@ -34,7 +35,15 @@ module JoobQ
       @max_recent_errors = max
     end
 
-    def initialize(@time_window : Time::Span = 5.minutes, @max_recent_errors : Int32 = 100)
+    def notify_alert=(callback : Proc(Hash(String, String), Nil))
+      @notify_alert = callback
+    end
+
+    def initialize(
+      @time_window : Time::Span = 5.minutes,
+      @max_recent_errors : Int32 = 100,
+      @notify_alert : Proc(Hash(String, String), Nil) = ->(_alert_context : Hash(String, String)) { },
+    )
       # Don't load from Redis during initialization to avoid circular dependency
       # Data will be loaded when first accessed
     end
@@ -221,7 +230,8 @@ module JoobQ
     end
 
     private def send_alert(error_context : ErrorContext, count : Int32, threshold : Int32) : Nil
-      alert_context = {
+      # Create alert context for logging (with symbol keys)
+      log_context = {
         alert_type:    "error_threshold_exceeded",
         error_type:    error_context.error_type,
         queue_name:    error_context.queue_name,
@@ -232,17 +242,30 @@ module JoobQ
         occurred_at:   Time.local.to_rfc3339,
       }
 
+      # Create alert context for notification callback (with string keys)
+      alert_context = {
+        "alert_type"    => "error_threshold_exceeded",
+        "error_type"    => error_context.error_type,
+        "queue_name"    => error_context.queue_name,
+        "current_count" => count.to_s,
+        "threshold"     => threshold.to_s,
+        "severity"      => error_context.severity,
+        "time_window"   => @time_window.to_s,
+        "occurred_at"   => Time.local.to_rfc3339,
+      }
+
       case error_context.severity
       when "error"
-        Log.error &.emit("ERROR ALERT: Threshold exceeded", alert_context)
+        Log.error &.emit("ERROR ALERT: Threshold exceeded", log_context)
       when "warn"
-        Log.warn &.emit("WARNING ALERT: Threshold exceeded", alert_context)
+        Log.warn &.emit("WARNING ALERT: Threshold exceeded", log_context)
       else
-        Log.info &.emit("INFO ALERT: Threshold exceeded", alert_context)
+        Log.info &.emit("INFO ALERT: Threshold exceeded", log_context)
       end
 
       # Here you could integrate with external alerting systems
       # like Slack, PagerDuty, email, etc.
+      notify_alert.call(alert_context) if notify_alert
     end
 
     # Redis storage methods

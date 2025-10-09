@@ -8,17 +8,22 @@ require "./joobq/store"
 require "./joobq/error_context"
 require "./joobq/error_monitor"
 require "./joobq/api_validation"
-require "./joobq/api_cache"
 require "./joobq/**"
 
 module JoobQ
+  # Custom exception for configuration errors
+  class ConfigNotInitializedError < Exception
+  end
+
   # Configuration instance with lazy loading
   @@config : Configure? = nil
   @@config_initialized = false
 
   def self.config : Configure
     initialize_config unless @@config_initialized
-    @@config.not_nil!
+    config = @@config
+    raise ConfigNotInitializedError.new("JoobQ configuration has not been initialized") unless config
+    config
   end
 
   def self.configure(&)
@@ -128,9 +133,6 @@ module JoobQ
     config.error_monitor
   end
 
-  def self.api_cache : APICache
-    APICache.instance
-  end
 
   # Configuration loading methods
   def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure

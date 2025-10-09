@@ -245,4 +245,3 @@ module JoobQ
     end
   end
 end
-

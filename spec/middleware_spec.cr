@@ -22,7 +22,7 @@ module JoobQ
         3.times do
           if job_json = queue.store.claim_job("throttled", "test-worker", ExampleJob)
             job = ExampleJob.from_json(job_json)
-            next_middleware = ->{ }  # Empty proc representing next middleware
+            next_middleware = -> { } # Empty proc representing next middleware
             throttle.call(job, queue, "test-worker", next_middleware)
           end
         end
@@ -55,8 +55,8 @@ module JoobQ
         throttle = Middleware::Throttle.new
 
         start_time = Time.local
-        next_middleware = ->{ }
-        
+        next_middleware = -> { }
+
         2.times do
           job = ExampleJob.new(1)
           throttle.call(job, queue, "test-worker", next_middleware)
@@ -79,8 +79,8 @@ module JoobQ
 
         timeout.matches?(job, queue).should be_true
 
-        # Job should be expired
-        job.expired?.should be_true
+        # Job should be past expiration
+        job.past_expiration?.should be_true
       end
 
       it "sends expired jobs to dead letter" do
@@ -93,7 +93,7 @@ module JoobQ
         job.queue = "example"
 
         # Process through timeout middleware
-        next_middleware = ->{ }
+        next_middleware = -> { }
         timeout.call(job, queue, "test-worker", next_middleware)
 
         # Job should be in dead letter queue
@@ -109,7 +109,7 @@ module JoobQ
         job.expires = (Time.local + 1.hour).to_unix_ms
 
         executed = false
-        next_middleware = ->{ executed = true }
+        next_middleware = -> { executed = true }
         timeout.call(job, queue, "test-worker", next_middleware)
 
         executed.should be_true
@@ -124,8 +124,8 @@ module JoobQ
         job = ExampleJob.new(1)
         job.expires = (Time.local - 1.hour).to_unix_ms
         job.queue = "example"
-        
-        next_middleware = ->{ }
+
+        next_middleware = -> { }
         timeout.call(job, queue, "test-worker", next_middleware)
 
         # Should have recorded error
@@ -159,7 +159,7 @@ module JoobQ
 
         # Simulate failure
         begin
-          next_middleware = ->{ raise "Test failure" }
+          next_middleware = -> { raise "Test failure" }
           retry_mw.call(job, queue, "test-worker", next_middleware)
         rescue
           # Expected
@@ -184,7 +184,7 @@ module JoobQ
 
         # Simulate failure
         begin
-          next_middleware = ->{ raise "Test failure" }
+          next_middleware = -> { raise "Test failure" }
           retry_mw.call(job, queue, "test-worker", next_middleware)
         rescue
           # Expected
@@ -216,7 +216,7 @@ module JoobQ
         store.redis.set(retry_lock_key, "testing", ex: 30)
 
         # Process successfully
-        next_middleware = ->{ }
+        next_middleware = -> { }
         retry_mw.call(job, queue, "test-worker", next_middleware)
 
         # Lock should be cleaned up

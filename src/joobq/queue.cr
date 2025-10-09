@@ -63,13 +63,13 @@ module JoobQ
     end
 
     private def add_batch_pipelined(jobs : Array(T))
-      store.as(RedisStore).enqueue_batch(jobs, JoobQ.config.pipeline_batch_size)
+      store.enqueue_batch(jobs, JoobQ.config.pipeline_batch_size)
     end
 
     private def add_batch_strings_pipelined(jobs : Array(String))
       # Convert strings to Job objects for batch enqueuing
       job_objects = jobs.map { |job_str| T.from_json(job_str) }
-      store.as(RedisStore).enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
+      store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
     end
 
     private def handle_enqueue_error(ex : Exception, job_data : String, job_type : String)
@@ -105,7 +105,8 @@ module JoobQ
 
     def mark_as_dead(job : String)
       expires = JoobQ.config.dead_letter_ttl.total_seconds.to_i
-      store.mark_as_dead job, expires
+      job_obj = T.from_json(job)
+      store.mark_as_dead job_obj, expires
     end
 
     def retry(job : String)
@@ -114,9 +115,8 @@ module JoobQ
       delay_ms = (2 ** retries) * 1000_i64             # Delay in ms
       schedule_time = Time.local.to_unix_ms + delay_ms # Calculate when job should run
 
-      # Use Redis store directly to schedule the job string
-      redis_store = store.as(RedisStore)
-      redis_store.redis.zadd(RedisStore::DELAYED_SET, schedule_time, job)
+      # Use store to schedule the job string
+      store.schedule_job(job, schedule_time)
     end
 
     def size : Int64
@@ -181,7 +181,7 @@ module JoobQ
     # Pipelined job cleanup for improved performance
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
     def cleanup_job_processing_pipelined(worker_id : String, job_json : String) : Nil
-      store.as(RedisStore).cleanup_job(job_json, name)
+      store.cleanup_job(job_json, name)
     rescue ex
       Log.error &.emit("Error in pipelined job cleanup", queue: name, worker: worker_id,
         job_data_length: job_json.size, error: ex.message)
@@ -190,7 +190,7 @@ module JoobQ
     # Enhanced cleanup for successfully completed jobs
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
     def cleanup_completed_job_pipelined(worker_id : String, job_json : String) : Nil
-      store.as(RedisStore).mark_job_completed(job_json, name)
+      store.mark_job_completed(job_json, name)
     rescue ex
       Log.error &.emit("Error in completed job cleanup", queue: name, worker: worker_id,
         job_data_length: job_json.size, error: ex.message)
@@ -198,19 +198,19 @@ module JoobQ
 
     # Verify that a job has been properly removed from processing queue
     def verify_job_removed_from_processing?(job_id : String) : Bool
-      store.as(RedisStore).verify_job_removed_from_processing?(job_id, name)
+      store.verify_job_removed_from_processing?(job_id, name)
     end
 
     # Get count of jobs currently in processing queue
     def processing_queue_size : Int64
-      store.as(RedisStore).processing_queue_size(name)
+      store.processing_queue_size(name)
     end
 
     # Batch job cleanup for improved performance
     def cleanup_jobs_batch_pipelined(worker_id : String, job_ids : Array(String)) : Nil
       # Note: This method expects job JSON strings, not just job IDs
       # For now, we'll need to find the actual job JSON strings
-      store.as(RedisStore).cleanup_jobs_batch(job_ids, name)
+      store.cleanup_jobs_batch(job_ids, name)
     rescue ex
       Log.error &.emit("Error in batch job cleanup", queue: name, worker: worker_id,
         job_count: job_ids.size, error: ex.message)

@@ -2,6 +2,11 @@ module JoobQ
   class Worker(T)
     Log = ::Log.for("WORKER")
 
+    # Configuration constants for worker behavior
+    private WORKER_BATCH_SLICE_SIZE = 32
+    private WORKER_BATCH_DELAY      = 10.milliseconds
+    private WORKER_IDLE_DELAY       = 100.milliseconds
+
     getter wid : Int32
     getter worker_id : String
     getter active : Atomic(Bool) = Atomic(Bool).new(false)
@@ -61,16 +66,16 @@ module JoobQ
 
               if !jobs.empty?
                 # Process jobs in smaller concurrent batches to reduce connection pressure
-                jobs.each_slice(32) do |job_batch|
+                jobs.each_slice(WORKER_BATCH_SLICE_SIZE) do |job_batch|
                   job_batch.each do |job|
                     spawn { handle_job_async(job) }
                   end
                   # Small delay between batches to allow connection reuse
-                  sleep 1.microseconds if job_batch.size > 1
+                  sleep WORKER_BATCH_DELAY if job_batch.size > 1
                 end
               else
                 # Adaptive delay to prevent busy waiting and reduce connection frequency
-                sleep 1.microseconds
+                sleep WORKER_IDLE_DELAY
               end
             end
           end
@@ -111,6 +116,10 @@ module JoobQ
               worker_id: @worker_id,
               processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s)
           end
+        rescue ex : JSON::Error
+          # Handle unparseable jobs by moving them to dead letter queue
+          handle_unparseable_job(job, ex)
+          next
         rescue ex : Exception
           # Use the monitored error handling system with rich context
           if parsed_job
@@ -157,6 +166,112 @@ module JoobQ
             @queue.cleanup_job_processing_pipelined(@worker_id, job)
           end
         end
+      end
+    end
+
+    # Handle jobs that cannot be parsed (invalid JSON or structure)
+    private def handle_unparseable_job(job_json : String, parse_error : Exception) : Nil
+      Log.error &.emit("Unparseable job detected, moving to dead letter queue",
+        queue: @queue.name,
+        worker_id: @worker_id,
+        job_data_length: job_json.size,
+        parse_error: parse_error.message || "Unknown JSON parsing error"
+      )
+
+      # Try to extract job ID from the raw JSON if possible
+      job_id = extract_job_id_from_raw_json(job_json)
+
+      # Create a minimal error context for the unparseable job
+      error_context = ErrorContext.new(
+        job_id: job_id,
+        queue_name: @queue.name,
+        worker_id: @worker_id,
+        job_type: "Unknown",
+        error_type: "serialization_error",
+        error_message: "Job could not be parsed: #{parse_error.message}",
+        error_class: parse_error.class.name,
+        backtrace: parse_error.inspect_with_backtrace.split('\n').first(10),
+        retry_count: 0,
+        job_data: job_json[0, 1000], # Truncate to first 1000 chars
+        error_cause: nil,
+        system_context: {
+          "worker_id"         => @worker_id,
+          "job_data_length"   => job_json.size.to_s,
+          "parse_error_class" => parse_error.class.name,
+        }
+      )
+
+      # Record the error in the error monitor
+      JoobQ.error_monitor.record_error(error_context)
+
+      # Move the unparseable job to dead letter queue
+      move_unparseable_job_to_dead_letter(job_json, job_id)
+    end
+
+    # Extract job ID from raw JSON string
+    private def extract_job_id_from_raw_json(job_json : String) : String
+      # Try to extract jid field from the JSON string
+      if match = job_json.match(/"jid"\s*:\s*"([^"]+)"/)
+        match[1]
+      elsif match = job_json.match(/"jid"\s*:\s*"([^"]+)"/)
+        match[1]
+      else
+        # Generate a fallback ID based on content hash
+        "unparseable_#{job_json.hash.abs.to_s(16)}"
+      end
+    rescue
+      "unparseable_#{job_json.hash.abs.to_s(16)}"
+    end
+
+    # Move unparseable job to dead letter queue
+    private def move_unparseable_job_to_dead_letter(job_json : String, job_id : String) : Nil
+      begin
+        # Create a minimal job structure for dead letter queue
+        dead_job_data = {
+          "jid"    => job_id,
+          "queue"  => @queue.name,
+          "status" => "Dead",
+          "error"  => {
+            "failed_at"      => Time.local.to_rfc3339,
+            "message"        => "Job could not be parsed",
+            "backtrace"      => "JSON parsing failed",
+            "cause"          => "",
+            "error_type"     => "serialization_error",
+            "error_class"    => "JSON::Error",
+            "retry_count"    => 0,
+            "system_context" => {
+              "worker_id"                => @worker_id,
+              "original_job_data_length" => job_json.size.to_s,
+            },
+          },
+          "original_job_data" => job_json[0, 1000], # Truncate for storage
+        }
+
+        # Store in dead letter queue
+        redis_store = @queue.store
+        if redis_store.is_a?(RedisStore)
+          current_timestamp = Time.local.to_unix_ms
+          redis_store.redis.zadd("joobq:dead_letter", current_timestamp, dead_job_data.to_json)
+
+          Log.info &.emit("Unparseable job moved to dead letter queue",
+            job_id: job_id,
+            queue: @queue.name,
+            worker_id: @worker_id
+          )
+        else
+          Log.warn &.emit("Cannot move unparseable job to dead letter - RedisStore not available",
+            job_id: job_id,
+            queue: @queue.name,
+            worker_id: @worker_id
+          )
+        end
+      rescue ex
+        Log.error &.emit("Failed to move unparseable job to dead letter queue",
+          job_id: job_id,
+          queue: @queue.name,
+          worker_id: @worker_id,
+          error: ex.message
+        )
       end
     end
   end

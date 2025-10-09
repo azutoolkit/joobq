@@ -14,6 +14,9 @@ module JoobQ
     getter max_recent_errors : Int32 = 100
     getter notify_alert : Proc(Hash(String, String), Nil) = ->(_alert_context : Hash(String, String)) { }
 
+    # Thread safety mutex for shared state
+    @mutex = Mutex.new
+
     # Redis keys for error storage
     private ERROR_COUNTS_KEY  = "joobq:error_counts"
     private RECENT_ERRORS_KEY = "joobq:recent_errors"
@@ -49,75 +52,66 @@ module JoobQ
     end
 
     def record_error(error_context : ErrorContext) : Nil
-      # Add to recent errors
-      @recent_errors << error_context
+      @mutex.synchronize do
+        # Add to recent errors with immediate trimming to prevent memory growth
+        @recent_errors << error_context
+        trim_old_errors_immediately
 
-      # Store in Redis
+        # Update error counts
+        error_key = "#{error_context.error_type}:#{error_context.queue_name}"
+        @error_counts[error_key] = (@error_counts[error_key]? || 0) + 1
+      end
+
+      # Store in Redis (outside mutex to avoid blocking)
       store_error_in_redis(error_context)
 
-      # Trim old errors and decay counts
-      trim_old_errors
-      decay_error_counts
-
-      # Update error counts
-      error_key = "#{error_context.error_type}:#{error_context.queue_name}"
-      @error_counts[error_key] = (@error_counts[error_key]? || 0) + 1
-
-      # Invalidate error caches since data has changed
-      invalidate_error_caches
 
       # Check for alerts
       check_alerts(error_context)
     end
 
-    private def invalidate_error_caches : Nil
-      # Invalidate error-related caches when new errors are recorded
-      JoobQ.api_cache.invalidate_error_stats
-      JoobQ.api_cache.invalidate_recent_errors
-    rescue ex
-      # Don't fail error recording if cache invalidation fails
-      Log.warn &.emit("Failed to invalidate error caches", error: ex.message)
-    end
 
     def get_error_stats : Hash(String, Int32)
       # Ensure Redis data is loaded
       ensure_redis_loaded
-      @error_counts.dup
+      @mutex.synchronize { @error_counts.dup }
     end
 
     # Get fresh error stats by forcing a reload from Redis
     def get_fresh_error_stats : Hash(String, Int32)
       force_reload_from_redis
-      @error_counts.dup
+      @mutex.synchronize { @error_counts.dup }
     end
 
     def get_time_windowed_error_stats : Hash(String, Int32)
       # Ensure Redis data is loaded
       ensure_redis_loaded
 
-      # Get error counts only for errors within the time window
-      cutoff_time = Time.local - @time_window
-      time_windowed_counts = {} of String => Int32
+      @mutex.synchronize do
+        # Get error counts only for errors within the time window
+        cutoff_time = Time.local - @time_window
+        time_windowed_counts = {} of String => Int32
 
-      @recent_errors.each do |error|
-        begin
-          error_time = Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC)
-          if error_time.to_local >= cutoff_time
-            error_key = "#{error.error_type}:#{error.queue_name}"
-            time_windowed_counts[error_key] = (time_windowed_counts[error_key]? || 0) + 1
+        @recent_errors.each do |error|
+          begin
+            error_time = Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC)
+            if error_time.to_local >= cutoff_time
+              error_key = "#{error.error_type}:#{error.queue_name}"
+              time_windowed_counts[error_key] = (time_windowed_counts[error_key]? || 0) + 1
+            end
+          rescue
+            # Skip errors with invalid timestamps
           end
-        rescue
-          # Skip errors with invalid timestamps
         end
-      end
 
-      time_windowed_counts
+        time_windowed_counts
+      end
     end
 
     def get_recent_errors(limit : Int32 = 20) : Array(ErrorContext)
       # Ensure Redis data is loaded
       ensure_redis_loaded
-      @recent_errors.last(limit)
+      @mutex.synchronize { @recent_errors.last(limit) }
     end
 
     # Get recent errors with pagination support
@@ -125,68 +119,76 @@ module JoobQ
       # Ensure Redis data is loaded
       ensure_redis_loaded
 
-      offset = (page - 1) * per_page
-      start_index = [@recent_errors.size - offset - per_page, 0].max
-      end_index = [@recent_errors.size - offset - 1, 0].max
+      @mutex.synchronize do
+        offset = (page - 1) * per_page
+        start_index = [@recent_errors.size - offset - per_page, 0].max
+        end_index = [@recent_errors.size - offset - 1, 0].max
 
-      if start_index > end_index
-        [] of ErrorContext
-      else
-        @recent_errors[start_index..end_index].reverse
+        if start_index > end_index
+          [] of ErrorContext
+        else
+          @recent_errors[start_index..end_index].reverse
+        end
       end
     end
 
     # Get total count of recent errors
     def get_recent_errors_count : Int32
       ensure_redis_loaded
-      @recent_errors.size
+      @mutex.synchronize { @recent_errors.size }
     end
 
     # Get error information for multiple jobs in batch
     def get_errors_for_jobs_batch(jids : Array(String)) : Hash(String, ErrorContext?)
       ensure_redis_loaded
 
-      results = {} of String => ErrorContext?
-      jids.each { |jid| results[jid] = nil }
+      @mutex.synchronize do
+        results = {} of String => ErrorContext?
+        jids.each { |jid| results[jid] = nil }
 
-      # Find errors for each JID in a single pass through recent_errors
-      @recent_errors.each do |error|
-        if jids.includes?(error.job_id.to_s) && results[error.job_id.to_s].nil?
-          results[error.job_id.to_s] = error
+        # Find errors for each JID in a single pass through recent_errors
+        @recent_errors.each do |error|
+          if jids.includes?(error.job_id.to_s) && results[error.job_id.to_s].nil?
+            results[error.job_id.to_s] = error
+          end
         end
-      end
 
-      results
+        results
+      end
     end
 
     def get_errors_by_type(error_type : String) : Array(ErrorContext)
       # Ensure Redis data is loaded
       ensure_redis_loaded
-      @recent_errors.select { |error| error.error_type == error_type }
+      @mutex.synchronize { @recent_errors.select { |error| error.error_type == error_type } }
     end
 
     def get_errors_by_queue(queue_name : String) : Array(ErrorContext)
       # Ensure Redis data is loaded
       ensure_redis_loaded
-      @recent_errors.select { |error| error.queue_name == queue_name }
+      @mutex.synchronize { @recent_errors.select { |error| error.queue_name == queue_name } }
     end
 
     def clear_old_errors : Nil
-      cutoff_time = Time.local - @time_window
-      @recent_errors.reject! { |error|
-        begin
-          # Parse the timestamp and convert to local time for comparison
-          error_time = Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC)
-          error_time.to_local < cutoff_time
-        rescue
-          true
-        end
-      }
+      @mutex.synchronize do
+        cutoff_time = Time.local - @time_window
+        @recent_errors.reject! { |error|
+          begin
+            # Parse the timestamp and convert to local time for comparison
+            error_time = Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC)
+            error_time.to_local < cutoff_time
+          rescue
+            true
+          end
+        }
+      end
     end
 
     def reset : Nil
-      @error_counts.clear
-      @recent_errors.clear
+      @mutex.synchronize do
+        @error_counts.clear
+        @recent_errors.clear
+      end
       clear_redis_errors
     end
 
@@ -197,6 +199,27 @@ module JoobQ
       # Then trim if still too many errors - keep the most recent ones
       if @recent_errors.size > @max_recent_errors
         @recent_errors = @recent_errors.last(@max_recent_errors)
+      end
+    end
+
+    # More aggressive trimming that runs immediately after each error is added
+    private def trim_old_errors_immediately : Nil
+      # Remove old errors based on time window
+      cutoff_time = Time.local - @time_window
+      @recent_errors.reject! { |error|
+        begin
+          # Parse the timestamp and convert to local time for comparison
+          error_time = Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC)
+          error_time.to_local < cutoff_time
+        rescue
+          true
+        end
+      }
+
+      # Aggressive trimming: keep only the most recent errors, with a smaller buffer
+      max_immediate = [@max_recent_errors / 2, 50].max.to_i
+      if @recent_errors.size > max_immediate
+        @recent_errors = @recent_errors.last(max_immediate)
       end
     end
 
@@ -309,30 +332,32 @@ module JoobQ
     private def perform_redis_load : Nil
       store = JoobQ.store.as(RedisStore)
 
-      # Load error counts
-      error_counts_data = store.redis.hgetall(ERROR_COUNTS_KEY)
-      @error_counts.clear
-      error_counts_data.each do |key, value|
-        @error_counts[key] = value.to_i
-      end
+      @mutex.synchronize do
+        # Load error counts
+        error_counts_data = store.redis.hgetall(ERROR_COUNTS_KEY)
+        @error_counts.clear
+        error_counts_data.each do |key, value|
+          @error_counts[key] = value.to_i
+        end
 
-      # Load recent errors
-      @recent_errors.clear
-      error_ids = store.redis.zrange(ERROR_INDEX_KEY, 0, -1)
-      error_ids.each do |error_id|
-        error_json = store.redis.hget(RECENT_ERRORS_KEY, error_id)
-        if error_json
-          begin
-            error_context = ErrorContext.from_json(error_json)
-            @recent_errors << error_context
-          rescue ex
-            Log.warn &.emit("Failed to parse error from Redis", error_id: error_id, error: ex.message)
+        # Load recent errors
+        @recent_errors.clear
+        error_ids = store.redis.zrange(ERROR_INDEX_KEY, 0, -1)
+        error_ids.each do |error_id|
+          error_json = store.redis.hget(RECENT_ERRORS_KEY, error_id)
+          if error_json
+            begin
+              error_context = ErrorContext.from_json(error_json)
+              @recent_errors << error_context
+            rescue ex
+              Log.warn &.emit("Failed to parse error from Redis", error_id: error_id, error: ex.message)
+            end
           end
         end
-      end
 
-      # Sort by occurred_at timestamp
-      @recent_errors.sort_by!(&.occurred_at)
+        # Sort by occurred_at timestamp
+        @recent_errors.sort_by!(&.occurred_at)
+      end
 
       @redis_loaded = true
       Log.debug &.emit("Loaded #{@recent_errors.size} errors from Redis")

@@ -44,7 +44,9 @@ end
 Spec.before_each do
   # Stop all running workers before resetting
   JoobQ.config.queues.each_value do |queue|
-    queue.stop! if queue.running?
+    if queue.running?
+      queue.stop!
+    end
   end
 
   JoobQ.reset

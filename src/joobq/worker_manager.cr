@@ -19,10 +19,22 @@ module JoobQ
     end
 
     def stop_workers
+      had_running_workers = false
+
       @workers_mutex.synchronize do
         return if stopped.get
         stopped.set(true)
-        @workers.size.times { terminate_channel.send(nil) }
+
+        # Check if any workers are running before sending termination signals
+        had_running_workers = @workers.any?(&.running?)
+        if had_running_workers
+          @workers.size.times { terminate_channel.send(nil) }
+        end
+      end
+
+      # Only wait for termination if there were workers that were running
+      if had_running_workers
+        wait_for_workers_to_stop
       end
     end
 
@@ -99,6 +111,33 @@ module JoobQ
 
     private def create_worker
       Worker(T).new(@workers.size, terminate_channel, @queue)
+    end
+
+    private def wait_for_workers_to_stop
+      # Wait up to 5 seconds for all workers to stop
+      timeout = 5.seconds
+      start_time = Time.monotonic
+
+      while Time.monotonic - start_time < timeout
+        @workers_mutex.synchronize do
+          all_stopped = @workers.all? { |worker| !worker.running? }
+          if all_stopped
+            return
+          end
+        end
+        sleep 10.milliseconds
+      end
+
+      # If we reach here, some workers didn't stop in time
+      # Log a warning but don't block indefinitely
+      @workers_mutex.synchronize do
+        still_running = @workers.select(&.running?)
+        if !still_running.empty?
+          Log.warn &.emit("Some workers did not stop within timeout",
+            still_running_count: still_running.size,
+            total_workers: @workers.size)
+        end
+      end
     end
   end
 end

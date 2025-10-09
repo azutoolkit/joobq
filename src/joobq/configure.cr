@@ -1,6 +1,10 @@
 module JoobQ
   alias ThrottlerConfig = Hash(String, NamedTuple(limit: Int32, period: Time::Span))
 
+  # Custom exception for configuration validation errors
+  class ConfigValidationError < Exception
+  end
+
   # `Configure` is responsible for managing the settings for the `JoobQ` job queue system.
   #
   # ### Features
@@ -45,6 +49,62 @@ module JoobQ
     property pipeline_batch_size : Int32 = 100
     property pipeline_timeout : Float64 = 1.0
     property pipeline_max_commands : Int32 = 1000
+
+    # Validation methods
+    def validate_configuration : Nil
+      validate_worker_batch_size
+      validate_pipeline_settings
+      validate_timeouts
+      validate_retries
+    end
+
+    private def validate_worker_batch_size : Nil
+      if @worker_batch_size <= 0
+        raise ConfigValidationError.new("worker_batch_size must be greater than 0, got #{@worker_batch_size}")
+      end
+      if @worker_batch_size > 1000
+        raise ConfigValidationError.new("worker_batch_size must be less than or equal to 1000, got #{@worker_batch_size}")
+      end
+    end
+
+    private def validate_pipeline_settings : Nil
+      if @pipeline_batch_size <= 0
+        raise ConfigValidationError.new("pipeline_batch_size must be greater than 0, got #{@pipeline_batch_size}")
+      end
+      if @pipeline_batch_size > @pipeline_max_commands
+        raise ConfigValidationError.new("pipeline_batch_size (#{@pipeline_batch_size}) must be less than or equal to pipeline_max_commands (#{@pipeline_max_commands})")
+      end
+      if @pipeline_timeout <= 0.0
+        raise ConfigValidationError.new("pipeline_timeout must be greater than 0, got #{@pipeline_timeout}")
+      end
+      if @pipeline_max_commands <= 0
+        raise ConfigValidationError.new("pipeline_max_commands must be greater than 0, got #{@pipeline_max_commands}")
+      end
+    end
+
+    private def validate_timeouts : Nil
+      if @timeout <= Time::Span.zero
+        raise ConfigValidationError.new("timeout must be greater than 0, got #{@timeout}")
+      end
+      if @expires <= Time::Span.zero
+        raise ConfigValidationError.new("expires must be greater than 0, got #{@expires}")
+      end
+      if @failed_ttl <= Time::Span.zero
+        raise ConfigValidationError.new("failed_ttl must be greater than 0, got #{@failed_ttl}")
+      end
+      if @dead_letter_ttl <= Time::Span.zero
+        raise ConfigValidationError.new("dead_letter_ttl must be greater than 0, got #{@dead_letter_ttl}")
+      end
+    end
+
+    private def validate_retries : Nil
+      if @retries < 0
+        raise ConfigValidationError.new("retries must be greater than or equal to 0, got #{@retries}")
+      end
+      if @retries > 100
+        raise ConfigValidationError.new("retries must be less than or equal to 100, got #{@retries}")
+      end
+    end
 
     # Error Monitoring
     @error_monitor : ErrorMonitor? = nil
@@ -93,6 +153,14 @@ module JoobQ
     # Adds a queue configuration and optionally applies throttling limits.
     macro queue(name, workers, job, throttle = nil)
       {% begin %}
+      # Validate worker count at compile time
+      {% if workers <= 0 %}
+        {% raise "Worker count must be greater than 0, got #{workers}" %}
+      {% end %}
+      {% if workers > 1000 %}
+        {% raise "Worker count must be less than or equal to 1000, got #{workers}" %}
+      {% end %}
+
       queues[{{name}}] = JoobQ::Queue({{job.id}}).new({{name}}, {{workers}}, {{throttle}})
       job_registry.register({{job.id}})
       {% end %}

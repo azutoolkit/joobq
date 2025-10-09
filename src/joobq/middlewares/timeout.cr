@@ -8,7 +8,7 @@ module JoobQ
       end
 
       def call(job : Job, queue : BaseQueue, worker_id : String, next_middleware : ->) : Nil
-        if job.expired?
+        if job.past_expiration?
           job.expired!
 
           # Record timeout error to error context

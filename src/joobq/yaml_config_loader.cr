@@ -50,7 +50,12 @@ module JoobQ
     def self.load_from_string(yaml_content : String, source_path : String? = nil) : Configure
       config_data = YAML.parse(yaml_content)
       validate_schema(config_data, source_path)
-      map_to_configure(config_data, source_path)
+      config = map_to_configure(config_data, source_path)
+
+      # Validate the configuration after loading
+      config.validate_configuration
+
+      config
     rescue ex : YAML::ParseException
       raise ConfigParseError.new("Invalid YAML syntax#{source_path ? " in #{source_path}" : ""}: #{ex.message}")
     rescue ex : Exception

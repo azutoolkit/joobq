@@ -65,14 +65,37 @@ module JoobQ
     def run
       Log.info { "Scheduler starting..." }
       spawn do
+        retry_count = 0
+        max_retries = 10
+        base_delay = 1.second
+
         loop do
-          enqueue_due_jobs
-          sleep 5.seconds
+          begin
+            enqueue_due_jobs
+            retry_count = 0 # Reset retry count on successful iteration
+            sleep 5.seconds
+          rescue ex : Exception
+            retry_count += 1
+
+            if retry_count > max_retries
+              Log.error &.emit("Scheduler exceeded maximum retry count, stopping",
+                retry_count: retry_count, max_retries: max_retries, reason: ex.message)
+              break
+            end
+
+            # Exponential backoff with jitter
+            delay = base_delay * (2 ** (retry_count - 1))
+            jitter = Random.rand(0.1..0.5) * delay
+            total_delay = delay + jitter
+
+            Log.error &.emit("Scheduler error, retrying with backoff",
+              retry_count: retry_count, max_retries: max_retries,
+              delay_seconds: total_delay.total_seconds, reason: ex.message)
+
+            sleep total_delay
+          end
         end
       end
-    rescue ex : Exception
-      Log.error &.emit("Scheduler crashed", reason: ex.message)
-      run
     end
 
     def enqueue_due_jobs(current_time = Time.local)

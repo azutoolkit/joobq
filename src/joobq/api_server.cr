@@ -237,14 +237,9 @@ module JoobQ
       {method: "GET", path: "/joobq/errors/stats"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
 
-        # Use cached error stats to reduce Redis load
-        error_counts = JoobQ.api_cache.get_error_stats do
-          JoobQ.error_monitor.get_error_stats
-        end
-
-        recent_errors = JoobQ.api_cache.get_recent_errors do
-          JoobQ.error_monitor.get_recent_errors(1000)
-        end
+        # Get error stats directly from error monitor
+        error_counts = JoobQ.error_monitor.get_error_stats
+        recent_errors = JoobQ.error_monitor.get_recent_errors(1000)
 
         stats = {
           error_counts:        error_counts,
@@ -266,13 +261,8 @@ module JoobQ
 
         limit = context.request.query_params["limit"]?.try(&.to_i) || 20
 
-        # Use cached recent errors to reduce Redis load
-        cached_errors = JoobQ.api_cache.get_recent_errors do
-          JoobQ.error_monitor.get_recent_errors(1000)
-        end
-
-        # Apply limit after caching
-        recent_errors = cached_errors.last(limit)
+        # Get recent errors directly from error monitor
+        recent_errors = JoobQ.error_monitor.get_recent_errors(limit)
         context.response.print(recent_errors.to_json)
       end,
       {method: "GET", path: "/joobq/errors/by-type"} => ->(context : HTTP::Server::Context) do
@@ -565,10 +555,8 @@ module JoobQ
         begin
           redis_store = RedisStore.instance
 
-          # Use cached delayed jobs to reduce Redis load
-          all_delayed_jobs = JoobQ.api_cache.get_delayed_jobs(limit) do
-            redis_store.list_sorted_set_jobs(RedisStore::DELAYED_SET, 1, [limit, 1000].max)
-          end
+          # Get delayed jobs directly from Redis store
+          all_delayed_jobs = redis_store.list_sorted_set_jobs(RedisStore::DELAYED_SET, 1, [limit, 1000].max)
 
           # Filter for retrying jobs (jobs with retrying status)
           retrying_jobs = all_delayed_jobs.select do |job_json|
@@ -619,9 +607,7 @@ module JoobQ
           redis_store = RedisStore.instance
 
           # Use cached dead jobs to reduce Redis load
-          cached_dead_jobs = JoobQ.api_cache.get_dead_jobs(limit) do
-            redis_store.redis.zrange("joobq:dead_letter", 0, [limit, 100].max - 1).map(&.as(String))
-          end
+          cached_dead_jobs = redis_store.redis.zrange("joobq:dead_letter", 0, [limit, 100].max - 1).map(&.as(String))
 
           dead_jobs = cached_dead_jobs.select do |job_json|
             if queue_name
@@ -717,8 +703,7 @@ module JoobQ
               pipe.lpush(queue_name, job_to_retry.not_nil!)
             end
 
-            # Invalidate dead jobs cache since data has changed
-            JoobQ.api_cache.invalidate_dead_jobs
+            # Note: Cache invalidation removed as API Cache has been removed
 
             response = {
               status:    "success",

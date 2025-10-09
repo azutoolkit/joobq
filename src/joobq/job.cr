@@ -170,6 +170,11 @@ module JoobQ
         end
       {% end %}
 
+      # Check if job has passed its expiration time
+      def past_expiration? : Bool
+        Time.local.to_unix_ms > @expires
+      end
+
       # Batch enqueue jobs in an array of jobs
       # ```
       # TestJob.batch_enqueue([job1, job2, job3])

@@ -376,23 +376,30 @@ module JoobQ
         store = JoobQ.store.as(RedisStore)
         queue_name = "example"
 
+        # Ensure scheduler is stopped before starting
+        JoobQ.config.delayed_job_scheduler.stop
+
+        # Clear any existing jobs in the queue and delayed set
+        store.clear_queue(queue_name)
+        store.redis.del(RedisStore::DELAYED_SET)
+        JoobQ.queues["example"].stop!
+
         # Add a due job
         job = RetryTestJob.new(1)
         job.retrying!
         past_time = Time.local.to_unix_ms - 5000
         store.redis.zadd(RedisStore::DELAYED_SET, past_time, job.to_json)
-        JoobQ.queues["example"].stop!
 
         # Verify initial state
         store.set_size(RedisStore::DELAYED_SET).should eq 1
         store.queue_size(queue_name).should eq 0
 
-        # Start scheduler
-        scheduler = DelayedJobScheduler.new
+        # Start scheduler - use the configured one that has access to all queues
+        scheduler = JoobQ.config.delayed_job_scheduler
         scheduler.start
 
         # Wait for processing with retry logic for CI environment
-        max_attempts = 10
+        max_attempts = 20
         attempt = 0
         while attempt < max_attempts
           sleep 0.5.seconds
@@ -407,6 +414,8 @@ module JoobQ
         store.set_size(RedisStore::DELAYED_SET).should eq 0
 
         scheduler.stop
+        # Give scheduler time to fully stop and prevent interference with other tests
+        sleep 0.5.seconds
       end
     end
 

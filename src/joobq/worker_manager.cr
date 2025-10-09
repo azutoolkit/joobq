@@ -4,7 +4,7 @@ module JoobQ
     getter workers : Array(Worker(T)) = [] of Worker(T)
     getter workers_mutex = Mutex.new
     getter terminate_channel : Channel(Nil) = Channel(Nil).new
-    getter total_workers : Int32
+    property total_workers : Int32
     getter stopped : Atomic(Bool) = Atomic(Bool).new(false)
 
     def initialize(@total_workers : Int32, @queue : Queue(T))

@@ -20,7 +20,7 @@ module JoobQ
   # )
   #
   # # 2b. Or get all instantiated queues from configuration (memoized)
-  # all_queues = QueueFactory.queues  # Reads from JoobQ.config and caches
+  # all_queues = QueueFactory.queues # Reads from JoobQ.config and caches
   # ```
   #
   # ## Memoization Pattern:

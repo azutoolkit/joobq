@@ -206,7 +206,7 @@ module JoobQ
     end
 
     # Get cache statistics
-    def stats : Hash(Symbol, NamedTuple(cached: Bool, expired: Bool))
+    def stats
       @mutex.synchronize do
         {
           processing_jobs: {

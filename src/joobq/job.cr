@@ -209,10 +209,13 @@ module JoobQ
 
       # Delay a job for a specific time span and enqueue it
       # ```
-      # TestJob.delayed(time: 1.minute, x: 1)
+      # TestJob.enqueue_at(1.minute, x: 1)
       # ```
       def self.enqueue_at(time : Time::Span, **args)
-        delayed(time, **args)
+        job = new(**args)
+        job.scheduled!
+        JoobQ::DelayedJobScheduler.new.delay(job: job, delay_time: time)
+        job.jid
       end
 
       # Delay a job for a specific time span and enqueue it

@@ -15,7 +15,15 @@ module JoobQ
   # JoobQ::Configure.instance.queue "my_queue", 5, MyJob, {limit: 10, period: 1.minute}
   # ```
   class Configure
-    Log.setup_from_env(default_level: :trace)
+    begin
+      Log.setup_from_env(default_level: :trace)
+    rescue ex : ArgumentError
+      # Fallback if environment variables have invalid log configuration
+      Log.setup do |c|
+        c.bind "*", :info, Log::IOBackend.new
+      end
+    end
+
     # Properties and Getters
     getter queues = {} of String => BaseQueue
     getter queue_configs = {} of String => NamedTuple(job_class_name: String, workers: Int32, throttle: NamedTuple(limit: Int32, period: Time::Span)?)

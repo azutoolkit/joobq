@@ -8,6 +8,7 @@ module JoobQ
 
     describe "concurrent job enqueue" do
       it "handles multiple concurrent enqueues" do
+        JoobQ.store.reset
         queue = JoobQ["example"]
         store = JoobQ.store.as(RedisStore)
 

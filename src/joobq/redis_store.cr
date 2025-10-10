@@ -46,7 +46,7 @@ module JoobQ
     # Connection pool health check with detailed metrics
     def health_check : Hash(String, String | Int32 | Bool | Float64)
       health_data = @health.health_check
-      health_data["pipeline_stats"] = @pipeline.pipeline_stats.to_json
+      health_data["pipeline_stats"] = RedisPipeline.pipeline_stats.to_json
       health_data
     end
 

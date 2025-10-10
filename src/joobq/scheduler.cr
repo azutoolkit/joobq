@@ -84,9 +84,9 @@ module JoobQ
             end
 
             # Exponential backoff with jitter
-            delay = base_delay * (2 ** (retry_count - 1))
-            jitter = Random.rand(0.1..0.5) * delay
-            total_delay = delay + jitter
+            delay = (base_delay * (2 ** (retry_count - 1)))
+            jitter = Random.rand(0.1..0.5) * delay.to_f
+            total_delay = delay + jitter.seconds
 
             Log.error &.emit("Scheduler error, retrying with backoff",
               retry_count: retry_count, max_retries: max_retries,

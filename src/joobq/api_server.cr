@@ -416,8 +416,10 @@ module JoobQ
       # Pipeline health check endpoint
       {method: "GET", path: "/joobq/pipeline/health"} => ->(context : HTTP::Server::Context) do
         begin
-          pipeline_stats = RedisStore.pipeline_stats
-          queue_metrics = RedisStore.instance.get_all_queue_metrics
+          redis_store = RedisStore.instance
+          metrics = redis_store.metrics
+          pipeline_stats = RedisPipeline.pipeline_stats
+          queue_metrics = metrics.get_all_queue_metrics
 
           # Calculate pipeline health metrics
           success_rate = pipeline_stats.total_pipeline_calls > 0 ? ((pipeline_stats.total_pipeline_calls - pipeline_stats.pipeline_failures).to_f / pipeline_stats.total_pipeline_calls * 100) : 100.0
@@ -482,7 +484,7 @@ module JoobQ
       # Pipeline statistics endpoint
       {method: "GET", path: "/joobq/pipeline/stats"} => ->(context : HTTP::Server::Context) do
         begin
-          pipeline_stats = RedisStore.pipeline_stats
+          pipeline_stats = RedisPipeline.pipeline_stats
 
           response = {
             status:         "success",
@@ -519,7 +521,7 @@ module JoobQ
       # Reset pipeline statistics endpoint
       {method: "POST", path: "/joobq/pipeline/stats/reset"} => ->(context : HTTP::Server::Context) do
         begin
-          RedisStore.reset_pipeline_stats
+          RedisPipeline.reset_pipeline_stats
 
           response = {
             status:    "success",

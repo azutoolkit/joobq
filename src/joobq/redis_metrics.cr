@@ -147,7 +147,7 @@ module JoobQ
         return total_count
       LUA
 
-      @redis.eval(lua_script, [] of String, [] of String).as(Int32)
+      @redis.eval(lua_script, [] of String, [] of String).as(Int64).to_i
     rescue ex
       Log.warn &.emit("Error getting processing jobs count", error: ex.message)
       0
@@ -167,7 +167,7 @@ module JoobQ
         return count
       LUA
 
-      @redis.eval(lua_script, [DELAYED_SET], [] of String).as(Int32)
+      @redis.eval(lua_script, [DELAYED_SET], [] of String).as(Int64).to_i
     rescue ex
       Log.warn &.emit("Error getting retrying jobs count", error: ex.message)
       0

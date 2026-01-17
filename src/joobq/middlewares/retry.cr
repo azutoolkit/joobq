@@ -94,8 +94,10 @@ module JoobQ
   class ExponentialBackoff
     # Retry lock key prefix for Redis
     private RETRY_LOCK_PREFIX = "joobq:retry_lock"
-    # Retry lock expiration time (30 seconds - enough for scheduling, not excessive)
-    private RETRY_LOCK_TTL = 30
+    # Base retry lock TTL - will be extended based on actual delay
+    private RETRY_LOCK_BASE_TTL = 60
+    # Maximum delay in milliseconds (1 hour)
+    private MAX_DELAY_MS = 3_600_000_i64
 
     # Idempotent retry that prevents duplicate retries for the same job
     # Returns a tuple of (success: Bool, modified_job: Job)
@@ -105,16 +107,19 @@ module JoobQ
       retry_lock_key = "#{RETRY_LOCK_PREFIX}:#{job.jid}"
       redis_store = queue.store.as(RedisStore)
 
+      # Calculate delay first so we can set appropriate lock TTL
+      # Clamp retry_attempt to prevent overflow (max 22 gives ~4 million ms before cap)
+      safe_retry_attempt = Math.min(Math.max(0, retry_attempt), 22)
+      delay_ms = Math.min((2_i64 ** safe_retry_attempt) * 1000_i64, MAX_DELAY_MS)
+
+      # Set lock TTL to be delay + buffer to prevent duplicate retries
+      lock_ttl = (delay_ms / 1000).to_i + RETRY_LOCK_BASE_TTL
+
       # Use Redis SET with NX (only if not exists) and EX (expiration) for atomic lock
-      lock_acquired = redis_store.redis.set(retry_lock_key, "retrying", nx: true, ex: RETRY_LOCK_TTL)
+      lock_acquired = redis_store.redis.set(retry_lock_key, "retrying", nx: true, ex: lock_ttl)
 
       if lock_acquired == "OK"
         begin
-          # Calculate exponential backoff delay: 2^retry_attempt * 1000ms
-          # Cap the delay at 1 hour to prevent extremely long delays
-          # Ensure retry_attempt is never negative
-          safe_retry_attempt = Math.max(0, retry_attempt)
-          delay_ms = [(2.0 ** safe_retry_attempt).to_i * 1000, 3_600_000].min
 
           # Mark job as retrying
           job.retrying!

@@ -19,14 +19,8 @@ module JoobQ
   # JoobQ::Configure.instance.queue "my_queue", 5, MyJob, {limit: 10, period: 1.minute}
   # ```
   class Configure
-    begin
-      Log.setup_from_env(default_level: :trace)
-    rescue ex : ArgumentError
-      # Fallback if environment variables have invalid log configuration
-      Log.setup do |c|
-        c.bind "*", :info, Log::IOBackend.new
-      end
-    end
+    # Only setup from env if CRYSTAL_LOG_LEVEL is set and not empty
+    Log.setup_from_env(default_level: :info)
 
     # Properties and Getters
     getter queues = {} of String => BaseQueue
@@ -40,7 +34,7 @@ module JoobQ
     property retries : Int32 = 3
     property expires : Time::Span = 3.days
     property timeout : Time::Span = 2.seconds
-    property failed_ttl : Time::Span = 3.milliseconds
+    property failed_ttl : Time::Span = 7.days
     property dead_letter_ttl : Time::Span = 7.days
     property worker_batch_size : Int32 = 10
     property job_registry : JobSchemaRegistry = JobSchemaRegistry.new
@@ -283,14 +277,18 @@ module JoobQ
       end
     end
 
-    private def resolve_job_class(class_name : String) : Class
-      # This is a simplified job class resolution
-      # In a real implementation, you might want to maintain a registry of job classes
-      # or use a more sophisticated resolution mechanism
-
-      # For now, we'll raise an error if the job class can't be resolved
-      # This will force users to ensure their job classes are properly registered
-      raise ConfigValidationError.new("Job class '#{class_name}' not found. Ensure job classes are properly defined and available.")
+    private def resolve_job_class(class_name : String) : String
+      # Validate that the job class is registered in QueueFactory
+      # Crystal doesn't support runtime class resolution, so we validate against the registry
+      unless QueueFactory.registered?(class_name)
+        available_types = QueueFactory.registered_types.join(", ")
+        raise ConfigValidationError.new(
+          "Job class '#{class_name}' not registered. " \
+          "Available types: #{available_types.empty? ? "(none)" : available_types}. " \
+          "Register it using: QueueFactory.register_job_type(#{class_name})"
+        )
+      end
+      class_name
     end
 
     private def convert_yaml_args_to_hash(yaml_args : Hash(String, YAML::Any)) : Hash(String, YAML::Any)

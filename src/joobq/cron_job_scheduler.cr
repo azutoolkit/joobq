@@ -31,15 +31,22 @@ module JoobQ
           prev_nxt = nxt
 
           sleep_duration = (nxt - now)
-          if sleep_duration.seconds > 0
+          # Fix: Compare Time::Span directly instead of extracting .seconds
+          if sleep_duration > Time::Span.zero
             sleep sleep_duration
           end
 
-          # Execute the job
+          # Execute the job with error handling
           begin
-            spawn { block.call }
+            spawn do
+              begin
+                block.call
+              rescue ex : Exception
+                Log.error &.emit("Cron job execution failed", pattern: pattern, timezone: timezone.name, reason: ex.message)
+              end
+            end
           rescue ex : Exception
-            Log.error &.emit("Cron job execution failed", pattern: pattern, timezone: timezone.name, reason: ex.message)
+            Log.error &.emit("Failed to spawn cron job fiber", pattern: pattern, timezone: timezone.name, reason: ex.message)
           end
         end
       end

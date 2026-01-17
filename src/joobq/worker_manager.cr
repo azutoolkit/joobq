@@ -1,11 +1,21 @@
 module JoobQ
   # WorkerManager handles all worker-related operations
   class WorkerManager(T)
+    Log = ::Log.for("WORKER_MANAGER")
+
+    # Restart protection constants
+    private MAX_RESTARTS_PER_WINDOW  =  5
+    private RESTART_WINDOW_SECONDS   = 60
+    private RESTART_COOLDOWN_SECONDS =  5
+
     getter workers : Array(Worker(T)) = [] of Worker(T)
     getter workers_mutex = Mutex.new
     getter terminate_channel : Channel(Nil) = Channel(Nil).new
     property total_workers : Int32
     getter stopped : Atomic(Bool) = Atomic(Bool).new(false)
+    @worker_id_counter : Atomic(Int32) = Atomic(Int32).new(0)
+    @restart_times : Array(Time) = [] of Time
+    @last_restart_time : Time? = nil
 
     def initialize(@total_workers : Int32, @queue : Queue(T))
       create_workers
@@ -77,10 +87,49 @@ module JoobQ
         # Only restart if we still need workers and haven't been stopped
         return if stopped.get || @workers.size >= total_workers
 
+        # Check for restart rate limiting to prevent infinite restart loops
+        now = Time.local
+        window_start = now - RESTART_WINDOW_SECONDS.seconds
+
+        # Remove restart times outside the window
+        @restart_times.reject! { |restart_time| restart_time < window_start }
+
+        # Check if we've exceeded the restart limit
+        if @restart_times.size >= MAX_RESTARTS_PER_WINDOW
+          Log.error &.emit("Worker restart rate limit exceeded, not restarting",
+            queue: @queue.name,
+            restarts_in_window: @restart_times.size,
+            max_restarts: MAX_RESTARTS_PER_WINDOW,
+            error: ex.message)
+          return
+        end
+
+        # Apply cooldown if we restarted recently
+        if last_restart = @last_restart_time
+          elapsed = (now - last_restart).total_seconds
+          if elapsed < RESTART_COOLDOWN_SECONDS
+            sleep_time = RESTART_COOLDOWN_SECONDS - elapsed
+            Log.debug &.emit("Applying restart cooldown",
+              queue: @queue.name,
+              cooldown_seconds: sleep_time)
+            sleep sleep_time.seconds
+          end
+        end
+
+        # Record this restart
+        @restart_times << now
+        @last_restart_time = now
+
         # Create and start a new worker
         new_worker = create_worker
         @workers << new_worker
         new_worker.run
+
+        Log.info &.emit("Worker restarted after failure",
+          queue: @queue.name,
+          worker_id: new_worker.wid,
+          error: ex.message,
+          restarts_in_window: @restart_times.size)
       end
     end
 
@@ -108,7 +157,8 @@ module JoobQ
     end
 
     private def create_worker
-      Worker(T).new(@workers.size, terminate_channel, @queue)
+      worker_id = @worker_id_counter.add(1)
+      Worker(T).new(worker_id, terminate_channel, @queue)
     end
 
     private def wait_for_workers_to_stop

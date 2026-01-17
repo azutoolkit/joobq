@@ -628,8 +628,9 @@ module JoobQ
                 # Remove from delayed queue (using original JSON)
                 pipe.zrem(DELAYED_SET, job_json)
 
-                # Add back to main queue with updated status (front of queue for priority)
-                pipe.lpush(queue_name, updated_job_json)
+                # Add back to main queue with updated status
+                # Using rpush to maintain FIFO order (delayed jobs go to back of queue)
+                pipe.rpush(queue_name, updated_job_json)
 
                 moved_count += 1
               end

@@ -4,6 +4,7 @@ module JoobQ
       include Middleware
 
       private getter last_job_times : Hash(String, Int64) = {} of String => Int64
+      private getter mutex : Mutex = Mutex.new
 
       def matches?(job : JoobQ::Job, queue : BaseQueue) : Bool
         !queue.throttle_limit.nil?
@@ -21,19 +22,22 @@ module JoobQ
 
           min_interval = period / limit
 
-          now = Time.local.to_unix_ms
-          last_job_time = @last_job_times[queue.name]?
+          # Use mutex to prevent race condition when multiple workers access last_job_times
+          @mutex.synchronize do
+            now = Time.local.to_unix_ms
+            last_job_time = @last_job_times[queue.name]?
 
-          if last_job_time
-            elapsed = now - last_job_time
-            sleep_time = min_interval - elapsed
+            if last_job_time
+              elapsed = now - last_job_time
+              sleep_time = min_interval - elapsed
 
-            if sleep_time > 0
-              sleep (sleep_time / 1000.0).seconds
+              if sleep_time > 0
+                sleep (sleep_time / 1000.0).seconds
+              end
             end
-          end
 
-          @last_job_times[queue.name] = now
+            @last_job_times[queue.name] = Time.local.to_unix_ms
+          end
         end
       end
     end

@@ -119,15 +119,15 @@ module JoobQ
       lock_acquired = redis_store.redis.set(retry_lock_key, "retrying", nx: true, ex: lock_ttl)
 
       if lock_acquired == "OK"
+        move_succeeded = false
         begin
-
           # Mark job as retrying
           job.retrying!
 
           # Move job from processing to retry queue using simplified method
-          success = redis_store.move_to_retry(job, queue.name, delay_ms.to_i64)
+          move_succeeded = redis_store.move_to_retry(job, queue.name, delay_ms.to_i64)
 
-          if success
+          if move_succeeded
             Log.info &.emit("Job scheduled for idempotent retry with exponential backoff",
               job_id: job.jid.to_s,
               queue: queue.name,
@@ -137,19 +137,23 @@ module JoobQ
             )
             return {true, job}
           else
-            # If move failed, remove the lock to allow future retries
-            redis_store.redis.del(retry_lock_key)
+            Log.warn &.emit("Failed to move job to retry queue",
+              job_id: job.jid.to_s,
+              queue: queue.name)
             return {false, job}
           end
         rescue ex : Exception
-          # If scheduling fails, remove the lock to allow future retries
-          redis_store.redis.del(retry_lock_key)
-          Log.error &.emit("Failed to schedule retry, removed lock",
+          Log.error &.emit("Exception during retry scheduling",
             job_id: job.jid.to_s,
             queue: queue.name,
             error: ex.message
           )
-          raise ex
+          return {false, job}
+        ensure
+          # Always clean up lock if move didn't succeed to allow future retries
+          unless move_succeeded
+            redis_store.redis.del(retry_lock_key) rescue nil
+          end
         end
       else
         # Lock already exists, retry already in progress

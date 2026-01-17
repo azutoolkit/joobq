@@ -52,6 +52,33 @@ module JoobQ
       validate_retries
     end
 
+    # Validate Redis pool size against configured workers (call after queues are set up)
+    def validate_pool_size : Nil
+      return unless store.is_a?(RedisStore)
+      redis_store = store.as(RedisStore)
+      pool_size = redis_store.pool_size
+
+      # Calculate total workers across all queues
+      total_workers = queues.values.sum(&.total_workers)
+      return if total_workers == 0
+
+      # Recommended pool size: at least (workers * batch_factor) + headroom
+      batch_factor = (worker_batch_size / 10.0).ceil.to_i
+      recommended_pool_size = (total_workers * batch_factor) + 50
+
+      if pool_size < total_workers
+        Log.warn &.emit("Redis pool size is less than total workers",
+          pool_size: pool_size,
+          total_workers: total_workers,
+          recommendation: "Set REDIS_POOL_SIZE to at least #{recommended_pool_size}")
+      elsif pool_size < recommended_pool_size
+        Log.info &.emit("Redis pool size may be insufficient for optimal performance",
+          pool_size: pool_size,
+          total_workers: total_workers,
+          recommended: recommended_pool_size)
+      end
+    end
+
     private def validate_worker_batch_size : Nil
       if @worker_batch_size <= 0
         raise ConfigValidationError.new("worker_batch_size must be greater than 0, got #{@worker_batch_size}")

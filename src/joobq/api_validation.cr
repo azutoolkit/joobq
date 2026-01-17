@@ -243,6 +243,30 @@ module JoobQ
       /^[A-Z][a-zA-Z0-9_]*$/.matches?(job_type) && job_type.size <= 100
     end
 
+    private def self.valid_job_id?(job_id : String) : Bool
+      # Job IDs should be UUIDs or alphanumeric with hyphens/underscores
+      /^[a-zA-Z0-9_-]+$/.matches?(job_id) && job_id.size <= 100
+    end
+
+    # Validate job ID from URL path
+    def self.validate_job_id(job_id : String) : ValidationResult
+      result = ValidationResult.new(true)
+
+      if job_id.empty?
+        result.add_error("job_id", "Job ID cannot be empty")
+      elsif !valid_job_id?(job_id)
+        result.add_error("job_id", "Job ID contains invalid characters",
+          JSON::Any.new(job_id), "invalid_format")
+      end
+
+      result
+    end
+
+    # Sanitize error message for external clients (hide internal details)
+    def self.safe_error_message(operation : String) : String
+      "An error occurred while #{operation}. Please try again later."
+    end
+
     private def self.queue_exists?(name : String) : Bool
       JoobQ.queues.has_key?(name)
     end

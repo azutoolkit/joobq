@@ -218,7 +218,7 @@ module JoobQ
 
           error_response = {
             error:     "Failed to enqueue job",
-            message:   ex.message || "Unknown error occurred",
+            message:   APIValidation.safe_error_message("enqueuing job"),
             timestamp: Time.local.to_rfc3339,
           }
 
@@ -399,12 +399,13 @@ module JoobQ
           Log.error &.emit(
             "Error reprocessing busy jobs for queue",
             queue: queue_name,
-            error: ex.message || "Unknown error"
+            error: ex.message || "Unknown error",
+            backtrace: ex.backtrace?.try(&.first(5).join("\n"))
           )
 
           response = {
             status:    "error",
-            message:   "Failed to reprocess busy jobs for queue '#{queue_name}': #{ex.message}",
+            message:   APIValidation.safe_error_message("reprocessing busy jobs"),
             queue:     queue_name,
             timestamp: Time.local.to_rfc3339,
           }
@@ -473,7 +474,7 @@ module JoobQ
 
           response = {
             status:    "error",
-            message:   "Failed to get pipeline health: #{ex.message}",
+            message:   APIValidation.safe_error_message("getting pipeline health"),
             timestamp: Time.local.to_rfc3339,
           }
           context.response.status = HTTP::Status::INTERNAL_SERVER_ERROR
@@ -510,7 +511,7 @@ module JoobQ
 
           response = {
             status:    "error",
-            message:   "Failed to get pipeline statistics: #{ex.message}",
+            message:   APIValidation.safe_error_message("getting pipeline statistics"),
             timestamp: Time.local.to_rfc3339,
           }
           context.response.status = HTTP::Status::INTERNAL_SERVER_ERROR
@@ -539,7 +540,7 @@ module JoobQ
 
           response = {
             status:    "error",
-            message:   "Failed to reset pipeline statistics: #{ex.message}",
+            message:   APIValidation.safe_error_message("resetting pipeline statistics"),
             timestamp: Time.local.to_rfc3339,
           }
           context.response.status = HTTP::Status::INTERNAL_SERVER_ERROR
@@ -590,7 +591,7 @@ module JoobQ
 
           response = {
             status:    "error",
-            message:   "Failed to get retrying jobs: #{ex.message}",
+            message:   APIValidation.safe_error_message("getting retrying jobs"),
             timestamp: Time.local.to_rfc3339,
           }
           context.response.status_code = 500
@@ -638,7 +639,7 @@ module JoobQ
 
           response = {
             status:    "error",
-            message:   "Failed to get dead jobs: #{ex.message}",
+            message:   APIValidation.safe_error_message("getting dead jobs"),
             timestamp: Time.local.to_rfc3339,
           }
           context.response.status_code = 500
@@ -665,6 +666,14 @@ module JoobQ
         end
 
         job_id = job_match[1]
+
+        # Validate job ID format to prevent path traversal
+        job_validation = APIValidation.validate_job_id(job_id)
+        unless job_validation.success?
+          context.response.status_code = 400
+          context.response.print(job_validation.error_response.to_json)
+          return
+        end
 
         begin
           redis_store = RedisStore.instance
@@ -721,7 +730,7 @@ module JoobQ
 
           response = {
             status:    "error",
-            message:   "Failed to retry job: #{ex.message}",
+            message:   APIValidation.safe_error_message("retrying job"),
             timestamp: Time.local.to_rfc3339,
           }
           context.response.status_code = 500

@@ -92,7 +92,7 @@ module JoobQ
 
         @recent_errors.each do |error|
           begin
-            error_time = Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC)
+            error_time = parse_rfc3339_timestamp(error.occurred_at)
             if error_time.to_local >= cutoff_time
               error_key = "#{error.error_type}:#{error.queue_name}"
               time_windowed_counts[error_key] = (time_windowed_counts[error_key]? || 0) + 1
@@ -173,7 +173,7 @@ module JoobQ
         @recent_errors.reject! { |error|
           begin
             # Parse the timestamp and convert to local time for comparison
-            error_time = Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC)
+            error_time = parse_rfc3339_timestamp(error.occurred_at)
             error_time.to_local < cutoff_time
           rescue
             true
@@ -206,8 +206,8 @@ module JoobQ
       cutoff_time = Time.local - @time_window
       @recent_errors.reject! { |error|
         begin
-          # Parse the timestamp and convert to local time for comparison
-          error_time = Time.parse(error.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC)
+          # Parse the timestamp - handle both with and without fractional seconds
+          error_time = parse_rfc3339_timestamp(error.occurred_at)
           error_time.to_local < cutoff_time
         rescue
           true
@@ -219,6 +219,9 @@ module JoobQ
       if @recent_errors.size > max_immediate
         @recent_errors = @recent_errors.last(max_immediate)
       end
+
+      # Decay error counts to prevent memory leak
+      decay_error_counts
     end
 
     private def decay_error_counts : Nil
@@ -233,6 +236,15 @@ module JoobQ
 
       # Remove counts for errors that are no longer recent
       @error_counts.reject! { |key, _| !current_error_keys.includes?(key) }
+    end
+
+    # Parse RFC3339 timestamp, handling both with and without fractional seconds
+    private def parse_rfc3339_timestamp(timestamp : String) : Time
+      # Try parsing with fractional seconds first (from to_rfc3339)
+      Time.parse_rfc3339(timestamp)
+    rescue
+      # Fall back to format without fractional seconds
+      Time.parse(timestamp, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC)
     end
 
     private def check_alerts(error_context : ErrorContext) : Nil
@@ -299,7 +311,7 @@ module JoobQ
     private def store_error_in_redis_pipelined(error_context : ErrorContext) : Nil
       store = JoobQ.store.as(RedisStore)
       error_id = "#{error_context.job_id}:#{Time.local.to_unix}"
-      timestamp = Time.parse(error_context.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC).to_unix
+      timestamp = parse_rfc3339_timestamp(error_context.occurred_at).to_unix
       error_key = "#{error_context.error_type}:#{error_context.queue_name}"
 
       store.redis.pipelined do |pipe|
@@ -399,7 +411,7 @@ module JoobQ
         store.redis.pipelined do |pipe|
           error_contexts.each do |error_context|
             error_id = "#{error_context.job_id}:#{Time.local.to_unix}"
-            timestamp = Time.parse(error_context.occurred_at, "%Y-%m-%dT%H:%M:%S%z", Time::Location::UTC).to_unix
+            timestamp = parse_rfc3339_timestamp(error_context.occurred_at).to_unix
             error_key = "#{error_context.error_type}:#{error_context.queue_name}"
 
             # Store error context

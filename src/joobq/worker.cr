@@ -68,7 +68,18 @@ module JoobQ
                 # Process jobs in smaller concurrent batches to reduce connection pressure
                 jobs.each_slice(WORKER_BATCH_SLICE_SIZE) do |job_batch|
                   job_batch.each do |job|
-                    spawn { handle_job_async(job) }
+                    # Spawn with error containment to prevent fiber crashes from affecting worker
+                    spawn do
+                      begin
+                        handle_job_async(job)
+                      rescue ex : Exception
+                        Log.error &.emit("Unhandled error in job fiber",
+                          queue: @queue.name,
+                          worker_id: @worker_id,
+                          error: ex.message,
+                          error_class: ex.class.name)
+                      end
+                    end
                   end
                   # Small delay between batches to allow connection reuse
                   sleep WORKER_BATCH_DELAY if job_batch.size > 1

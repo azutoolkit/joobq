@@ -76,7 +76,7 @@ module JoobQ
   end
 
   # Initialize configuration with hybrid loading method (requires block)
-  def self.initialize_config_with(loading_method : Symbol, *args, **kwargs, &block) : Nil
+  def self.initialize_config_with(loading_method : Symbol, *args, **kwargs, &) : Nil
     return if @@config_initialized
 
     case loading_method
@@ -179,6 +179,9 @@ module JoobQ
 
     # Start delayed job scheduler (processes retrying jobs from DELAYED_SET)
     config.delayed_job_scheduler.start
+
+    # Start expired job reaper (scans queues for expired waiting/processing jobs)
+    config.expired_job_reaper.start
 
     queues.each do |key, queue|
       Log.info { "JoobQ starting #{key} queue..." }

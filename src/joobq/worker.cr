@@ -236,54 +236,52 @@ module JoobQ
 
     # Move unparseable job to dead letter queue
     private def move_unparseable_job_to_dead_letter(job_json : String, job_id : String) : Nil
-      begin
-        # Create a minimal job structure for dead letter queue
-        dead_job_data = {
-          "jid"    => job_id,
-          "queue"  => @queue.name,
-          "status" => "Dead",
-          "error"  => {
-            "failed_at"      => Time.local.to_rfc3339,
-            "message"        => "Job could not be parsed",
-            "backtrace"      => "JSON parsing failed",
-            "cause"          => "",
-            "error_type"     => "serialization_error",
-            "error_class"    => "JSON::Error",
-            "retry_count"    => 0,
-            "system_context" => {
-              "worker_id"                => @worker_id,
-              "original_job_data_length" => job_json.size.to_s,
-            },
+      # Create a minimal job structure for dead letter queue
+      dead_job_data = {
+        "jid"    => job_id,
+        "queue"  => @queue.name,
+        "status" => "Dead",
+        "error"  => {
+          "failed_at"      => Time.local.to_rfc3339,
+          "message"        => "Job could not be parsed",
+          "backtrace"      => "JSON parsing failed",
+          "cause"          => "",
+          "error_type"     => "serialization_error",
+          "error_class"    => "JSON::Error",
+          "retry_count"    => 0,
+          "system_context" => {
+            "worker_id"                => @worker_id,
+            "original_job_data_length" => job_json.size.to_s,
           },
-          "original_job_data" => job_json[0, 1000], # Truncate for storage
-        }
+        },
+        "original_job_data" => job_json[0, 1000], # Truncate for storage
+      }
 
-        # Store in dead letter queue
-        redis_store = @queue.store
-        if redis_store.is_a?(RedisStore)
-          current_timestamp = Time.local.to_unix_ms
-          redis_store.redis.zadd("joobq:dead_letter", current_timestamp, dead_job_data.to_json)
+      # Store in dead letter queue
+      redis_store = @queue.store
+      if redis_store.is_a?(RedisStore)
+        current_timestamp = Time.local.to_unix_ms
+        redis_store.redis.zadd("joobq:dead_letter", current_timestamp, dead_job_data.to_json)
 
-          Log.info &.emit("Unparseable job moved to dead letter queue",
-            job_id: job_id,
-            queue: @queue.name,
-            worker_id: @worker_id
-          )
-        else
-          Log.warn &.emit("Cannot move unparseable job to dead letter - RedisStore not available",
-            job_id: job_id,
-            queue: @queue.name,
-            worker_id: @worker_id
-          )
-        end
-      rescue ex
-        Log.error &.emit("Failed to move unparseable job to dead letter queue",
+        Log.info &.emit("Unparseable job moved to dead letter queue",
           job_id: job_id,
           queue: @queue.name,
-          worker_id: @worker_id,
-          error: ex.message
+          worker_id: @worker_id
+        )
+      else
+        Log.warn &.emit("Cannot move unparseable job to dead letter - RedisStore not available",
+          job_id: job_id,
+          queue: @queue.name,
+          worker_id: @worker_id
         )
       end
+    rescue ex
+      Log.error &.emit("Failed to move unparseable job to dead letter queue",
+        job_id: job_id,
+        queue: @queue.name,
+        worker_id: @worker_id,
+        error: ex.message
+      )
     end
   end
 end

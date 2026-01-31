@@ -58,7 +58,7 @@ module JoobQ
           sleep 0.1.seconds
         end
 
-        queue.size.should eq(0)  # All jobs should be processed
+        queue.size.should eq(0) # All jobs should be processed
         queue.stop!
       end
 

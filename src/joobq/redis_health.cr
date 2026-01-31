@@ -36,71 +36,65 @@ module JoobQ
 
     # Get Redis server information
     def server_info : Hash(String, String)
-      begin
-        info = @redis.info("server")
-        {
-          "redis_version"     => info["redis_version"]?.to_s || "unknown",
-          "redis_mode"        => info["redis_mode"]?.to_s || "unknown",
-          "os"                => info["os"]?.to_s || "unknown",
-          "arch_bits"         => info["arch_bits"]?.to_s || "unknown",
-          "uptime_in_seconds" => info["uptime_in_seconds"]?.to_s || "unknown",
-        }
-      rescue ex
-        {
-          "redis_version"     => "unknown",
-          "redis_mode"        => "unknown",
-          "os"                => "unknown",
-          "arch_bits"         => "unknown",
-          "uptime_in_seconds" => "unknown",
-          "error"             => ex.message || "Failed to get server info",
-        }
-      end
+      info = @redis.info("server")
+      {
+        "redis_version"     => info["redis_version"]?.to_s || "unknown",
+        "redis_mode"        => info["redis_mode"]?.to_s || "unknown",
+        "os"                => info["os"]?.to_s || "unknown",
+        "arch_bits"         => info["arch_bits"]?.to_s || "unknown",
+        "uptime_in_seconds" => info["uptime_in_seconds"]?.to_s || "unknown",
+      }
+    rescue ex
+      {
+        "redis_version"     => "unknown",
+        "redis_mode"        => "unknown",
+        "os"                => "unknown",
+        "arch_bits"         => "unknown",
+        "uptime_in_seconds" => "unknown",
+        "error"             => ex.message || "Failed to get server info",
+      }
     end
 
     # Get memory usage information
     def memory_info : Hash(String, String)
-      begin
-        info = @redis.info("memory")
-        {
-          "used_memory"            => info["used_memory"]?.to_s || "unknown",
-          "used_memory_human"      => info["used_memory_human"]?.to_s || "unknown",
-          "used_memory_peak"       => info["used_memory_peak"]?.to_s || "unknown",
-          "used_memory_peak_human" => info["used_memory_peak_human"]?.to_s || "unknown",
-          "used_memory_rss"        => info["used_memory_rss"]?.to_s || "unknown",
-          "used_memory_rss_human"  => info["used_memory_rss_human"]?.to_s || "unknown",
-        }
-      rescue ex
-        {
-          "used_memory"            => "unknown",
-          "used_memory_human"      => "unknown",
-          "used_memory_peak"       => "unknown",
-          "used_memory_peak_human" => "unknown",
-          "used_memory_rss"        => "unknown",
-          "used_memory_rss_human"  => "unknown",
-          "error"                  => ex.message || "Failed to get memory info",
-        }
-      end
+      info = @redis.info("memory")
+      {
+        "used_memory"            => info["used_memory"]?.to_s || "unknown",
+        "used_memory_human"      => info["used_memory_human"]?.to_s || "unknown",
+        "used_memory_peak"       => info["used_memory_peak"]?.to_s || "unknown",
+        "used_memory_peak_human" => info["used_memory_peak_human"]?.to_s || "unknown",
+        "used_memory_rss"        => info["used_memory_rss"]?.to_s || "unknown",
+        "used_memory_rss_human"  => info["used_memory_rss_human"]?.to_s || "unknown",
+      }
+    rescue ex
+      {
+        "used_memory"            => "unknown",
+        "used_memory_human"      => "unknown",
+        "used_memory_peak"       => "unknown",
+        "used_memory_peak_human" => "unknown",
+        "used_memory_rss"        => "unknown",
+        "used_memory_rss_human"  => "unknown",
+        "error"                  => ex.message || "Failed to get memory info",
+      }
     end
 
     # Get client information
     def client_info : Hash(String, String)
-      begin
-        info = @redis.info("clients")
-        {
-          "connected_clients"          => info["connected_clients"]?.to_s || "unknown",
-          "client_longest_output_list" => info["client_longest_output_list"]?.to_s || "unknown",
-          "client_biggest_input_buf"   => info["client_biggest_input_buf"]?.to_s || "unknown",
-          "blocked_clients"            => info["blocked_clients"]?.to_s || "unknown",
-        }
-      rescue ex
-        {
-          "connected_clients"          => "unknown",
-          "client_longest_output_list" => "unknown",
-          "client_biggest_input_buf"   => "unknown",
-          "blocked_clients"            => "unknown",
-          "error"                      => ex.message || "Failed to get client info",
-        }
-      end
+      info = @redis.info("clients")
+      {
+        "connected_clients"          => info["connected_clients"]?.to_s || "unknown",
+        "client_longest_output_list" => info["client_longest_output_list"]?.to_s || "unknown",
+        "client_biggest_input_buf"   => info["client_biggest_input_buf"]?.to_s || "unknown",
+        "blocked_clients"            => info["blocked_clients"]?.to_s || "unknown",
+      }
+    rescue ex
+      {
+        "connected_clients"          => "unknown",
+        "client_longest_output_list" => "unknown",
+        "client_biggest_input_buf"   => "unknown",
+        "blocked_clients"            => "unknown",
+        "error"                      => ex.message || "Failed to get client info",
+      }
     end
 
     # Comprehensive health report

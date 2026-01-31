@@ -157,6 +157,19 @@ module JoobQ
     # Delayed job scheduler (processes retrying jobs)
     property delayed_job_scheduler : DelayedJobScheduler = DelayedJobScheduler.new
 
+    # Expired job reaper configuration
+    property reaper_interval : Time::Span = 30.seconds
+    property reaper_scan_limit : Int32 = 1000
+
+    # Expired job reaper (scans queues for expired jobs)
+    getter expired_job_reaper : ExpiredJobReaper do
+      ExpiredJobReaper.new(
+        store: store,
+        interval: reaper_interval,
+        scan_limit: reaper_scan_limit
+      )
+    end
+
     # DSL: Add custom middlewares
     def use(& : ->)
       yield middlewares

@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: crystallang/crystal
+      image: crystallang/crystal:1.22.0
 
     services:
       redis:
@@ -22,15 +22,28 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+    env:
+      JOOBQ_ENV: test
+      REDIS_URL: redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: shards install
 
-      - name: Run tests
+      - name: Format
+        run: crystal tool format --check src spec
+
+      # Crystal's default execution context is parallel: races only show with more than one thread.
+      - name: Run tests (1 worker)
         run: crystal spec
         env:
-          REDIS_URL: redis:6379
-          REDIS_HOST: redis
-          REDIS_PORT: 6379
+          CRYSTAL_WORKERS: 1
+
+      - name: Run tests (4 workers)
+        run: crystal spec
+        env:
+          CRYSTAL_WORKERS: 4

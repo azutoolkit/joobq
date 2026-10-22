@@ -676,24 +676,9 @@ module JoobQ
         end
 
         begin
-          redis_store = RedisStore.instance
-
-          # Find the job in dead letter queue
-          dead_jobs = redis_store.redis.zrange("joobq:dead_letter", 0, -1)
-          job_found = false
-          job_to_retry : String? = nil
-
-          dead_jobs.each do |job_data|
-            job_json = job_data.as(String)
-            parsed = JSON.parse(job_json)
-            if parsed["jid"]?.try(&.as_s) == job_id
-              job_found = true
-              job_to_retry = job_json
-              break
-            end
-          end
-
-          unless job_found || job_to_retry
+          dlq = DeadLetterQueue.new
+          entry = dlq.find(job_id)
+          unless entry
             context.response.status_code = 404
             context.response.print({
               error:     "Job not found",
@@ -703,27 +688,23 @@ module JoobQ
             return
           end
 
-          if job_to_retry
-            # Parse the job to get its queue
-            parsed_job = JSON.parse(job_to_retry.not_nil!)
-            queue_name = parsed_job["queue"]?.try(&.as_s) || "default"
-
-            # Remove from dead letter queue and add back to main queue
-            redis_store.redis.pipelined do |pipe|
-              pipe.zrem("joobq:dead_letter", job_to_retry.not_nil!)
-              pipe.lpush(queue_name, job_to_retry.not_nil!)
-            end
-
-            # Note: Cache invalidation removed as API Cache has been removed
-
-            response = {
+          outcome = dlq.redrive([job_id])
+          if outcome.succeeded == 1
+            context.response.print({
               status:    "success",
-              message:   "Job '#{job_id}' has been moved from dead letter queue back to '#{queue_name}' queue",
+              message:   "Job '#{job_id}' has been moved from dead letter queue back to '#{entry.queue}' queue",
               job_id:    job_id,
-              queue:     queue_name,
+              queue:     entry.queue,
               timestamp: Time.local.to_rfc3339,
-            }
-            context.response.print(response.to_json)
+            }.to_json)
+          else
+            unredrivable = !outcome.unredrivable.empty?
+            context.response.status_code = unredrivable ? 422 : 409
+            context.response.print({
+              error:     unredrivable ? "Job cannot be retried" : "Job was already handled",
+              message:   unredrivable ? "The stored job could not be parsed, so it cannot run again" : "Another operator moved this job first",
+              timestamp: Time.local.to_rfc3339,
+            }.to_json)
           end
         rescue ex
           Log.error &.emit("Error retrying dead job", job_id: job_id, error: ex.message)
@@ -739,18 +720,39 @@ module JoobQ
       end,
     } of NamedTuple(method: String, path: String) => Proc(HTTP::Server::Context, Nil)
 
+    @@param_routes : Array({String, Array(String), Proc(HTTP::Server::Context, Nil)})?
+
     def self.register_endpoint(method, path, handler)
       ENDPOINTS[{method: method, path: path}] = handler
+      @@param_routes = nil
+    end
+
+    # Routes with ":param" segments, split once instead of on every request.
+    protected def self.param_routes
+      @@param_routes ||= ENDPOINTS.compact_map do |key, handler|
+        {key[:method], key[:path].split('/'), handler} if key[:path].includes?(':')
+      end
     end
 
     def call(context : HTTP::Server::Context)
       method = context.request.method
       path = context.request.path
-      if handler = ENDPOINTS[{method: method, path: path}]?
+      if handler = ENDPOINTS[{method: method, path: path}]? || match_param_route(method, path)
         handler.call(context)
       else
         call_next(context)
       end
+    end
+
+    # Finds a handler registered with ":param" segments, e.g. "/joobq/jobs/:job_id/retry".
+    private def match_param_route(method : String, path : String)
+      segments = path.split('/')
+      self.class.param_routes.each do |route_method, pattern, handler|
+        next unless route_method == method && pattern.size == segments.size
+
+        return handler if pattern.zip(segments).all? { |part, seg| part.starts_with?(':') ? !seg.empty? : part == seg }
+      end
+      nil
     end
   end
 end

@@ -9,12 +9,12 @@ module JoobQ
 
     # Connection pool health check with detailed metrics
     def health_check : Hash(String, String | Int32 | Bool | Float64)
-      start_time = Time.monotonic
+      start_time = Time.instant
 
       begin
         # Try a simple ping
         @redis.ping
-        response_time = (Time.monotonic - start_time).total_milliseconds
+        response_time = (Time.instant - start_time).total_milliseconds
 
         {
           "status"           => "healthy",

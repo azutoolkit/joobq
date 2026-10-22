@@ -6,8 +6,7 @@ module JoobQ
     DEAD_LETTER = "joobq:dead_letter"
     PROCESSING  = "joobq:processing"
 
-    @running = Atomic(Bool).new(false)
-    @reaper_fiber : Fiber?
+    @loop = BackgroundLoop.new("expired_job_reaper")
 
     def initialize(
       @store : Store = RedisStore.instance,
@@ -17,31 +16,20 @@ module JoobQ
     end
 
     def start
-      return if @running.get
-      @running.set(true)
-
-      @reaper_fiber = spawn do
-        Log.info &.emit("Expired job reaper started",
-          interval_seconds: @interval.total_seconds,
-          scan_limit: @scan_limit
-        )
-
-        while @running.get
-          begin
-            reap_expired_jobs
-            sleep @interval
-          rescue ex
-            Log.error &.emit("Expired job reaper error", error: ex.message)
-            sleep 5.seconds
-          end
-        end
+      started = @loop.start do
+        reap_expired_jobs
+        @interval
       end
+      return unless started
+
+      Log.info &.emit("Expired job reaper started",
+        interval_seconds: @interval.total_seconds,
+        scan_limit: @scan_limit
+      )
     end
 
     def stop
-      return unless @running.get
-      @running.set(false)
-      sleep 0.1.seconds
+      return unless @loop.stop
       Log.info &.emit("Expired job reaper stopped")
     end
 

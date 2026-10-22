@@ -15,7 +15,7 @@ module JoobQ
     getter notify_alert : Proc(Hash(String, String), Nil) = ->(_alert_context : Hash(String, String)) { }
 
     # Thread safety mutex for shared state
-    @mutex = Mutex.new
+    @mutex = Sync::Mutex.new
 
     # Redis keys for error storage
     private ERROR_COUNTS_KEY  = "joobq:error_counts"

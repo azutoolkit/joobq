@@ -2,8 +2,7 @@ module JoobQ
   class DelayedJobScheduler
     Log = ::Log.for("DELAYED_JOB_SCHEDULER")
 
-    @running = Atomic(Bool).new(false)
-    @scheduler_fiber : Fiber?
+    @loop = BackgroundLoop.new("delayed_job_scheduler")
 
     def initialize(@store : Store = RedisStore.instance)
     end
@@ -15,31 +14,16 @@ module JoobQ
 
     # Start the scheduler to process due delayed jobs
     def start
-      return if @running.get
-      @running.set(true)
-
-      @scheduler_fiber = spawn do
-        Log.info &.emit("Delayed job scheduler started")
-
-        while @running.get
-          begin
-            process_due_jobs
-            sleep 1.second # Check every second for due jobs
-          rescue ex
-            Log.error &.emit("Delayed job scheduler error", error: ex.message)
-            sleep 5.seconds # Back off on error
-          end
-        end
+      started = @loop.start do
+        process_due_jobs
+        1.second # Check every second for due jobs
       end
+      Log.info &.emit("Delayed job scheduler started") if started
     end
 
-    # Stop the scheduler
+    # Stop the scheduler and wait for its fiber to exit
     def stop
-      return unless @running.get
-      @running.set(false)
-      # Give the fiber time to finish its current iteration
-      sleep 0.1.seconds
-      Log.info &.emit("Delayed job scheduler stopped")
+      Log.info &.emit("Delayed job scheduler stopped") if @loop.stop
     end
 
     # Process delayed jobs that are due for all configured queues

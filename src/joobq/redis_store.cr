@@ -83,6 +83,7 @@ module JoobQ
 
     def enqueue(job : Job) : String
       redis.rpush job.queue, job.to_json
+      Events.emit("job.enqueued") { {jid: job.jid.to_s, queue: job.queue} }
 
       Log.debug &.emit("Job enqueued", job_id: job.jid.to_s, queue: job.queue)
       job.jid.to_s
@@ -94,7 +95,7 @@ module JoobQ
 
       return if jobs.empty?
 
-      start_time = Time.monotonic
+      start_time = Time.instant
       total_enqueued = 0
 
       begin
@@ -105,9 +106,10 @@ module JoobQ
             end
           end
           total_enqueued += batch_jobs.size
+          batch_jobs.each { |job| Events.emit("job.enqueued") { {jid: job.jid.to_s, queue: job.queue} } }
         end
 
-        duration = Time.monotonic - start_time
+        duration = Time.instant - start_time
         Log.info &.emit("Batch enqueue successful",
           jobs_count: total_enqueued,
           duration_ms: duration.total_milliseconds.round(2),
@@ -170,8 +172,10 @@ module JoobQ
       false
     end
 
+    # Scored by time of death like every other dead-letter writer, so entries sort
+    # and age consistently; `expiration_time` is kept for the Store interface.
     def mark_as_dead(job : Job, expiration_time : Int64) : Nil
-      redis.zadd DEAD_LETTER, expiration_time, job.to_json
+      redis.zadd DEAD_LETTER, Time.utc.to_unix_ms, job.to_json
     end
 
     def schedule(job : Job, delay_in_ms : Int64, delay_set : String = DELAYED_SET) : Nil
@@ -496,6 +500,33 @@ module JoobQ
       false
     end
 
+    def paused?(queue_name : String) : Bool
+      redis.exists(pause_key(queue_name)) == 1
+    end
+
+    def set_paused(queue_name : String, paused : Bool) : Nil
+      paused ? redis.set(pause_key(queue_name), "1") : redis.del(pause_key(queue_name))
+    end
+
+    def desired_concurrency(queue_name : String) : {count: Int32, set_at: Int64}?
+      count, set_at = redis.hmget(config_key(queue_name), "concurrency", "set_at")
+      return unless count && set_at
+
+      {count: count.to_s.to_i, set_at: set_at.to_s.to_i64}
+    end
+
+    def set_concurrency(queue_name : String, count : Int32) : Nil
+      redis.hmset(config_key(queue_name), {"concurrency" => count.to_s, "set_at" => Time.utc.to_unix_ms.to_s})
+    end
+
+    private def config_key(queue_name : String) : String
+      "joobq:queue:#{queue_name}:config"
+    end
+
+    private def pause_key(queue_name : String) : String
+      "joobq:queue:#{queue_name}:paused"
+    end
+
     # High-performance move to dead letter queue using pipelined operations
     def move_to_dead_letter(job : Job, queue_name : String) : Nil
       current_timestamp = Time.local.to_unix_ms
@@ -517,6 +548,7 @@ module JoobQ
         pipe.hincrby("joobq:stats:total_dead_letter", "global", 1)
       end
 
+      Events.emit("job.dead") { {jid: job.jid.to_s, queue: queue_name} }
       Log.debug &.emit("Job moved to dead letter queue",
         job_id: job.jid.to_s,
         queue: queue_name
@@ -547,6 +579,7 @@ module JoobQ
         pipe.hincrby("joobq:stats:total_retries", "global", 1)
       end
 
+      Events.emit("job.retrying") { {jid: job.jid.to_s, queue: queue_name, delay_ms: delay_ms} }
       Log.debug &.emit("Job moved to retry queue",
         job_id: job.jid.to_s,
         queue: queue_name,

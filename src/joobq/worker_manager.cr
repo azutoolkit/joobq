@@ -9,10 +9,10 @@ module JoobQ
     private RESTART_COOLDOWN_SECONDS =  5
 
     getter workers : Array(Worker(T)) = [] of Worker(T)
-    getter workers_mutex = Mutex.new
-    getter terminate_channel : Channel(Nil) = Channel(Nil).new
+    getter workers_mutex = Sync::Mutex.new
     property total_workers : Int32
     getter stopped : Atomic(Bool) = Atomic(Bool).new(false)
+    getter started : Atomic(Bool) = Atomic(Bool).new(false)
     @worker_id_counter : Atomic(Int32) = Atomic(Int32).new(0)
     @restart_times : Array(Time) = [] of Time
     @last_restart_time : Time? = nil
@@ -24,6 +24,7 @@ module JoobQ
     def start_workers
       @workers_mutex.synchronize do
         return if stopped.get
+        started.set(true)
         @workers.each &.run
       end
     end
@@ -38,7 +39,7 @@ module JoobQ
         # Check if any workers are running before sending termination signals
         had_running_workers = @workers.any?(&.running?)
         if had_running_workers
-          @workers.size.times { terminate_channel.send(nil) }
+          @workers.each(&.terminate)
         end
       end
 
@@ -142,6 +143,22 @@ module JoobQ
       end
     end
 
+    # Grows or shrinks the pool to `count` workers.
+    def resize(count : Int32) : Nil
+      @workers_mutex.synchronize do
+        return if stopped.get
+        @total_workers = count
+        while @workers.size < count
+          worker = create_worker
+          @workers << worker
+          worker.run if started.get
+        end
+        while @workers.size > count
+          @workers.pop.terminate
+        end
+      end
+    end
+
     def remove_worker
       @workers_mutex.synchronize do
         return if @workers.empty?
@@ -158,15 +175,16 @@ module JoobQ
 
     private def create_worker
       worker_id = @worker_id_counter.add(1)
-      Worker(T).new(worker_id, terminate_channel, @queue)
+      # Buffered, so terminating a busy worker never blocks the caller.
+      Worker(T).new(worker_id, Channel(Nil).new(1), @queue)
     end
 
     private def wait_for_workers_to_stop
       # Wait up to 5 seconds for all workers to stop
       timeout = 5.seconds
-      start_time = Time.monotonic
+      start_time = Time.instant
 
-      while Time.monotonic - start_time < timeout
+      while Time.instant - start_time < timeout
         @workers_mutex.synchronize do
           all_stopped = @workers.all? { |worker| !worker.running? }
           if all_stopped

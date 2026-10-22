@@ -45,16 +45,16 @@ module JoobQ
         sleep 0.1.seconds
 
         # Wait for workers to start running
-        start_time = Time.monotonic
-        while !queue.running? && (Time.monotonic - start_time) < 5.seconds
+        start_time = Time.instant
+        while !queue.running? && (Time.instant - start_time) < 5.seconds
           sleep 0.1.seconds
         end
 
         queue.running?.should be_true
 
         # Wait for processing to complete or timeout
-        start_time = Time.monotonic
-        while queue.size > 0 && (Time.monotonic - start_time) < 15.seconds
+        start_time = Time.instant
+        while queue.size > 0 && (Time.instant - start_time) < 15.seconds
           sleep 0.1.seconds
         end
 
@@ -83,16 +83,16 @@ module JoobQ
         sleep 0.1.seconds
 
         # Wait for workers to start running
-        start_time = Time.monotonic
-        while !failed_queue.running? && (Time.monotonic - start_time) < 5.seconds
+        start_time = Time.instant
+        while !failed_queue.running? && (Time.instant - start_time) < 5.seconds
           sleep 0.1.seconds
         end
 
         failed_queue.running?.should be_true
 
         # Wait for processing attempts (jobs will fail and retry)
-        start_time = Time.monotonic
-        while failed_queue.size > 0 && (Time.monotonic - start_time) < 20.seconds
+        start_time = Time.instant
+        while failed_queue.size > 0 && (Time.instant - start_time) < 20.seconds
           sleep 0.1.seconds
         end
 

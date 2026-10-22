@@ -158,5 +158,24 @@ module JoobQ
     abstract def verify_job_removed_from_processing?(job_id : String, queue_name : String) : Bool
     abstract def processing_queue_size(queue_name : String) : Int64
     abstract def cleanup_jobs_batch(job_jsons : Array(String), queue_name : String) : Nil
+
+    # Optional capabilities. Reads are safe defaults; writes raise, so a store
+    # that cannot pause or resize queues says so instead of silently ignoring it.
+    def paused?(queue_name : String) : Bool
+      false
+    end
+
+    def set_paused(queue_name : String, paused : Bool) : Nil
+      raise NotImplementedError.new("#{self.class} cannot pause queues")
+    end
+
+    # Desired worker count shared between processes, with when it was set.
+    def desired_concurrency(queue_name : String) : {count: Int32, set_at: Int64}?
+      nil
+    end
+
+    def set_concurrency(queue_name : String, count : Int32) : Nil
+      raise NotImplementedError.new("#{self.class} cannot resize queues")
+    end
   end
 end

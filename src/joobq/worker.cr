@@ -14,7 +14,7 @@ module JoobQ
 
     @terminate_channel : Channel(Nil)
     @queue : BaseQueue
-    @worker_mutex = Mutex.new
+    @worker_mutex = Sync::Mutex.new
 
     private getter middleware_pipeline : MiddlewarePipeline = JoobQ.config.middleware_pipeline
 
@@ -62,7 +62,7 @@ module JoobQ
               break
             else
               # Use batch processing for improved performance and minimal connection usage
-              jobs = @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
+              jobs = @queue.paused? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
 
               if !jobs.empty?
                 # Process jobs in smaller concurrent batches to reduce connection pressure
@@ -114,18 +114,20 @@ module JoobQ
         begin
           parsed_job = T.from_json(job)
           parsed_job.running!
+          Events.emit("job.started") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }
 
           middleware_pipeline.call(parsed_job, @queue, @worker_id) do
             parsed_job.perform
             parsed_job.completed!
             job_completed_successfully = true
+            Events.emit("job.completed") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }
 
             # Log successful completion
             Log.info &.emit("Job completed successfully",
               job_id: parsed_job.jid.to_s,
               queue: @queue.name,
               worker_id: @worker_id,
-              processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s)
+              processing_time: (Time.instant - parsed_job.enqueue_time).total_seconds.to_s)
           end
         rescue ex : JSON::Error
           # Handle unparseable jobs by moving them to dead letter queue
@@ -151,7 +153,7 @@ module JoobQ
             # Log worker-specific error
             additional_context = {
               worker_wid:          wid.to_s,
-              job_processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s,
+              job_processing_time: (Time.instant - parsed_job.enqueue_time).total_seconds.to_s,
             }.to_h
 
             Log.error &.emit(
@@ -262,6 +264,7 @@ module JoobQ
       if redis_store.is_a?(RedisStore)
         current_timestamp = Time.local.to_unix_ms
         redis_store.redis.zadd("joobq:dead_letter", current_timestamp, dead_job_data.to_json)
+        Events.emit("job.dead") { {jid: job_id, queue: @queue.name} }
 
         Log.info &.emit("Unparseable job moved to dead letter queue",
           job_id: job_id,

@@ -4,6 +4,7 @@ ENV["JOOBQ_ENV"] = "test"
 
 require "../src/joobq"
 require "./helpers/all_test_jobs"
+require "./helpers/event_sinks"
 
 # Reset configuration and load from YAML file
 JoobQ.reset_config
@@ -41,13 +42,42 @@ JoobQ.configure do
   end
 end
 
+# Workers started by any spec (including standalone queues the registries do
+# not know about) are stopped when the example ends, so none can keep claiming
+# jobs that a later example enqueues.
+module SpecWorkers
+  STOPPERS = [] of ->
+
+  def self.stop_all
+    STOPPERS.each(&.call)
+    STOPPERS.clear
+  end
+end
+
+class JoobQ::Worker(T)
+  def run
+    SpecWorkers::STOPPERS << -> { terminate if running.get }
+    previous_def
+  end
+end
+
 Spec.before_each do
-  # Stop all running workers before resetting
-  JoobQ.config.queues.each_value do |queue|
-    if queue.running?
-      queue.stop!
-    end
+  # Two queue registries exist (QueueFactory vs. config.queues); stop! blocks
+  # until the queue's workers have exited.
+  [JoobQ.config.queues, JoobQ.queues].each do |registry|
+    registry.each_value { |queue| queue.stop! if queue.running? }
   end
 
   JoobQ.reset
+end
+
+Spec.after_each { SpecWorkers.stop_all }
+
+# Polls until the block is truthy or the timeout lapses; returns the last result.
+def eventually(timeout : Time::Span = 3.seconds, &) : Bool
+  deadline = Time.instant + timeout
+  until (ok = yield) || Time.instant >= deadline
+    sleep 20.milliseconds
+  end
+  !!ok
 end

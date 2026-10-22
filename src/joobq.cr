@@ -11,6 +11,8 @@ require "./joobq/api_validation"
 require "./joobq/**"
 
 module JoobQ
+  VERSION = "0.4.2"
+
   # Custom exception for configuration errors
   class ConfigNotInitializedError < Exception
   end

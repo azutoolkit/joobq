@@ -4,6 +4,7 @@ ENV["JOOBQ_ENV"] = "test"
 
 require "../src/joobq"
 require "./helpers/all_test_jobs"
+require "./helpers/event_sinks"
 
 # Reset configuration and load from YAML file
 JoobQ.reset_config
@@ -71,3 +72,12 @@ Spec.before_each do
 end
 
 Spec.after_each { SpecWorkers.stop_all }
+
+# Polls until the block is truthy or the timeout lapses; returns the last result.
+def eventually(timeout : Time::Span = 3.seconds, &) : Bool
+  deadline = Time.instant + timeout
+  until (ok = yield) || Time.instant >= deadline
+    sleep 20.milliseconds
+  end
+  !!ok
+end

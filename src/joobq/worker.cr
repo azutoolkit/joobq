@@ -62,7 +62,7 @@ module JoobQ
               break
             else
               # Use batch processing for improved performance and minimal connection usage
-              jobs = @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
+              jobs = @queue.paused? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
 
               if !jobs.empty?
                 # Process jobs in smaller concurrent batches to reduce connection pressure
@@ -114,11 +114,13 @@ module JoobQ
         begin
           parsed_job = T.from_json(job)
           parsed_job.running!
+          Events.emit("job.started") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }
 
           middleware_pipeline.call(parsed_job, @queue, @worker_id) do
             parsed_job.perform
             parsed_job.completed!
             job_completed_successfully = true
+            Events.emit("job.completed") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }
 
             # Log successful completion
             Log.info &.emit("Job completed successfully",
@@ -262,6 +264,7 @@ module JoobQ
       if redis_store.is_a?(RedisStore)
         current_timestamp = Time.local.to_unix_ms
         redis_store.redis.zadd("joobq:dead_letter", current_timestamp, dead_job_data.to_json)
+        Events.emit("job.dead") { {jid: job_id, queue: @queue.name} }
 
         Log.info &.emit("Unparseable job moved to dead letter queue",
           job_id: job_id,

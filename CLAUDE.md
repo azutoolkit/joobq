@@ -4,7 +4,7 @@
 
 JoobQ is an enterprise-grade, high-performance asynchronous job queue system for the Crystal programming language. It processes up to 35,000 jobs/second using Redis-backed persistence and Crystal's fiber-based concurrency.
 
-- **Version:** 0.4.1
+- **Version:** 0.4.2
 - **License:** MIT
 - **Crystal:** 1.22.0+
 - **Dependencies:** redis, cron_parser
@@ -168,3 +168,7 @@ Expired -------+
 | `joobq:retry_lock:{jid}` | Idempotent retry locks |
 | `joobq:error_counts` | Error counts (hash) |
 | `joobq:recent_errors` | Error contexts (hash) |
+| `joobq:queue:{queue}:paused` | Pause flag, shared across processes |
+| `joobq:queue:{queue}:config` | Desired concurrency + `set_at` (hash) |
+| `joobq:worker:{id}` / `joobq:workers` | Worker heartbeat (TTL'd JSON) / index (zset) |
+| `joobq:events` / `joobq:events:live` | Lifecycle event stream / pub-sub channel |

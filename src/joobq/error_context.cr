@@ -201,6 +201,9 @@ module JoobQ
 
       # Log the error with rich context
       log_error(error_context)
+      Events.emit("job.failed") do
+        {jid: job.jid.to_s, queue: queue.name, worker_id: worker_id, error: exception.message}
+      end
 
       # Update job with error information
       update_job_with_error(job, error_context)

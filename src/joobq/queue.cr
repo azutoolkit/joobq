@@ -4,6 +4,11 @@ module JoobQ
     abstract def add(job : String)
     abstract def start
     abstract def stop!
+    abstract def pause!
+    abstract def resume!
+    abstract def paused? : Bool
+    abstract def resize(count : Int32)
+    abstract def apply_concurrency(count : Int32)
     abstract def name : String
     abstract def size : Int64
     abstract def job_type : String
@@ -23,8 +28,11 @@ module JoobQ
     getter worker_manager : WorkerManager(T) { WorkerManager(T).new(total_workers, self) }
     getter throttle_limit : NamedTuple(limit: Int32, period: Time::Span)?
 
+    PAUSE_CACHE_TTL = 500.milliseconds
+
     def initialize(@name : String, @total_workers : Int32,
                    @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
+      @pause = CachedFlag.new(PAUSE_CACHE_TTL) { store.paused?(name) }
     end
 
     def start
@@ -141,6 +149,41 @@ module JoobQ
 
     def stop!
       worker_manager.stop_workers
+    end
+
+    # Changes the number of workers at runtime. The new size is stored so every
+    # process serving this queue follows it (see WorkerRegistry).
+    def resize(count : Int32)
+      raise ArgumentError.new("workers must be positive") unless count > 0
+
+      store.set_concurrency(name, count)
+      apply_concurrency(count)
+      Events.emit("queue.resized") { {queue: name, concurrency: count} }
+    end
+
+    # Resizes this process only; used when following a size set elsewhere.
+    def apply_concurrency(count : Int32)
+      raise ArgumentError.new("workers must be positive") unless count > 0
+
+      @total_workers = count
+      worker_manager.resize(count)
+    end
+
+    # Pausing is shared through the store, so it holds across processes.
+    def pause!
+      store.set_paused(name, true)
+      @pause.set(true)
+      Events.emit("queue.paused") { {queue: name} }
+    end
+
+    def resume!
+      store.set_paused(name, false)
+      @pause.set(false)
+      Events.emit("queue.resumed") { {queue: name} }
+    end
+
+    def paused? : Bool
+      @pause.get
     end
 
     def next_job : String?

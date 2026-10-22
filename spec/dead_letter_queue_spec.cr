@@ -24,6 +24,18 @@ module JoobQ
       dlq.page(offset: 1, limit: 1).map(&.jid).should eq([old])
     end
 
+    it "keeps an entry whose queue name is not a queue, instead of losing it" do
+      # a key of another type: pushing onto it fails, and a script that already removed the entry would lose it
+      jid = seed.call(1, DeadLetterQueue::KEY, 1000_i64)
+
+      outcome = dlq.redrive([jid])
+
+      outcome.succeeded.should eq(0)
+      outcome.unredrivable.should eq([jid])
+      dlq.find(jid).should_not be_nil
+      dlq.count.should eq(1)
+    end
+
     it "filters by queue" do
       seed.call(1, "example", 1000_i64)
       other = seed.call(2, "test", 2000_i64)

@@ -25,6 +25,29 @@ module JoobQ
     end
 
     describe "#start" do
+      it "reprocesses in-flight jobs once: starting a running queue must not requeue what a worker is processing" do
+        name = "start_guard"
+        redis = JoobQ.store.as(RedisStore).redis
+        [name, "joobq:processing:#{name}"].each { |key| redis.del(key) }
+        queue = Queue(Job1).new(name, 0) # no workers, so nothing consumes what the specs push
+        redis.rpush("joobq:processing:#{name}", %({"jid":"a"}))
+
+        queue.start
+        redis.llen(name).should eq(1) # the first start puts the stranded job back
+
+        redis.rpush("joobq:processing:#{name}", %({"jid":"b"})) # a job a worker is processing right now
+        queue.start
+        redis.llen(name).should eq(1) # a second start leaves it alone
+        redis.llen("joobq:processing:#{name}").should eq(1)
+
+        queue.stop!
+        queue.start
+        redis.llen(name).should eq(2) # after a stop, starting again reprocesses as the first start did
+      ensure
+        queue.try(&.stop!)
+        [name, "joobq:processing:#{name}"].each { |key| redis.try(&.del(key)) } if name
+      end
+
       # Queue Running Test Issue (spec/queue_spec.cr:28):
       # Problem: Race condition where queue.running? was checked before workers had time to start (workers start asynchronously via spawn).
       # Solution: Added proper wait logic to ensure workers start before checking running? status.

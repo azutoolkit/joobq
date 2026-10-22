@@ -30,12 +30,18 @@ module JoobQ
 
     PAUSE_CACHE_TTL = 500.milliseconds
 
+    @started = Atomic(Bool).new(false)
+
     def initialize(@name : String, @total_workers : Int32,
                    @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
       @pause = CachedFlag.new(PAUSE_CACHE_TTL) { store.paused?(name) }
     end
 
+    # Starting a running queue does nothing: `reprocess_busy_jobs!` would move a job that a worker is
+    # still processing back onto the queue, and it would run twice.
     def start
+      return if @started.swap(true)
+
       reprocess_busy_jobs!
       worker_manager.start_workers
     end
@@ -149,6 +155,7 @@ module JoobQ
 
     def stop!
       worker_manager.stop_workers
+      @started.set(false)
     end
 
     # Changes the number of workers at runtime. The new size is stored so every

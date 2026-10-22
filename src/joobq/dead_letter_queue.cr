@@ -8,8 +8,13 @@ module JoobQ
     KEY   = "joobq:dead_letter"
     CHUNK = 200
 
-    # Moves one entry back onto its queue; 0 when someone else got there first.
+    # Moves one entry back onto its queue; 0 when someone else got there first, -1 when the queue's key holds
+    # something that is not a list (nothing is touched then: a failure after the ZREM would lose the entry).
     REDRIVE = <<-LUA
+      local kind = redis.call('TYPE', KEYS[2]).ok
+      if kind ~= 'list' and kind ~= 'none' then
+        return -1
+      end
       if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then
         redis.call('RPUSH', KEYS[2], ARGV[2])
         redis.call('DEL', KEYS[3])
@@ -92,10 +97,12 @@ module JoobQ
       apply(jids) do |entry, tally|
         if !entry.redrivable?
           tally.unredrivable << entry.jid
-        elsif @redis.eval(REDRIVE, [KEY, entry.queue, "joobq:retry_lock:#{entry.jid}"], [entry.member, fresh_payload(entry)]) == 1
-          tally.succeeded += 1
         else
-          tally.conflicted << entry.jid
+          case @redis.eval(REDRIVE, [KEY, entry.queue, "joobq:retry_lock:#{entry.jid}"], [entry.member, fresh_payload(entry)])
+          when  1 then tally.succeeded += 1
+          when -1 then tally.unredrivable << entry.jid # its queue name is not a queue
+          else         tally.conflicted << entry.jid
+          end
         end
       end
     end

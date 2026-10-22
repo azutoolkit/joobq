@@ -22,6 +22,20 @@ module JoobQ
       info.stale?.should be_false
     end
 
+    it "skips an entry it cannot read instead of failing the whole list" do
+      WorkerRegistry.new(store.call, id: "host-ok:1").beat
+      redis.call.set(WorkerRegistry::PREFIX + "host-bad:2", "{not json")
+      redis.call.zadd(WorkerRegistry::INDEX, Time.utc.to_unix_ms, "host-bad:2")
+      redis.call.set(WorkerRegistry::PREFIX + "host-old:3", %({"id":"host-old:3"})) # an older format
+      redis.call.zadd(WorkerRegistry::INDEX, Time.utc.to_unix_ms, "host-old:3")
+
+      ids = WorkerRegistry.all(redis.call).map(&.id)
+
+      ids.should contain("host-ok:1")
+      ids.should_not contain("host-bad:2")
+      ids.should_not contain("host-old:3")
+    end
+
     it "removes the worker when stopped" do
       registry = WorkerRegistry.new(store.call, id: "host-b:2")
       registry.beat

@@ -263,7 +263,10 @@ module JoobQ
       redis_store = @queue.store
       if redis_store.is_a?(RedisStore)
         current_timestamp = Time.local.to_unix_ms
-        redis_store.redis.zadd("joobq:dead_letter", current_timestamp, dead_job_data.to_json)
+        redis_store.redis.pipelined do |pipe|
+          pipe.zadd("joobq:dead_letter", current_timestamp, dead_job_data.to_json)
+          pipe.hincrby(DeadLetterQueue::COUNTS, @queue.name, 1)
+        end
         Events.emit("job.dead") { {jid: job_id, queue: @queue.name} }
 
         Log.info &.emit("Unparseable job moved to dead letter queue",

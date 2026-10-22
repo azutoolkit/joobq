@@ -5,8 +5,9 @@ module JoobQ
   # Each state change is one atomic Lua step, so two operators can never redrive
   # or purge the same entry twice.
   class DeadLetterQueue
-    KEY   = "joobq:dead_letter"
-    CHUNK = 200
+    KEY    = "joobq:dead_letter"
+    COUNTS = "joobq:dead_letter:counts" # entries per queue; writers keep it, `counts` repairs it when it drifts
+    CHUNK  = 200
 
     # Moves one entry back onto its queue; 0 when someone else got there first, -1 when the queue's key holds
     # something that is not a list (nothing is touched then: a failure after the ZREM would lose the entry).
@@ -18,6 +19,7 @@ module JoobQ
       if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then
         redis.call('RPUSH', KEYS[2], ARGV[2])
         redis.call('DEL', KEYS[3])
+        redis.call('HINCRBY', KEYS[4], ARGV[3], -1)
         return 1
       end
       return 0
@@ -63,11 +65,16 @@ module JoobQ
     end
 
     def count(queue : String? = nil) : Int64
-      return @redis.zcard(KEY) unless queue
+      queue ? (counts[queue]? || 0_i64) : @redis.zcard(KEY)
+    end
 
-      total = 0_i64
-      each_entry { |entry| total += 1 if entry.queue == queue }
-      total
+    # Entries per queue without reading them. The hash is trusted only while it adds up to the set's size;
+    # otherwise (a writer that predates it, a lost update) it is rebuilt from the entries.
+    def counts : Hash(String, Int64)
+      stored = read_counts
+      return stored if stored.values.sum == @redis.zcard(KEY)
+
+      recount
     end
 
     # Newest first. `queue` filters; `offset`/`limit` page through the matches.
@@ -98,7 +105,7 @@ module JoobQ
         if !entry.redrivable?
           tally.unredrivable << entry.jid
         else
-          case @redis.eval(REDRIVE, [KEY, entry.queue, "joobq:retry_lock:#{entry.jid}"], [entry.member, fresh_payload(entry)])
+          case @redis.eval(REDRIVE, [KEY, entry.queue, "joobq:retry_lock:#{entry.jid}", COUNTS], [entry.member, fresh_payload(entry), entry.queue])
           when  1 then tally.succeeded += 1
           when -1 then tally.unredrivable << entry.jid # its queue name is not a queue
           else         tally.conflicted << entry.jid
@@ -110,6 +117,7 @@ module JoobQ
     def purge(jids : Array(String)) : Outcome
       apply(jids) do |entry, tally|
         if @redis.zrem(KEY, entry.member) == 1
+          @redis.hincrby(COUNTS, entry.queue, -1)
           tally.succeeded += 1
         else
           tally.conflicted << entry.jid
@@ -120,7 +128,21 @@ module JoobQ
     def purge_all(queue : String? = nil) : Int32
       members = [] of String
       each_entry { |entry| members << entry.member if queue.nil? || entry.queue == queue }
-      members.each_slice(CHUNK).sum { |slice| @redis.command(["ZREM", KEY] + slice).as(Int64).to_i }
+      removed = members.each_slice(CHUNK).sum { |slice| @redis.command(["ZREM", KEY] + slice).as(Int64).to_i }
+      @redis.del(COUNTS) # rebuilt on the next read
+      removed
+    end
+
+    private def read_counts : Hash(String, Int64)
+      @redis.hgetall(COUNTS).to_h { |queue, count| {queue.to_s, count.to_s.to_i64} }.reject { |_, count| count <= 0 }
+    end
+
+    private def recount : Hash(String, Int64)
+      tally = Hash(String, Int64).new(0_i64)
+      each_entry { |entry| tally[entry.queue] += 1 }
+      @redis.del(COUNTS)
+      tally.each { |queue, count| @redis.hset(COUNTS, queue, count) }
+      tally
     end
 
     private class Tally

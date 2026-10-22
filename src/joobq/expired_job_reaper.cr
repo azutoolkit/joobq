@@ -87,13 +87,17 @@ module JoobQ
 
         total_scanned += jobs.size
         expired_jobs = [] of String
+        dead_by_queue = Hash(String, Int32).new(0)
 
         jobs.each do |job_json|
           begin
             parsed = JSON.parse(job_json)
             expires = parsed["expires"]?.try(&.as_i64)
             next unless expires
-            expired_jobs << job_json if current_time_ms > expires
+            next unless current_time_ms > expires
+
+            expired_jobs << job_json
+            dead_by_queue[parsed["queue"]?.try(&.as_s?) || stats_key] += 1
           rescue ex
             Log.warn &.emit("Failed to parse job during reaping",
               list_key: list_key,
@@ -110,6 +114,7 @@ module JoobQ
             end
             pipe.hincrby("joobq:stats:expired", stats_key, expired_jobs.size)
             pipe.hincrby("joobq:stats:dead_letter", stats_key, expired_jobs.size)
+            dead_by_queue.each { |queue, count| pipe.hincrby(DeadLetterQueue::COUNTS, queue, count) }
           end
           total_reaped += expired_jobs.size
           # Removed items shift list down; advance past non-expired items only

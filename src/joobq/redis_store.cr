@@ -175,7 +175,10 @@ module JoobQ
     # Scored by time of death like every other dead-letter writer, so entries sort
     # and age consistently; `expiration_time` is kept for the Store interface.
     def mark_as_dead(job : Job, expiration_time : Int64) : Nil
-      redis.zadd DEAD_LETTER, Time.utc.to_unix_ms, job.to_json
+      redis.pipelined do |pipe|
+        pipe.zadd DEAD_LETTER, Time.utc.to_unix_ms, job.to_json
+        pipe.hincrby DeadLetterQueue::COUNTS, job.queue, 1
+      end
     end
 
     def schedule(job : Job, delay_in_ms : Int64, delay_set : String = DELAYED_SET) : Nil
@@ -539,6 +542,7 @@ module JoobQ
       redis.pipelined do |pipe|
         # Add to dead letter queue
         pipe.zadd(DEAD_LETTER, current_timestamp, job_json)
+        pipe.hincrby(DeadLetterQueue::COUNTS, queue_name, 1)
 
         # Clean up retry lock if it exists
         pipe.del(retry_lock_key)

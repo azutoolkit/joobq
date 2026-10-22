@@ -24,6 +24,45 @@ module JoobQ
       dlq.page(offset: 1, limit: 1).map(&.jid).should eq([old])
     end
 
+    describe "counts per queue" do
+      held = -> { redis.call.hgetall(DeadLetterQueue::COUNTS).to_h { |q, c| {q.to_s, c.to_s.to_i64} } }
+
+      it "are kept by the writers, so reading them never scans the set" do
+        job = ExampleJob.new(1)
+        job.queue = "example"
+        JoobQ.store.as(RedisStore).move_to_dead_letter(job, "example")
+
+        held.call.should eq({"example" => 1_i64})
+        dlq.counts.should eq({"example" => 1_i64})
+        dlq.count("example").should eq(1)
+        dlq.count("other").should eq(0)
+      end
+
+      it "follow redrives and purges" do
+        a = seed.call(1, "example", 1000_i64)
+        b = seed.call(2, "example", 2000_i64)
+        seed.call(3, "other", 3000_i64)
+        dlq.counts # entries seeded without a writer are counted on first read
+
+        dlq.redrive([a]).succeeded.should eq(1)
+        dlq.purge([b]).succeeded.should eq(1)
+
+        held.call.reject { |_, n| n == 0 }.should eq({"other" => 1_i64})
+        dlq.counts.should eq({"other" => 1_i64})
+        dlq.purge_all("other")
+        dlq.counts.should be_empty
+      end
+
+      it "are rebuilt when they no longer add up to the set" do
+        seed.call(1, "example", 1000_i64)
+        seed.call(2, "example", 2000_i64)
+        redis.call.hset(DeadLetterQueue::COUNTS, "example", 7) # drifted
+
+        dlq.counts.should eq({"example" => 2_i64})
+        held.call.should eq({"example" => 2_i64})
+      end
+    end
+
     it "keeps an entry whose queue name is not a queue, instead of losing it" do
       # a key of another type: pushing onto it fails, and a script that already removed the entry would lose it
       jid = seed.call(1, DeadLetterQueue::KEY, 1000_i64)

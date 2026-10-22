@@ -78,7 +78,13 @@ module JoobQ
       cutoff = Time.utc.to_unix_ms - TTL.total_milliseconds.to_i64
       redis.zremrangebyscore(INDEX, "-inf", cutoff)
       ids = redis.zrevrange(INDEX, 0, -1).map(&.to_s)
-      ids.compact_map { |id| redis.get(PREFIX + id).try { |json| WorkerInfo.from_json(json) } }
+      ids.compact_map do |id|
+        json = redis.get(PREFIX + id) || next
+        WorkerInfo.from_json(json)
+      rescue ex : JSON::ParseException | JSON::SerializableError
+        Log.warn &.emit("Ignoring an unreadable worker entry", worker: id, error: ex.message)
+        nil
+      end
     end
 
     # Follows worker counts an operator set after this process started; a

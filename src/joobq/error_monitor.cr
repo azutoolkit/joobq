@@ -374,7 +374,6 @@ module JoobQ
     rescue ex
       Log.warn &.emit("Failed to load errors from Redis", error: ex.message)
       @redis_loaded = true # Mark as loaded even if failed to avoid retrying
-
     end
 
     private def ensure_redis_loaded : Nil

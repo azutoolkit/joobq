@@ -38,6 +38,47 @@ module JoobQ
         dlq.count("other").should eq(0)
       end
 
+      it "are trusted while they add up, so reading them does not scan the set" do
+        seed.call(1, "example", 1000_i64)
+        seed.call(2, "other", 2000_i64)
+        dlq.counts
+        redis.call.hset(DeadLetterQueue::COUNTS, "example", 0)
+        redis.call.hset(DeadLetterQueue::COUNTS, "other", 0)
+        redis.call.hset(DeadLetterQueue::COUNTS, "marker", 2) # adds up to the set, but a rescan would never say this
+
+        dlq.counts.should eq({"marker" => 2_i64})
+      end
+
+      it "come from the entry's own queue, whatever name the caller moved it under" do
+        job = ExampleJob.new(1)
+        job.queue = "example"
+        JoobQ.store.as(RedisStore).move_to_dead_letter(job, "aliased")
+
+        dlq.counts.should eq({"example" => 1_i64})
+        dlq.page(queue: "example").size.should eq(1)
+        dlq.purge([job.jid.to_s]).succeeded.should eq(1)
+        dlq.counts.should be_empty
+      end
+
+      it "count a member once however often it is written" do
+        job = ExampleJob.new(1)
+        job.queue = "example"
+        store = JoobQ.store.as(RedisStore)
+        store.mark_as_dead(job, 0_i64)
+        store.mark_as_dead(job, 0_i64)
+
+        dlq.counts.should eq({"example" => 1_i64})
+        held.call.should eq({"example" => 1_i64})
+      end
+
+      it "stay exact next to members that are not jobs, without rescanning" do
+        seed.call(1, "example", 1000_i64)
+        DeadLetterQueue.add(redis.call, 2000_i64, ["not json"]).should eq(1)
+
+        dlq.counts.should eq({"example" => 1_i64})
+        held.call.should eq({"example" => 1_i64, DeadLetterQueue::UNKNOWN => 1_i64})
+      end
+
       it "follow redrives and purges" do
         a = seed.call(1, "example", 1000_i64)
         b = seed.call(2, "example", 2000_i64)

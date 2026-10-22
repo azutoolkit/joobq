@@ -21,6 +21,8 @@ module JoobQ
 
         store.queue_size("example").should eq(0)
         store.redis.zcard("joobq:dead_letter").should be >= 1
+        DeadLetterQueue.new(store.redis).counts.should eq({"example" => 1_i64})
+        store.redis.hget(DeadLetterQueue::COUNTS, "example").should eq("1") # counted when written, not rebuilt on read
       end
 
       it "does not reap non-expired jobs" do

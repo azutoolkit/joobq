@@ -87,17 +87,13 @@ module JoobQ
 
         total_scanned += jobs.size
         expired_jobs = [] of String
-        dead_by_queue = Hash(String, Int32).new(0)
 
         jobs.each do |job_json|
           begin
             parsed = JSON.parse(job_json)
             expires = parsed["expires"]?.try(&.as_i64)
             next unless expires
-            next unless current_time_ms > expires
-
-            expired_jobs << job_json
-            dead_by_queue[parsed["queue"]?.try(&.as_s?) || stats_key] += 1
+            expired_jobs << job_json if current_time_ms > expires
           rescue ex
             Log.warn &.emit("Failed to parse job during reaping",
               list_key: list_key,
@@ -107,14 +103,12 @@ module JoobQ
         end
 
         if !expired_jobs.empty?
+          # Dead first: a crash between the two leaves a copy in both places rather than none.
+          DeadLetterQueue.add(redis_store.redis, current_time_ms, expired_jobs)
           redis_store.redis.pipelined do |pipe|
-            expired_jobs.each do |job_json|
-              pipe.lrem(list_key, 0, job_json)
-              pipe.zadd(DEAD_LETTER, current_time_ms, job_json)
-            end
+            expired_jobs.each { |job_json| pipe.lrem(list_key, 0, job_json) }
             pipe.hincrby("joobq:stats:expired", stats_key, expired_jobs.size)
             pipe.hincrby("joobq:stats:dead_letter", stats_key, expired_jobs.size)
-            dead_by_queue.each { |queue, count| pipe.hincrby(DeadLetterQueue::COUNTS, queue, count) }
           end
           total_reaped += expired_jobs.size
           # Removed items shift list down; advance past non-expired items only

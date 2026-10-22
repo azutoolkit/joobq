@@ -6,8 +6,59 @@ module JoobQ
   # or purge the same entry twice.
   class DeadLetterQueue
     KEY    = "joobq:dead_letter"
-    COUNTS = "joobq:dead_letter:counts" # entries per queue; writers keep it, `counts` repairs it when it drifts
+    COUNTS = "joobq:dead_letter:counts" # entries per queue, kept by the scripts below
     CHUNK  = 200
+
+    # Entries whose JSON has no queue are counted under this name, so the counts always add up to the set.
+    UNKNOWN = ""
+
+    # The queue an entry belongs to, read the way `parse` reads it: from the entry itself, never from the caller.
+    QUEUE_OF = <<-LUA
+      local function queue_of(member)
+        local ok, job = pcall(cjson.decode, member)
+        if ok and type(job) == 'table' and type(job.queue) == 'string' then return job.queue end
+        return ''
+      end
+    LUA
+
+    # Adds members (ARGV[2..], scored ARGV[1]) to the set. A member that is already there is not counted again.
+    ADD = QUEUE_OF + <<-LUA
+      local added = 0
+      for i = 2, #ARGV do
+        if redis.call('ZADD', KEYS[1], ARGV[1], ARGV[i]) == 1 then
+          redis.call('HINCRBY', KEYS[2], queue_of(ARGV[i]), 1)
+          added = added + 1
+        end
+      end
+      return added
+    LUA
+
+    # Removes members (ARGV) from the set and from the counts; returns how many were there.
+    REMOVE = QUEUE_OF + <<-LUA
+      local removed = 0
+      for _, member in ipairs(ARGV) do
+        if redis.call('ZREM', KEYS[1], member) == 1 then
+          redis.call('HINCRBY', KEYS[2], queue_of(member), -1)
+          removed = removed + 1
+        end
+      end
+      return removed
+    LUA
+
+    # The set's size and the counts, read together; and the counts rebuilt from the set (for data written
+    # before they existed). The rebuild blocks Redis for as long as the scan takes, so it runs only when the
+    # two disagree.
+    READ = <<-LUA
+      return {redis.call('ZCARD', KEYS[1]), redis.call('HGETALL', KEYS[2])}
+    LUA
+
+    RECOUNT = QUEUE_OF + <<-LUA
+      redis.call('DEL', KEYS[2])
+      for _, member in ipairs(redis.call('ZRANGE', KEYS[1], 0, -1)) do
+        redis.call('HINCRBY', KEYS[2], queue_of(member), 1)
+      end
+      return 1
+    LUA
 
     # Moves one entry back onto its queue; 0 when someone else got there first, -1 when the queue's key holds
     # something that is not a list (nothing is touched then: a failure after the ZREM would lose the entry).
@@ -19,7 +70,7 @@ module JoobQ
       if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then
         redis.call('RPUSH', KEYS[2], ARGV[2])
         redis.call('DEL', KEYS[3])
-        redis.call('HINCRBY', KEYS[4], ARGV[3], -1)
+        redis.call('HINCRBY', KEYS[4], ARGV[3], -1) -- ARGV[3]: the entry's own queue
         return 1
       end
       return 0
@@ -64,17 +115,26 @@ module JoobQ
     def initialize(@redis : Redis::PooledClient = RedisStore.instance.redis)
     end
 
+    # Every writer to the set goes through here, so the counts stay exact. Members already present are not
+    # counted twice; returns how many were new.
+    def self.add(redis : Redis::PooledClient, score : Int64, members : Array(String)) : Int64
+      return 0_i64 if members.empty?
+
+      redis.eval(ADD, [KEY, COUNTS], [score.to_s] + members).as(Int64)
+    end
+
     def count(queue : String? = nil) : Int64
       queue ? (counts[queue]? || 0_i64) : @redis.zcard(KEY)
     end
 
-    # Entries per queue without reading them. The hash is trusted only while it adds up to the set's size;
-    # otherwise (a writer that predates it, a lost update) it is rebuilt from the entries.
+    # Entries per queue without reading them. If the counts do not add up to the set (entries written by code
+    # that predates them), they are rebuilt once.
     def counts : Hash(String, Int64)
       stored = read_counts
-      return stored if stored.values.sum == @redis.zcard(KEY)
+      return stored unless stored.nil?
 
-      recount
+      @redis.eval(RECOUNT, [KEY, COUNTS])
+      read_counts || {} of String => Int64
     end
 
     # Newest first. `queue` filters; `offset`/`limit` page through the matches.
@@ -116,8 +176,7 @@ module JoobQ
 
     def purge(jids : Array(String)) : Outcome
       apply(jids) do |entry, tally|
-        if @redis.zrem(KEY, entry.member) == 1
-          @redis.hincrby(COUNTS, entry.queue, -1)
+        if @redis.eval(REMOVE, [KEY, COUNTS], [entry.member]) == 1
           tally.succeeded += 1
         else
           tally.conflicted << entry.jid
@@ -128,21 +187,16 @@ module JoobQ
     def purge_all(queue : String? = nil) : Int32
       members = [] of String
       each_entry { |entry| members << entry.member if queue.nil? || entry.queue == queue }
-      removed = members.each_slice(CHUNK).sum { |slice| @redis.command(["ZREM", KEY] + slice).as(Int64).to_i }
-      @redis.del(COUNTS) # rebuilt on the next read
-      removed
+      members.each_slice(CHUNK).sum { |slice| @redis.eval(REMOVE, [KEY, COUNTS], slice).as(Int64).to_i }
     end
 
-    private def read_counts : Hash(String, Int64)
-      @redis.hgetall(COUNTS).to_h { |queue, count| {queue.to_s, count.to_s.to_i64} }.reject { |_, count| count <= 0 }
-    end
+    # nil when the counts do not add up to the set's size.
+    private def read_counts : Hash(String, Int64)?
+      size, flat = @redis.eval(READ, [KEY, COUNTS]).as(Array)
+      stored = flat.as(Array).each_slice(2).to_h { |(queue, count)| {queue.to_s, count.to_s.to_i64} }
+      return unless stored.values.sum == size.as(Int64)
 
-    private def recount : Hash(String, Int64)
-      tally = Hash(String, Int64).new(0_i64)
-      each_entry { |entry| tally[entry.queue] += 1 }
-      @redis.del(COUNTS)
-      tally.each { |queue, count| @redis.hset(COUNTS, queue, count) }
-      tally
+      stored.reject { |queue, count| queue == UNKNOWN || count <= 0 }
     end
 
     private class Tally

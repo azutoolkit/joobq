@@ -41,13 +41,33 @@ JoobQ.configure do
   end
 end
 
+# Workers started by any spec (including standalone queues the registries do
+# not know about) are stopped when the example ends, so none can keep claiming
+# jobs that a later example enqueues.
+module SpecWorkers
+  STOPPERS = [] of ->
+
+  def self.stop_all
+    STOPPERS.each(&.call)
+    STOPPERS.clear
+  end
+end
+
+class JoobQ::Worker(T)
+  def run
+    SpecWorkers::STOPPERS << -> { terminate if running.get }
+    previous_def
+  end
+end
+
 Spec.before_each do
-  # Stop all running workers before resetting
-  JoobQ.config.queues.each_value do |queue|
-    if queue.running?
-      queue.stop!
-    end
+  # Two queue registries exist (QueueFactory vs. config.queues); stop! blocks
+  # until the queue's workers have exited.
+  [JoobQ.config.queues, JoobQ.queues].each do |registry|
+    registry.each_value { |queue| queue.stop! if queue.running? }
   end
 
   JoobQ.reset
 end
+
+Spec.after_each { SpecWorkers.stop_all }

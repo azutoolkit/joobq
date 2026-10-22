@@ -14,7 +14,7 @@ module JoobQ
 
     @terminate_channel : Channel(Nil)
     @queue : BaseQueue
-    @worker_mutex = Mutex.new
+    @worker_mutex = Sync::Mutex.new
 
     private getter middleware_pipeline : MiddlewarePipeline = JoobQ.config.middleware_pipeline
 
@@ -125,7 +125,7 @@ module JoobQ
               job_id: parsed_job.jid.to_s,
               queue: @queue.name,
               worker_id: @worker_id,
-              processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s)
+              processing_time: (Time.instant - parsed_job.enqueue_time).total_seconds.to_s)
           end
         rescue ex : JSON::Error
           # Handle unparseable jobs by moving them to dead letter queue
@@ -151,7 +151,7 @@ module JoobQ
             # Log worker-specific error
             additional_context = {
               worker_wid:          wid.to_s,
-              job_processing_time: (Time.monotonic - parsed_job.enqueue_time).total_seconds.to_s,
+              job_processing_time: (Time.instant - parsed_job.enqueue_time).total_seconds.to_s,
             }.to_h
 
             Log.error &.emit(

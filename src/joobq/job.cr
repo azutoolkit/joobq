@@ -133,7 +133,7 @@ module JoobQ
       )?
 
       @[JSON::Field(ignore: true)]
-      property enqueue_time = Time.monotonic
+      property enqueue_time = Time.instant
 
       macro finalized
         # Register the job type with QueueFactory for YAML-based queue creation

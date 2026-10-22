@@ -94,7 +94,7 @@ module JoobQ
 
       return if jobs.empty?
 
-      start_time = Time.monotonic
+      start_time = Time.instant
       total_enqueued = 0
 
       begin
@@ -107,7 +107,7 @@ module JoobQ
           total_enqueued += batch_jobs.size
         end
 
-        duration = Time.monotonic - start_time
+        duration = Time.instant - start_time
         Log.info &.emit("Batch enqueue successful",
           jobs_count: total_enqueued,
           duration_ms: duration.total_milliseconds.round(2),

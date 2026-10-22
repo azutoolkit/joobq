@@ -9,7 +9,7 @@ module JoobQ
     private RESTART_COOLDOWN_SECONDS =  5
 
     getter workers : Array(Worker(T)) = [] of Worker(T)
-    getter workers_mutex = Mutex.new
+    getter workers_mutex = Sync::Mutex.new
     getter terminate_channel : Channel(Nil) = Channel(Nil).new
     property total_workers : Int32
     getter stopped : Atomic(Bool) = Atomic(Bool).new(false)
@@ -164,9 +164,9 @@ module JoobQ
     private def wait_for_workers_to_stop
       # Wait up to 5 seconds for all workers to stop
       timeout = 5.seconds
-      start_time = Time.monotonic
+      start_time = Time.instant
 
-      while Time.monotonic - start_time < timeout
+      while Time.instant - start_time < timeout
         @workers_mutex.synchronize do
           all_stopped = @workers.all? { |worker| !worker.running? }
           if all_stopped

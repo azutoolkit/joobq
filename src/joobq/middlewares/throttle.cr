@@ -4,7 +4,7 @@ module JoobQ
       include Middleware
 
       private getter last_job_times : Hash(String, Int64) = {} of String => Int64
-      private getter mutex : Mutex = Mutex.new
+      private getter mutex : Sync::Mutex = Sync::Mutex.new
 
       def matches?(job : JoobQ::Job, queue : BaseQueue) : Bool
         !queue.throttle_limit.nil?

@@ -6,7 +6,7 @@ JoobQ is an enterprise-grade, high-performance asynchronous job queue system for
 
 - **Version:** 0.4.1
 - **License:** MIT
-- **Crystal:** 1.17.1+
+- **Crystal:** 1.22.0+
 - **Dependencies:** redis, cron_parser
 
 ## Architecture Summary

@@ -8,7 +8,7 @@ targets:
   joobq:
     main: src/joobq.cr
 
-crystal: ">=0.34.0"
+crystal: ">= 1.22.0"
 
 license: MIT
 

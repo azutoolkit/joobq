@@ -44,11 +44,12 @@ module JoobQ
             "current_retries" => current_retries.to_s,
             "retry_attempt"   => retry_attempt.to_s,
             "worker_id"       => worker_id,
-          }
+          },
+          schedule: false # this middleware does the scheduling, once
         )
 
-        # Simple logic: if retries > 0, then retry, otherwise move to dead letter queue
-        if current_retries > 0
+        # If retries are left and the error is one that running again can fix, retry; otherwise dead letter
+        if current_retries > 0 && error_context.retryable?
           # Decrement retries
           job.retries = current_retries - 1
 

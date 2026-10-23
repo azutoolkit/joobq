@@ -440,9 +440,10 @@ module JoobQ
       worker_id : String,
       retry_count : Int32 = 0,
       additional_context : Hash(String, String) = {} of String => String,
+      schedule : Bool = true,
     ) : ErrorContext
       # Create error context using ErrorHandler
-      error_context = ErrorHandler.handle_job_error(job, queue, exception, worker_id, retry_count, additional_context)
+      error_context = ErrorHandler.handle_job_error(job, queue, exception, worker_id, retry_count, additional_context, schedule)
 
       # Record in error monitor
       JoobQ.error_monitor.record_error(error_context)

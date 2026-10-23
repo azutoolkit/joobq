@@ -149,6 +149,11 @@ module JoobQ
       }.to_h
     end
 
+    # False for the error types that running again cannot fix, whatever budget the job has left.
+    def retryable? : Bool
+      !{"validation_error", "configuration_error", "implementation_error"}.includes?(error_type)
+    end
+
     def should_retry? : Bool
       case error_type
       when "validation_error", "configuration_error", "implementation_error"
@@ -194,6 +199,7 @@ module JoobQ
       worker_id : String,
       retry_count : Int32 = 0,
       additional_context : Hash(String, String) = {} of String => String,
+      schedule : Bool = true,
     ) : ErrorContext
       error_context = ErrorContext.from_exception(
         job, queue, exception, worker_id, retry_count, additional_context
@@ -208,8 +214,11 @@ module JoobQ
       # Update job with error information
       update_job_with_error(job, error_context)
 
-      # Handle retry or dead letter based on error type
-      if error_context.should_retry?
+      # Handle retry or dead letter based on error type. A caller that decides this itself (the Retry middleware, the
+      # Timeout middleware) passes `schedule: false`: scheduling here as well would run the job once more per attempt.
+      if !schedule
+        nil
+      elsif error_context.should_retry?
         schedule_retry(job, queue, error_context)
       else
         send_to_dead_letter(job, queue, error_context)
@@ -261,7 +270,7 @@ module JoobQ
       )
 
       # Schedule job with retrying status using DELAYED_SET (not FAILED_SET)
-      queue.store.schedule(job, delay.total_milliseconds.to_i64, delay_set: RedisStore::DELAYED_SET)
+      queue.store.schedule(job, Time.local.to_unix_ms + delay.total_milliseconds.to_i64, delay_set: RedisStore::DELAYED_SET)
     end
 
     def self.send_to_dead_letter(job : Job, queue : BaseQueue, error_context : ErrorContext) : Job

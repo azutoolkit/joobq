@@ -186,6 +186,14 @@ module JoobQ
       redis.zadd DELAYED_SET, schedule_time, job
     end
 
+    TAKE_DUE = <<-LUA
+      local jobs = redis.call('ZRANGEBYSCORE', KEYS[1], 0, ARGV[1], 'LIMIT', 0, ARGV[2])
+      for _, job in ipairs(jobs) do
+        redis.call('ZREM', KEYS[1], job)
+      end
+      return jobs
+    LUA
+
     def fetch_due_jobs(
       current_time = Time.local,
       delay_set : String = DELAYED_SET,
@@ -193,11 +201,13 @@ module JoobQ
       remove : Bool = true,
     ) : Array(String)
       score = current_time.to_unix_ms
-      jobs = redis.zrangebyscore(delay_set, 0, score, with_scores: false, limit: [0, limit])
-      if remove
-        redis.zremrangebyscore(delay_set, "-inf", score)
+      unless remove
+        return redis.zrangebyscore(delay_set, 0, score, with_scores: false, limit: [0, limit]).map(&.as(String))
       end
-      jobs.map &.as(String)
+
+      # Read and remove exactly the same members in one step: removing "everything due" after reading `limit` of
+      # them would drop the rest unseen.
+      redis.eval(TAKE_DUE, [delay_set], [score.to_s, limit.to_s]).as(Array).map(&.as(String))
     end
 
     def queue_size(queue_name : String) : Int64
@@ -580,9 +590,8 @@ module JoobQ
       schedule_time = Time.local.to_unix_ms + delay_ms
       job_json = job.to_json
 
-      # Remove job by ID from processing queue (more reliable than JSON match)
-      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
-
+      # Store the retry first, then take the job off the processing list: a failure in between leaves the job
+      # in processing (to be reclaimed or dead-lettered), never in neither place.
       redis.pipelined do |pipe|
         # Add to delayed queue with future timestamp
         pipe.zadd(DELAYED_SET, schedule_time, job_json)
@@ -591,6 +600,9 @@ module JoobQ
         pipe.hincrby("joobq:stats:retries", queue_name, 1)
         pipe.hincrby("joobq:stats:total_retries", "global", 1)
       end
+
+      # Remove job by ID from processing queue (more reliable than JSON match)
+      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
 
       Events.emit("job.retrying") { {jid: job.jid.to_s, queue: queue_name, delay_ms: delay_ms} }
       Log.debug &.emit("Job moved to retry queue",

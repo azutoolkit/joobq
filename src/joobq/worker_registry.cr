@@ -53,6 +53,7 @@ module JoobQ
       @heartbeat.start do
         beat
         follow_desired_concurrency
+        trim_events
         INTERVAL
       end
     end
@@ -99,6 +100,13 @@ module JoobQ
       rescue ex
         Log.warn &.emit("Could not apply desired concurrency", queue: queue.name, error: ex.message)
       end
+    end
+
+    # A failed trim must not stop the heartbeat: the stream just stays a little larger until the next beat.
+    private def trim_events : Nil
+      RedisEventSink.trim_to_bytes(@redis)
+    rescue ex
+      Log.warn &.emit("Could not trim the event stream", error: ex.message)
     end
 
     private def key : String

@@ -169,7 +169,10 @@ REDIS_POOL_SIZE=500
 REDIS_POOL_TIMEOUT=5.0
 REDIS_PASS=somepass
 REDIS_TIMEOUT=0.2
+JOOBQ_EVENTS_MAX_BYTES=67108864
 ```
+
+`JOOBQ_EVENTS_MAX_BYTES` is the most memory the `joobq:events` stream may use (0 turns the limit off). The stream is also capped at about 50 000 entries. The byte limit is enforced from the worker heartbeat (every 10 s, at most one process checks per 10 s), so it is approximate: the stream can overshoot between beats, and it is trimmed to 90 % of the limit, never below 100 entries.
 
 ### Configuration
 

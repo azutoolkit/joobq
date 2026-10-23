@@ -77,6 +77,77 @@ module JoobQ
       entries.size.should eq(1)
     end
 
+    describe ".trim_to_bytes" do
+      fill = ->(store : RedisStore, entries : Int32) do
+        store.redis.del(RedisEventSink::STREAM, RedisEventSink::TRIM_LOCK)
+        payload = JSON.parse(%({"blob":"#{"x" * 2000}"}))
+        RedisEventSink.new(store.redis).publish_all((1..entries).map { Event.new("job.enqueued", payload) })
+      end
+      length = ->(store : RedisStore) { store.redis.command(["XLEN", RedisEventSink::STREAM]).as(Int64) }
+
+      it "drops the oldest entries when the stream outgrows its budget" do
+        store = JoobQ.store.as(RedisStore)
+        fill.call(store, 500)
+
+        dropped = RedisEventSink.trim_to_bytes(store.redis, 300_000_i64)
+
+        dropped.should be > 0
+        length.call(store).should eq(500 - dropped)
+        usage = store.redis.command(["MEMORY", "USAGE", RedisEventSink::STREAM, "SAMPLES", "0"]).as(Int64)
+        usage.should be <= 300_000
+        newest = store.redis.command(["XREVRANGE", RedisEventSink::STREAM, "+", "-", "COUNT", "1"]).as(Array)
+        newest.size.should eq(1) # the newest entries are the ones kept
+      end
+
+      it "leaves a stream alone that fits, and does nothing when the budget is 0" do
+        store = JoobQ.store.as(RedisStore)
+        fill.call(store, 300)
+        RedisEventSink.trim_to_bytes(store.redis, 1_000_000_000_i64).should eq(0)
+        store.redis.del(RedisEventSink::TRIM_LOCK)
+        RedisEventSink.trim_to_bytes(store.redis, 0_i64).should eq(0)
+        length.call(store).should eq(300)
+      end
+
+      it "does nothing when the stream does not exist" do
+        store = JoobQ.store.as(RedisStore)
+        store.redis.del(RedisEventSink::STREAM, RedisEventSink::TRIM_LOCK)
+        RedisEventSink.trim_to_bytes(store.redis, 1_i64).should eq(0)
+      end
+
+      it "reads the budget from JOOBQ_EVENTS_MAX_BYTES" do
+        saved = ENV["JOOBQ_EVENTS_MAX_BYTES"]?
+        begin
+          ENV.delete("JOOBQ_EVENTS_MAX_BYTES")
+          RedisEventSink.max_bytes.should eq(RedisEventSink::DEFAULT_MAX_BYTES)
+          ENV["JOOBQ_EVENTS_MAX_BYTES"] = " 1234 "
+          RedisEventSink.max_bytes.should eq(1234)
+          ENV["JOOBQ_EVENTS_MAX_BYTES"] = "0"
+          RedisEventSink.max_bytes.should eq(0)
+          ENV["JOOBQ_EVENTS_MAX_BYTES"] = "64MB"
+          RedisEventSink.max_bytes.should eq(RedisEventSink::DEFAULT_MAX_BYTES)
+        ensure
+          saved ? (ENV["JOOBQ_EVENTS_MAX_BYTES"] = saved) : ENV.delete("JOOBQ_EVENTS_MAX_BYTES")
+        end
+      end
+
+      it "keeps a floor of entries even under a tiny budget" do
+        store = JoobQ.store.as(RedisStore)
+        fill.call(store, 400)
+        RedisEventSink.trim_to_bytes(store.redis, 1_i64)
+        length.call(store).should eq(RedisEventSink::TRIM_FLOOR)
+      end
+
+      it "lets one process trim at a time" do
+        store = JoobQ.store.as(RedisStore)
+        fill.call(store, 500)
+        RedisEventSink.trim_to_bytes(store.redis, 300_000_i64).should be > 0
+        fill.call(store, 500)
+        store.redis.set(RedisEventSink::TRIM_LOCK, "1", ex: 10)
+        RedisEventSink.trim_to_bytes(store.redis, 300_000_i64).should eq(0)
+        length.call(store).should eq(500)
+      end
+    end
+
     it "delivers a batch in one go, preserving order" do
       store = JoobQ.store.as(RedisStore)
       store.redis.del(RedisEventSink::STREAM)

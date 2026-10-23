@@ -86,6 +86,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
       - [Summary](#summary)
     - [Defining Jobs](#defining-jobs)
       - [Best Practices for Defining Jobs](#best-practices-for-defining-jobs)
+    - [Encrypting Job Arguments](#encrypting-job-arguments)
         - [Idempotency](#idempotency)
         - [Simple Primitive Types for Arguments](#simple-primitive-types-for-arguments)
         - [Number of Arguments](#number-of-arguments)
@@ -170,6 +171,7 @@ REDIS_POOL_TIMEOUT=5.0
 REDIS_PASS=somepass
 REDIS_TIMEOUT=0.2
 JOOBQ_EVENTS_MAX_BYTES=67108864
+JOOBQ_PAYLOAD_KEYS=2026a:<64 hex digits>,2025:<64 hex digits> # see "Encrypting Job Arguments"
 ```
 
 `JOOBQ_EVENTS_MAX_BYTES` is the most memory the `joobq:events` stream may use (0 turns the limit off). The stream is also capped at about 50 000 entries. The byte limit is enforced from the worker heartbeat (every 10 s, at most one process checks per 10 s), so it is approximate: the stream can overshoot between beats, and it is trimmed to 90 % of the limit, never below 100 entries.
@@ -354,6 +356,43 @@ Keep the number of arguments for jobs to a minimum. Having too many arguments ca
 - Use default values for optional arguments to simplify job invocation.
 
 By following these best practices, you can ensure that your jobs are reliable, maintainable, and easy to work with in the JoobQ framework.
+
+### Encrypting Job Arguments
+
+A job is stored as JSON in Redis (queue, processing list, retry and scheduled sets, dead letters), readable by anyone with access to Redis or a backup. Declare the sensitive properties with `encrypted_property` and they are written as AES-256-GCM sealed strings and opened again when the worker loads the job, before `perform` runs. Jobs that do not use it pay nothing.
+
+```crystal
+class ChargeJob
+  include JoobQ::Job
+
+  property order_id : Int64 = 0 # stays readable
+  encrypted_property card_token : String = ""
+  encrypted_property billing : Hash(String, String)? = nil
+
+  def perform
+    charge(card_token) # plain text here
+  end
+end
+```
+
+Keys: one is *current* and seals; older ones only open. A key is `id:key` (32 bytes as 64 hex digits or base64; the id is 1 to 16 of `a-z 0-9 _ -`, `default` when omitted).
+
+```crystal
+JoobQ.configure do
+  payload_encryption current: "2026a:#{ENV["NEW_KEY"]}", previous: ["2025:#{ENV["OLD_KEY"]}"]
+end
+```
+
+Without that call the keys come from `JOOBQ_PAYLOAD_KEYS` (comma separated `id:key`, first is current) or `JOOBQ_PAYLOAD_KEY` (one key). To rotate, put the new key first and keep the old one until no job sealed with it can still be in Redis; a retried job is rewritten with the current key.
+
+- Each value carries its key id, a random 96 bit nonce and the tag. The job class and the property name are authenticated data, so a value copied to another field or class is refused. Renaming the class or the property makes stored values unreadable; pass `job_name:` to `encrypted_property` to pin the name.
+- A job whose values cannot be opened because of the *job* (unknown key id, wrong class or field, altered, damaged) is never run: it goes to the dead-letter set as the job itself with error type `decryption_error` and a message that names the class and property but holds no value. Once the key is back, redrive it (dead-letter API or `DeadLetterQueue#redrive`) and it runs.
+- A problem with the *process's keys* (none configured, `JOOBQ_PAYLOAD_KEYS` malformed) is a configuration error: the queue of a job class with encrypted properties refuses to start, enqueuing raises `JoobQ::Encryption::Error`, and a worker that meets such a job puts it back on its queue (atomically, not counted as processed) and stops claiming for a few seconds (`Encryption.key_backoff`, monotonic clock) instead of dead-lettering it.
+- Values written before the property was encrypted are read as they are and sealed on the next write. Set `JoobQ.config.allow_plaintext_payloads = false` to make workers refuse them (the job is dead-lettered without its payload, which holds the plain values: that legacy job is gone, so drain old jobs first rather than flipping the flag). The same withholding applies to any other parse error in a job class with encrypted properties (`Queue#add` and the HTTP API still accept plain values, which are then sealed). While it is true, anyone who can write to Redis can substitute an unsealed value and it will run.
+- The library scrubs the plain values (and their `to_s`, `inspect`, JSON forms and the leaves of hashes and arrays; strings under 4 characters and numbers under 6 digits excepted, booleans never) from the error messages, causes and backtraces it records (error context, `job.failed` event, stored job error). It cannot scrub what your own `perform` logs. Scrubbing never raises: if it cannot be done the text is replaced by `[REDACTED: not scrubbable]`, so the job still retries or dead-letters.
+- The sealed value is bound to the class and property, not to the job id: someone who can write to Redis can copy a sealed value between jobs of the same class and property. Nonces are random 96 bit values: rotate keys before about 2^32 seals per key.
+- Sealing is not deterministic (random nonce per value): two serialisations of one job differ, so nothing may re-serialise a job to find it again by value.
+- Properties are sealed only in the stored payload: in memory, and in your own logs, they are plain. `String` values are sealed as they are, other types as their JSON text. The size of a value is not hidden.
 
 ## JoobQ HTTP Server
 

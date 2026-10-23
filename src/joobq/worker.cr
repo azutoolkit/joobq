@@ -206,17 +206,21 @@ module JoobQ
       job_id = extract_job_id_from_raw_json(job_json)
 
       # Create a minimal error context for the unparseable job
+      # A payload whose encrypted properties cannot be opened is kept whole (it holds only sealed values) so it can
+      # be redriven once the key is back; the error message never contains a value.
+      undecryptable = parse_error.is_a?(Encryption::Error)
+
       error_context = ErrorContext.new(
         job_id: job_id,
         queue_name: @queue.name,
         worker_id: @worker_id,
         job_type: "Unknown",
-        error_type: "serialization_error",
-        error_message: "Job could not be parsed: #{parse_error.message}",
+        error_type: undecryptable ? "decryption_error" : "serialization_error",
+        error_message: undecryptable ? "Job payload could not be decrypted: #{parse_error.message}" : "Job could not be parsed: #{parse_error.message}",
         error_class: parse_error.class.name,
         backtrace: parse_error.inspect_with_backtrace.split('\n').first(10),
         retry_count: 0,
-        job_data: job_json[0, 1000], # Truncate to first 1000 chars
+        job_data: undecryptable ? job_json : job_json[0, 1000], # Truncate to first 1000 chars
         error_cause: nil,
         system_context: {
           "worker_id"         => @worker_id,
@@ -229,7 +233,7 @@ module JoobQ
       JoobQ.error_monitor.record_error(error_context)
 
       # Move the unparseable job to dead letter queue
-      move_unparseable_job_to_dead_letter(job_json, job_id)
+      move_unparseable_job_to_dead_letter(job_json, job_id, parse_error)
     end
 
     # Extract job ID from raw JSON string
@@ -248,7 +252,8 @@ module JoobQ
     end
 
     # Move unparseable job to dead letter queue
-    private def move_unparseable_job_to_dead_letter(job_json : String, job_id : String) : Nil
+    private def move_unparseable_job_to_dead_letter(job_json : String, job_id : String, parse_error : Exception) : Nil
+      undecryptable = parse_error.is_a?(Encryption::Error)
       # Create a minimal job structure for dead letter queue
       dead_job_data = {
         "jid"    => job_id,
@@ -256,18 +261,18 @@ module JoobQ
         "status" => "Dead",
         "error"  => {
           "failed_at"      => Time.local.to_rfc3339,
-          "message"        => "Job could not be parsed",
-          "backtrace"      => "JSON parsing failed",
+          "message"        => undecryptable ? "Job payload could not be decrypted: #{parse_error.message}" : "Job could not be parsed",
+          "backtrace"      => undecryptable ? "payload decryption failed" : "JSON parsing failed",
           "cause"          => "",
-          "error_type"     => "serialization_error",
-          "error_class"    => "JSON::Error",
+          "error_type"     => undecryptable ? "decryption_error" : "serialization_error",
+          "error_class"    => undecryptable ? "JoobQ::Encryption::Error" : "JSON::Error",
           "retry_count"    => 0,
           "system_context" => {
             "worker_id"                => @worker_id,
             "original_job_data_length" => job_json.size.to_s,
           },
         },
-        "original_job_data" => job_json[0, 1000], # Truncate for storage
+        "original_job_data" => undecryptable ? job_json : job_json[0, 1000], # Truncate for storage
       }
 
       # Store in dead letter queue

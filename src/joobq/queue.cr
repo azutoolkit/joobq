@@ -52,12 +52,16 @@ module JoobQ
 
     def add(job : String)
       add T.from_json(job)
+    rescue ex : Encryption::Error
+      raise ex # a key problem must reach the caller, not just the log
     rescue ex
       handle_enqueue_error(ex, job, "string_job")
     end
 
     def add(job : T)
       store.enqueue job
+    rescue ex : Encryption::Error
+      raise ex
     rescue ex
       handle_enqueue_error(ex, job.to_json, "typed_job")
     end

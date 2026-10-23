@@ -23,7 +23,8 @@ module JoobQ
               "middleware" => "timeout",
               "reason"     => "job_expired",
               "worker_id"  => worker_id,
-            }
+            },
+            schedule: false # it dead-letters the job itself, just below
           )
 
           DeadLetterManager.add(job)

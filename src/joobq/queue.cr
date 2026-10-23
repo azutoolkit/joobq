@@ -40,10 +40,24 @@ module JoobQ
     # Starting a running queue does nothing: `reprocess_busy_jobs!` would move a job that a worker is
     # still processing back onto the queue, and it would run twice.
     def start
+      verify_encryption_keys
       return if @started.swap(true)
 
       reprocess_busy_jobs!
       worker_manager.start_workers
+    end
+
+    # A queue of a job class with encrypted properties does not start without valid keys: better to fail at start-up
+    # than to find out at the first job.
+    private def verify_encryption_keys : Nil
+      {% for type in T.union_types %}
+        {% for iv in type.instance_vars %}
+          {% ann = iv.annotation(JSON::Field) %}
+          {% if ann && ann[:converter] && ann[:converter].stringify.includes?("Encryption::Field") %}
+            Encryption.keys
+          {% end %}
+        {% end %}
+      {% end %}
     end
 
     def parse_job(job : String) : T
@@ -52,12 +66,16 @@ module JoobQ
 
     def add(job : String)
       add T.from_json(job)
+    rescue ex : Encryption::Error
+      raise ex # a key problem must reach the caller, not just the log
     rescue ex
       handle_enqueue_error(ex, job, "string_job")
     end
 
     def add(job : T)
       store.enqueue job
+    rescue ex : Encryption::Error
+      raise ex
     rescue ex
       handle_enqueue_error(ex, job.to_json, "typed_job")
     end
@@ -65,6 +83,8 @@ module JoobQ
     # Batch add jobs with pipelining for improved performance
     def add_batch(jobs : Array(T))
       add_batch_pipelined(jobs)
+    rescue ex : Encryption::Error
+      raise ex
     rescue ex
       Log.error &.emit("Error adding job batch", queue: name, job_count: jobs.size, error: ex.message)
     end
@@ -72,6 +92,8 @@ module JoobQ
     # Add batch of job strings
     def add_batch_strings(jobs : Array(String))
       add_batch_strings_pipelined(jobs)
+    rescue ex : Encryption::Error
+      raise ex
     rescue ex
       Log.error &.emit("Error adding job batch strings", queue: name, job_count: jobs.size, error: ex.message)
     end
@@ -82,8 +104,22 @@ module JoobQ
 
     private def add_batch_strings_pipelined(jobs : Array(String))
       # Convert strings to Job objects for batch enqueuing
-      job_objects = jobs.map { |job_str| T.from_json(job_str) }
+      # A string that cannot be loaded here (a sealed value this process cannot open, say) is not dropped, and does not
+      # take the rest of the batch with it: it goes onto the queue as it is, for a worker to deal with.
+      job_objects = [] of T
+      unreadable = [] of String
+      jobs.each do |job_str|
+        job_objects << T.from_json(job_str)
+      rescue ex : JSON::Error
+        Log.warn &.emit("Job kept as stored; it could not be loaded here", queue: name, error: ex.message)
+        unreadable << job_str
+      end
+      # After the rest is stored, and in one transaction: if enqueue_batch raises, nothing was written for the
+      # unreadable ones, so a caller that retries the whole batch cannot duplicate them.
       store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
+      if !unreadable.empty? && (redis_store = store).is_a?(RedisStore)
+        redis_store.redis.multi { |multi| unreadable.each { |job_str| multi.rpush(name, job_str) } }
+      end
     end
 
     private def handle_enqueue_error(ex : Exception, job_data : String, job_type : String)

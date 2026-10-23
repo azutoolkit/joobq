@@ -218,6 +218,20 @@ module JoobQ
       @pipeline.set_sizes_batch(set_names)
     end
 
+    REQUEUE = <<-LUA
+      if redis.call('LREM', KEYS[1], 1, ARGV[1]) == 1 then
+        redis.call('RPUSH', KEYS[2], ARGV[1])
+        return 1
+      end
+      return 0
+    LUA
+
+    # Puts a claimed job back at the end of its queue, in one step: it is taken off the processing list and pushed,
+    # or (when it is no longer there, e.g. another process reclaimed it) nothing happens. Not counted as processed.
+    def requeue_from_processing(job_json : String, queue_name : String) : Bool
+      redis.eval(REQUEUE, [processing_queue(queue_name), queue_name], [job_json]) == 1
+    end
+
     # Simplified job cleanup for BRPOPLPUSH pattern - just remove from processing queue
     def cleanup_job(job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)

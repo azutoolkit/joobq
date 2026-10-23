@@ -7,6 +7,8 @@ module JoobQ
     private WORKER_BATCH_DELAY      = 10.milliseconds
     private WORKER_IDLE_DELAY       = 100.milliseconds
 
+    private WITHHELD = "[withheld: the payload holds unencrypted values]"
+
     getter wid : Int32
     getter worker_id : String
     getter active : Atomic(Bool) = Atomic(Bool).new(false)
@@ -15,6 +17,9 @@ module JoobQ
     @terminate_channel : Channel(Nil)
     @queue : BaseQueue
     @worker_mutex = Sync::Mutex.new
+    # While set in the future, this worker claims nothing: the process has no usable payload keys (see
+    # `Encryption::ConfigurationError`), so claiming would only bounce jobs.
+    @claim_paused_until : Atomic(Int64) = Atomic(Int64).new(0_i64)
 
     private getter middleware_pipeline : MiddlewarePipeline = JoobQ.config.middleware_pipeline
 
@@ -62,7 +67,7 @@ module JoobQ
               break
             else
               # Use batch processing for improved performance and minimal connection usage
-              jobs = @queue.paused? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
+              jobs = @queue.paused? || keys_backoff? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
 
               if !jobs.empty?
                 # Process jobs in smaller concurrent batches to reduce connection pressure
@@ -144,6 +149,7 @@ module JoobQ
         rescue ex : Encryption::ConfigurationError
           # No usable key in this process: the job is fine, the configuration is not. Leave it in the queue.
           keys_missing = true
+          pause_claiming
           Log.error &.emit("Payload encryption keys are missing or malformed; leaving the job in the queue",
             queue: @queue.name, worker_id: @worker_id, error: ex.message)
         rescue ex : JSON::Error
@@ -201,13 +207,25 @@ module JoobQ
       end
     end
 
-    # Backs off, then puts the job back at the end of its queue and takes it off the processing list.
+    private def now_ms : Int64
+      Time.utc.to_unix_ms
+    end
+
+    private def pause_claiming : Nil
+      @claim_paused_until.set(now_ms + Encryption.key_backoff.total_milliseconds.to_i64)
+    end
+
+    private def keys_backoff? : Bool
+      now_ms < @claim_paused_until.get
+    end
+
+    # Puts the job back at the end of its queue (one atomic step, not counted as processed); the worker has
+    # stopped claiming for a while, so it does not come straight back.
     private def requeue_for_missing_keys(job : String) : Nil
-      sleep Encryption.key_backoff
       if (store = @queue.store).is_a?(RedisStore)
-        store.redis.rpush(@queue.name, job)
+        store.requeue_from_processing(job, @queue.name)
+        Encryption.count_bounce
       end
-      @queue.cleanup_job_processing_pipelined(@worker_id, job)
     rescue ex
       Log.error &.emit("Could not return a job to its queue", queue: @queue.name, worker_id: @worker_id, error: ex.message)
     end
@@ -228,6 +246,9 @@ module JoobQ
       # A payload whose encrypted properties cannot be opened is kept whole (it holds only sealed values) so it can
       # be redriven once the key is back; the error message never contains a value.
       undecryptable = parse_error.is_a?(Encryption::Error)
+      # A plain payload that was refused holds the secrets in the clear: it goes nowhere (not the error monitor, not
+      # the dead-letter stub).
+      withheld = parse_error.is_a?(Encryption::PlaintextRefused)
 
       error_context = ErrorContext.new(
         job_id: job_id,
@@ -239,7 +260,7 @@ module JoobQ
         error_class: parse_error.class.name,
         backtrace: parse_error.inspect_with_backtrace.split('\n').first(10),
         retry_count: 0,
-        job_data: job_json[0, 1000], # Truncate to first 1000 chars (the error record is not where the payload is kept)
+        job_data: withheld ? WITHHELD : job_json[0, 1000], # Truncate to first 1000 chars (the error record is not where the payload is kept)
         error_cause: nil,
         system_context: {
           "worker_id"         => @worker_id,
@@ -272,6 +293,7 @@ module JoobQ
 
     # Move unparseable job to dead letter queue
     private def move_unparseable_job_to_dead_letter(job_json : String, job_id : String, parse_error : Exception) : Nil
+      withheld = parse_error.is_a?(Encryption::PlaintextRefused)
       undecryptable = parse_error.is_a?(Encryption::Error)
       # Create a minimal job structure for dead letter queue
       stub = {
@@ -291,13 +313,13 @@ module JoobQ
             "original_job_data_length" => job_json.size.to_s,
           },
         },
-        "original_job_data" => job_json[0, 1000], # Truncate for storage
+        "original_job_data" => withheld ? WITHHELD : job_json[0, 1000], # Truncate for storage
       }
       dead_job_data = JSON.parse(stub.to_json).as_h
 
       # An undecryptable job is stored as the job itself (sealed values untouched, status Dead, the error set), not
       # as a stub: it is the full payload the operator needs to redrive it once the key is back.
-      if undecryptable && (original = JSON.parse(job_json).as_h?) && original["jid"]?.try(&.as_s?) && original["queue"]?.try(&.as_s?)
+      if undecryptable && !withheld && (original = JSON.parse(job_json).as_h?) && original["jid"]?.try(&.as_s?) && original["queue"]?.try(&.as_s?)
         original["status"] = dead_job_data["status"]
         original["error"] = dead_job_data["error"]
         dead_job_data = original

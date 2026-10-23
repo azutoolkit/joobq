@@ -2,6 +2,7 @@ require "base64"
 require "json"
 require "openssl"
 require "openssl/cipher"
+require "openssl/hmac"
 
 # Crystal's `OpenSSL::Cipher` can set and read a GCM tag but has no way to feed additional authenticated data (AAD);
 # in OpenSSL that is an update call with no output buffer.
@@ -88,14 +89,17 @@ module JoobQ
   #
   # * The associated data is the class and the property, not the job id: a sealed value can be copied between two
   #   jobs of the same class and property by someone who can write to Redis.
-  # * Nonces are random 96 bit values, so keep to about 2^32 seals per key (billions of values), then rotate.
+  # * Nonces are 96 bit values (random, or derived per job id and value): keep to about 2^32 seals per key, then
+  #   rotate.
   # * Values shorter than `MIN_SCRUB` characters are not scrubbed from recorded errors.
   #
   # ## Format
   #
-  # `jqe1:<key id>:<base64url (no padding) of nonce, ciphertext and tag>`: AES-256-GCM, a fresh random 96 bit nonce
-  # per value, the additional authenticated data being `joobq/payload/v1`, the job class and the property name
-  # (separated by NUL). A `String` is sealed as it is; any other type is sealed as its JSON text. `nil` is stored
+  # `jqe1:<key id>:<base64url (no padding) of nonce, ciphertext and tag>`: AES-256-GCM, the additional authenticated data
+  # being `joobq/payload/v1`, the job class and the property name (separated by NUL). The 96 bit nonce is random
+  # for a value sealed on its own, and derived (HMAC of key, job id, property and value) when a job serialises
+  # itself, so the same job state always gives the same text: Redis structures that rely on identical members
+  # collapsing (the dead-letter set) keep working. The same value in another job gives another text. A `String` is sealed as it is; any other type is sealed as its JSON text. `nil` is stored
   # as `null`. Renaming the class or the property makes existing sealed values unreadable: pass `job_name:` to
   # `encrypted_property` to keep the name stable.
   module Encryption
@@ -113,6 +117,8 @@ module JoobQ
     # Plain values shorter than this are not scrubbed from messages: a one- or two-character value would match
     # everywhere and make every message unreadable. Do not put a secret that short in a job and expect it hidden.
     MIN_SCRUB = 4
+    # The same for the text of a number (an id of fewer digits would match everywhere).
+    MIN_NUMBER = 6
 
     # Raised for anything wrong with a sealed value or the keys. It is a `JSON::Error` so a worker that fails to
     # load a job treats it like any unreadable payload (dead letter), but its message never has a value in it.
@@ -123,6 +129,11 @@ module JoobQ
     # leaves such a job in the queue (and backs off) instead of dead-lettering it, and a queue of a job class with
     # encrypted properties refuses to start without valid keys.
     class ConfigurationError < Error
+    end
+
+    # `allow_plaintext_payloads` is false and a worker met a value that is not sealed. The payload holds plain
+    # secrets, so it is not copied into error records or the dead-letter stub.
+    class PlaintextRefused < Error
     end
 
     # The configured keys: the current one (seals) and the old ones (open only).
@@ -196,7 +207,7 @@ module JoobQ
     end
 
     @@env_keys : Keys?
-    @@env_read = false
+    @@env_ready = Atomic(Int32).new(0)
     @@env_mutex = Sync::Mutex.new
 
     # The keys in force: `JoobQ.config.payload_keys`, else the environment (read once).
@@ -206,10 +217,13 @@ module JoobQ
     end
 
     private def self.env_keys : Keys?
+      # Lock-free once read: the mutex is only for the first use.
+      return @@env_keys if @@env_ready.get(:acquire) == 1
+
       @@env_mutex.synchronize do
-        unless @@env_read
+        if @@env_ready.get(:acquire) == 0
           @@env_keys = Keys.from_env # raises (and stays unread) when the variable is malformed
-          @@env_read = true
+          @@env_ready.set(1, :release)
         end
         @@env_keys
       end
@@ -218,8 +232,8 @@ module JoobQ
     # Forgets the keys read from the environment, so the next use reads it again (specs, tools).
     def self.reset_env_keys : Nil
       @@env_mutex.synchronize do
+        @@env_ready.set(0, :release)
         @@env_keys = nil
-        @@env_read = false
       end
     end
 
@@ -232,6 +246,17 @@ module JoobQ
 
     def self.key_backoff=(value : Time::Span)
       @@key_backoff = value
+    end
+
+    @@bounces = Atomic(Int64).new(0_i64)
+
+    # How many times a worker has put a job back for want of keys (a metric, and what specs wait on).
+    def self.bounces : Int64
+      @@bounces.get
+    end
+
+    def self.count_bounce : Nil
+      @@bounces.add(1_i64)
     end
 
     @@strict = {} of Fiber => Bool
@@ -262,9 +287,39 @@ module JoobQ
       "joobq/payload/v1\0#{job}\0#{field}".to_slice
     end
 
+    @@sealing = {} of Fiber => String
+    @@sealing_mutex = Sync::Mutex.new
+
+    # Runs the block with sealing tied to a job (its id). Within it a value is sealed with a nonce derived from the
+    # key, the job id, the property and the plain value, so serialising the same job state twice gives the same
+    # text. That matters: Redis structures rely on identical members collapsing (the dead-letter set is a sorted
+    # set), and two writers of one dead job must not become two entries. The same value in two different jobs still
+    # seals differently, because the job id is part of the derivation. Used by `Job#to_json`, only for jobs that
+    # have encrypted properties.
+    def self.sealing_as(jid : String, &)
+      fiber = Fiber.current
+      previous = @@sealing_mutex.synchronize { @@sealing.fetch(fiber, nil).tap { @@sealing[fiber] = jid } }
+      begin
+        yield
+      ensure
+        @@sealing_mutex.synchronize { previous ? (@@sealing[fiber] = previous) : @@sealing.delete(fiber) }
+      end
+    end
+
+    private def self.sealing_job : String?
+      @@sealing_mutex.synchronize { @@sealing[Fiber.current]? }
+    end
+
+    private def self.nonce_for(key : Bytes, jid : String?, job : String, field : String, plain : String) : Bytes
+      return Random::Secure.random_bytes(NONCE_LEN) unless jid
+
+      subkey = OpenSSL::HMAC.digest(:sha256, key, "joobq/nonce-key/v1")
+      OpenSSL::HMAC.digest(:sha256, subkey, "#{jid}\0#{job}\0#{field}\0#{plain}")[0, NONCE_LEN]
+    end
+
     def self.seal(plain : String, job : String, field : String, keys : Keys = self.keys) : String
       id = keys.current_id
-      nonce = Random::Secure.random_bytes(NONCE_LEN)
+      nonce = nonce_for(keys[id].not_nil!, sealing_job, job, field, plain)
       cipher = OpenSSL::Cipher.new("aes-256-gcm")
       cipher.encrypt
       cipher.key = keys[id].not_nil!
@@ -313,33 +368,41 @@ module JoobQ
       id.gsub(/[^a-z0-9_-]/, "?")[0, 16]
     end
 
-    # `text` with every given plain value replaced by `REDACTED`, longest first (so a value that contains another is
-    # replaced whole). Used on what the library records about a failure.
+    # `text` with every given plain value replaced by `REDACTED`, in one pass (longest value first, so one that
+    # contains another is replaced whole, and the replacement is never searched again).
     def self.scrub(text : String, secrets : Array(String)) : String
-      secrets.each do |secret|
-        text = text.gsub(secret, REDACTED) if secret.size >= MIN_SCRUB
-      end
-      text
+      usable = secrets.select { |secret| secret.size >= MIN_SCRUB }
+      return text if usable.empty?
+
+      text.gsub(Regex.union(usable.sort_by { |secret| -secret.size }.uniq), REDACTED)
     end
 
-    # Every form in which `value` could show up in a message: itself, its `to_s`, `inspect` and JSON text, and the
-    # leaf strings and numbers inside a hash or array. Longest first.
+    # Every form in which `value` could show up in a message: for a string itself and its `inspect`/JSON text; for
+    # a hash or array also its `to_s`, and every string leaf inside (numbers only from 6 digits, booleans never:
+    # they would match everywhere); for a number its text if long enough. Longest first, without duplicates.
     def self.secret_forms(value) : Array(String)
       forms = [] of String
-      return forms if value.nil?
-
-      forms << value.to_s << value.inspect << value.to_json
-      collect_leaves(JSON.parse(value.to_json), forms)
-      forms.uniq!.reject! { |form| form.size < MIN_SCRUB }
+      case value
+      when Nil    then return forms
+      when String then forms << value << value.inspect << value.to_json
+      when Bool   then return forms
+      when Number then forms << value.to_s
+      else
+        forms << value.to_s << value.inspect << value.to_json
+        collect_leaves(JSON.parse(value.to_json), forms)
+      end
+      forms.uniq!.reject! { |form| form.size < (value.is_a?(String) || !value.is_a?(Number) ? MIN_SCRUB : MIN_NUMBER) }
       forms.sort_by! { |form| -form.size }
     end
 
     private def self.collect_leaves(any : JSON::Any, forms : Array(String)) : Nil
       case raw = any.raw
-      when Hash  then raw.each_value { |item| collect_leaves(item, forms) }
-      when Array then raw.each { |item| collect_leaves(item, forms) }
-      when Nil   then nil
-      else            forms << raw.to_s
+      when Hash   then raw.each_value { |item| collect_leaves(item, forms) }
+      when Array  then raw.each { |item| collect_leaves(item, forms) }
+      when String then forms << raw
+      when Int, Float
+        text = raw.to_s
+        forms << text if text.size >= MIN_NUMBER
       end
     end
 
@@ -367,7 +430,7 @@ module JoobQ
         end
         # Not sealed: a payload written before encryption, or a value someone put there.
         if !any.raw.nil? && !JoobQ.config.allow_plaintext_payloads? && Encryption.strict?
-          raise Error.new("#{@job}.#{@field} is not encrypted and plain payloads are not allowed")
+          raise PlaintextRefused.new("#{@job}.#{@field} is not encrypted and plain payloads are not allowed")
         end
         T.from_json(any.to_json)
       end

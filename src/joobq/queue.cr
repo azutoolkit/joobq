@@ -83,6 +83,8 @@ module JoobQ
     # Batch add jobs with pipelining for improved performance
     def add_batch(jobs : Array(T))
       add_batch_pipelined(jobs)
+    rescue ex : Encryption::Error
+      raise ex
     rescue ex
       Log.error &.emit("Error adding job batch", queue: name, job_count: jobs.size, error: ex.message)
     end
@@ -90,6 +92,8 @@ module JoobQ
     # Add batch of job strings
     def add_batch_strings(jobs : Array(String))
       add_batch_strings_pipelined(jobs)
+    rescue ex : Encryption::Error
+      raise ex
     rescue ex
       Log.error &.emit("Error adding job batch strings", queue: name, job_count: jobs.size, error: ex.message)
     end
@@ -110,10 +114,11 @@ module JoobQ
         Log.warn &.emit("Job kept as stored; it could not be loaded here", queue: name, error: ex.message)
         unreadable << job_str
       end
-      store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
+      # The unreadable ones first, so nothing that goes wrong with the rest can lose them.
       if !unreadable.empty? && (redis_store = store).is_a?(RedisStore)
         redis_store.redis.pipelined { |pipe| unreadable.each { |job_str| pipe.rpush(name, job_str) } }
       end
+      store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
     end
 
     private def handle_enqueue_error(ex : Exception, job_data : String, job_type : String)

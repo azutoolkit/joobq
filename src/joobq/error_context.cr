@@ -54,7 +54,7 @@ module JoobQ
         error_type: error_type,
         error_message: Encryption.scrub(exception.message || "Unknown error", secrets),
         error_class: exception.class.name,
-        backtrace: extract_backtrace(exception).map { |line| Encryption.scrub(line, secrets) },
+        backtrace: extract_backtrace(exception, secrets),
         retry_count: retry_count,
         job_data: job.to_json,
         error_cause: Encryption.scrub(exception.cause.try(&.message), secrets),
@@ -82,8 +82,9 @@ module JoobQ
       end
     end
 
-    def self.extract_backtrace(exception : Exception) : Array(String)
-      exception.inspect_with_backtrace
+    def self.extract_backtrace(exception : Exception, secrets : Array(String) = [] of String) : Array(String)
+      # Scrub the whole text before splitting it into lines: a secret may span lines.
+      Encryption.scrub(exception.inspect_with_backtrace, secrets)
         .split('\n')
         .first(20) # Limit to first 20 lines
         .map(&.strip)

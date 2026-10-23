@@ -148,6 +148,16 @@ module JoobQ
         values.sort_by! { |value| -value.size }
       end
 
+      # Serialises with sealing tied to this job (see `Encryption.sealing_as`); a plain `super` for a job without
+      # encrypted properties, which pays nothing.
+      def to_json(builder : JSON::Builder) : Nil
+        \{% if @type.instance_vars.any? { |iv| (ann = iv.annotation(JSON::Field)) && ann[:converter] && ann[:converter].stringify.includes?("Encryption::Field") } %}
+          ::JoobQ::Encryption.sealing_as(@jid.to_s) { super(builder) }
+        \{% else %}
+          super(builder)
+        \{% end %}
+      end
+
       macro finalized
         # Register the job type with QueueFactory for YAML-based queue creation
         # This allows queues to be created from configuration files

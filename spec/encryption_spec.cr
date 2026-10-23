@@ -29,6 +29,8 @@ class SecretJob
   def perform
     SecretJob.performed << token
     raise "gateway rejected #{token}" if SecretJob.mode == "fail"
+    raise NotImplementedError.new("not built for #{token}") if SecretJob.mode == "notimpl"
+    raise "multi\nline #{token}\nend" if SecretJob.mode == "multiline"
   end
 end
 
@@ -204,6 +206,11 @@ module JoobQ
         job = SecretJob.new(1, "abcd", nil, {"pin" => 424242, "n" => 3})
         forms = job.__secret_values
         forms.should contain("424242")
+        forms.should_not contain("3")
+        Encryption.secret_forms(true).should be_empty
+        Encryption.secret_forms(42).should be_empty
+        Encryption.secret_forms("abcd").uniq.size.should eq Encryption.secret_forms("abcd").size
+        Encryption.scrub("xx abcd1 yy abcd", ["abcd", "abcd1"]).should eq "xx [REDACTED] yy [REDACTED]"
         forms.should contain({"pin" => 424242, "n" => 3}.to_s)
         forms.should contain(%({"pin":424242,"n":3}))
         forms.map(&.size).should eq forms.map(&.size).sort.reverse!
@@ -297,19 +304,21 @@ module JoobQ
         JoobQ.add SecretJob.new(1, SECRET_TOKEN)
         JoobQ.config.payload_keys = nil
         Encryption.reset_env_keys
-        Encryption.key_backoff = 50.milliseconds
+        Encryption.key_backoff = 100.milliseconds
+        before = Encryption.bounces
         begin
           queue = Queue(SecretJob).new("secrets", 1)
           done = Channel(Nil).new
           worker = Worker(SecretJob).new(1, done, queue)
           worker.run
-          sleep 300.milliseconds
+          eventually { Encryption.bounces > before }.should be_true
           worker.terminate
-          sleep 200.milliseconds
 
           SecretJob.performed.should be_empty
           DeadLetterQueue.new(redis).count.should eq 0
-          (redis.llen("secrets") + JoobQ.store.processing_queue_size("secrets")).should eq 1
+          # claimed and put back whole: either in the queue or, for a moment, claimed again
+          eventually { redis.llen("secrets") + JoobQ.store.processing_queue_size("secrets") == 1 }.should be_true
+          redis.hget("joobq:stats:processed", "secrets").should be_nil # a bounce is not a processed job
           redis_dump(redis).should contain("jqe1:a1:")
         ensure
           Encryption.key_backoff = 5.seconds
@@ -355,14 +364,16 @@ module JoobQ
         delayed.should_not contain(SECRET_TOKEN)
         redis_dump(redis).should_not contain(SECRET_TOKEN)
 
+        members = redis.zcard(RedisStore::DELAYED_SET)
         SecretJob.mode = "ok"
         SecretJob.performed.clear
         JoobQ.config.schedulers.first.enqueue_due_jobs(current_time: 1.hour.from_now)
         worker = Worker(SecretJob).new(2, done, queue)
         worker.run
-        eventually { SecretJob.performed.size >= 1 }.should be_true
+        eventually { SecretJob.performed.size >= members }.should be_true
+        sleep 200.milliseconds
         worker.terminate
-        SecretJob.performed.uniq.should eq [SECRET_TOKEN]
+        SecretJob.performed.should eq [SECRET_TOKEN] * members # each stored retry runs once
       end
 
       it "loses nothing when a batch of due jobs holds one it cannot open" do
@@ -381,6 +392,61 @@ module JoobQ
         JoobQ.config.schedulers.first.enqueue_due_jobs(current_time: 1.hour.from_now)
         redis.zcard(RedisStore::DELAYED_SET).should eq 0
         redis.llen("secrets").should eq 2
+      end
+
+      it "writes one dead letter, not two, for an encrypted job failing on its last attempt" do
+        JoobQ.reset
+        SecretJob.mode = "notimpl"
+        queue = Queue(SecretJob).new("secrets", 1)
+        worker = Worker(SecretJob).new(1, Channel(Nil).new, queue)
+        job = SecretJob.new(1, SECRET_TOKEN)
+        job.retries = 0
+        job.max_retries = 1
+        JoobQ.add job
+        worker.run
+        eventually { DeadLetterQueue.new(redis).count >= 1 }.should be_true
+        sleep 300.milliseconds
+        worker.terminate
+
+        DeadLetterQueue.new(redis).count.should eq 1
+        redis_dump(redis).should_not contain(SECRET_TOKEN)
+      end
+
+      it "keeps a multi-line secret out of the backtrace, message and cause" do
+        secret = "line-one-of-secret\nline-two-of-secret"
+        job = SecretJob.new(1, secret)
+        queue = Queue(SecretJob).new("secrets", 1)
+        ex = Exception.new("failed with #{secret}", cause: Exception.new("cause #{secret}"))
+        context = ErrorContext.from_exception(job, queue, ex, "w1")
+        text = [context.error_message, context.error_cause.to_s, context.backtrace.join("\n")].join("\n")
+        text.should_not contain("line-one-of-secret")
+        text.should_not contain("line-two-of-secret")
+        text.should contain(Encryption::REDACTED)
+      end
+
+      it "withholds a refused plain payload from the dead letter stub and the error record" do
+        JoobQ.reset
+        JoobQ.config.allow_plaintext_payloads = false
+        plain = %({"jid":"#{UUID.random}","queue":"secrets","retries":0,"max_retries":0,"expires":#{Time.utc.to_unix_ms + 100000},"status":"Enqueued","order_id":1,"token":"plain-secret-token"})
+        redis.rpush "secrets", plain
+        worker = Worker(SecretJob).new(1, Channel(Nil).new, Queue(SecretJob).new("secrets", 1))
+        worker.run
+        dlq = DeadLetterQueue.new(redis)
+        eventually { dlq.count == 1 }.should be_true
+        worker.terminate
+
+        SecretJob.performed.should be_empty
+        redis_dump(redis).should_not contain("plain-secret-token")
+        dlq.page(limit: 1).first.redrivable?.should be_false
+      end
+
+      it "seals the same job state to the same text, and other jobs differently" do
+        job = SecretJob.new(1, SECRET_TOKEN)
+        job.to_json.should eq job.to_json
+        other = SecretJob.new(1, SECRET_TOKEN)
+        JSON.parse(other.to_json)["token"].should_not eq JSON.parse(job.to_json)["token"]
+        job.token = "changed-token-value"
+        Encryption.seal("v", "J", "f").should_not eq Encryption.seal("v", "J", "f") # no job: random nonce
       end
 
       it "records no plain value in events" do

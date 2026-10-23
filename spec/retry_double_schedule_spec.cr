@@ -38,6 +38,18 @@ def flaky_job(retries : Int32) : FlakyJob
   job
 end
 
+# What the delayed set holds for the flaky queue only: other specs leave schedulers and workers running that may
+# write jobs of their own into the shared set between this spec's reset and its assertions.
+def flaky_delayed(redis) : Array(String)
+  redis.zrange(JoobQ::RedisStore::DELAYED_SET, 0, -1).map(&.to_s).select(&.includes?(%("queue":"flaky")))
+end
+
+# The score of the first delayed entry that belongs to the flaky queue.
+def flaky_score(redis) : Float64
+  entries = redis.zrange(JoobQ::RedisStore::DELAYED_SET, 0, -1, with_scores: true).map(&.to_s)
+  entries.each_slice(2).find { |pair| pair[0].includes?(%("queue":"flaky")) }.not_nil![1].to_f
+end
+
 module JoobQ
   describe "failed jobs" do
     redis = JoobQ.store.as(RedisStore).redis
@@ -55,8 +67,8 @@ module JoobQ
       eventually { FlakyJob.runs >= 1 && idle.call }.should be_true
       worker.terminate
 
-      redis.zcard(RedisStore::DELAYED_SET).should eq 1
-      score = redis.zrange(RedisStore::DELAYED_SET, 0, 0, with_scores: true)[1].to_s.to_f
+      flaky_delayed(redis).size.should eq 1
+      score = flaky_score(redis)
       score.should be > Time.utc.to_unix_ms # due after the backoff, not at once
     end
 
@@ -64,7 +76,7 @@ module JoobQ
       it "are retried up to their budget and then dead-lettered exactly once (#{mode} error)" do
         FlakyJob.mode = mode
         worker = start_flaky(flaky_job(1))
-        eventually { FlakyJob.runs >= 1 && redis.zcard(RedisStore::DELAYED_SET) == 1 }.should be_true
+        eventually { FlakyJob.runs >= 1 && flaky_delayed(redis).size == 1 }.should be_true
 
         JoobQ.config.schedulers.first.enqueue_due_jobs(current_time: 1.hour.from_now)
         eventually { FlakyJob.runs >= 2 && dlq.count >= 1 && idle.call }.should be_true
@@ -72,7 +84,7 @@ module JoobQ
 
         FlakyJob.runs.should eq 2
         dlq.count.should eq 1
-        redis.zcard(RedisStore::DELAYED_SET).should eq 0
+        flaky_delayed(redis).size.should eq 0
       end
     end
 
@@ -83,7 +95,7 @@ module JoobQ
       worker.terminate
 
       dlq.count.should eq 1
-      redis.zcard(RedisStore::DELAYED_SET).should eq 0
+      flaky_delayed(redis).size.should eq 0
       FlakyJob.runs.should eq 1
     end
 
@@ -96,7 +108,7 @@ module JoobQ
 
       FlakyJob.runs.should eq 0
       dlq.count.should eq 1
-      redis.zcard(RedisStore::DELAYED_SET).should eq 0
+      flaky_delayed(redis).size.should eq 0
     end
 
     it "ErrorHandler.schedule_retry scores the retry at now plus the delay" do
@@ -106,7 +118,7 @@ module JoobQ
       before = Time.utc.to_unix_ms
       ErrorHandler.schedule_retry(job, queue, context)
 
-      score = redis.zrange(RedisStore::DELAYED_SET, 0, 0, with_scores: true)[1].to_s.to_f
+      score = flaky_score(redis)
       score.should be >= before + context.retry_delay.total_milliseconds
     end
   end

@@ -59,6 +59,7 @@ module JoobQ
 
     def stop : Nil
       @heartbeat.stop
+      Latency.stop
       @redis.pipelined do |pipe|
         pipe.del(key)
         pipe.zrem(INDEX, @id)

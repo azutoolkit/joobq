@@ -106,6 +106,17 @@ module JoobQ
       end
     end
 
+    # Runs the job and records how long `perform` itself took, failures included: not the throttle's wait, the
+    # retry bookkeeping or a job that expired without running.
+    private def perform_timed(job : T) : Nil
+      started = Time.instant
+      begin
+        job.perform
+      ensure
+        Latency.observe(@queue.name, (Time.instant - started).total_seconds)
+      end
+    end
+
     # Async job handling for batch processing
     private def handle_job_async(job : String)
       spawn do
@@ -117,7 +128,7 @@ module JoobQ
           Events.emit("job.started") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }
 
           middleware_pipeline.call(parsed_job, @queue, @worker_id) do
-            parsed_job.perform
+            perform_timed(parsed_job)
             parsed_job.completed!
             job_completed_successfully = true
             Events.emit("job.completed") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }

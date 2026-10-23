@@ -576,9 +576,8 @@ module JoobQ
       schedule_time = Time.local.to_unix_ms + delay_ms
       job_json = job.to_json
 
-      # Remove job by ID from processing queue (more reliable than JSON match)
-      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
-
+      # Store the retry first, then take the job off the processing list: a failure in between leaves the job
+      # in processing (to be reclaimed or dead-lettered), never in neither place.
       redis.pipelined do |pipe|
         # Add to delayed queue with future timestamp
         pipe.zadd(DELAYED_SET, schedule_time, job_json)
@@ -587,6 +586,9 @@ module JoobQ
         pipe.hincrby("joobq:stats:retries", queue_name, 1)
         pipe.hincrby("joobq:stats:total_retries", "global", 1)
       end
+
+      # Remove job by ID from processing queue (more reliable than JSON match)
+      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
 
       Events.emit("job.retrying") { {jid: job.jid.to_s, queue: queue_name, delay_ms: delay_ms} }
       Log.debug &.emit("Job moved to retry queue",

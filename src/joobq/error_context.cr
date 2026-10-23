@@ -149,11 +149,6 @@ module JoobQ
       }.to_h
     end
 
-    # False for the error types that running again cannot fix, whatever budget the job has left.
-    def retryable? : Bool
-      !{"validation_error", "configuration_error", "implementation_error"}.includes?(error_type)
-    end
-
     def should_retry? : Bool
       case error_type
       when "validation_error", "configuration_error", "implementation_error"

@@ -48,8 +48,8 @@ module JoobQ
           schedule: false # this middleware does the scheduling, once
         )
 
-        # If retries are left and the error is one that running again can fix, retry; otherwise dead letter
-        if current_retries > 0 && error_context.retryable?
+        # Retry while the job has budget left (every error type, as before); then dead letter, once
+        if current_retries > 0
           # Decrement retries
           job.retries = current_retries - 1
 
@@ -66,6 +66,13 @@ module JoobQ
               retries_remaining: updated_job.retries,
               max_retries: max_retries
             )
+          elsif job.retrying?
+            # The retry was attempted (the job was marked retrying) but could not be stored: do not lose the job.
+            Log.error &.emit("Job retry could not be stored, moving the job to the dead letter queue",
+              job_id: job.jid.to_s,
+              queue: queue.name
+            )
+            move_to_dead_letter(job, queue, error_context)
           else
             Log.warn &.emit("Job retry already in progress, skipping duplicate retry",
               job_id: job.jid.to_s,

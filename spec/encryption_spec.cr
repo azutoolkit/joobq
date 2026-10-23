@@ -32,6 +32,10 @@ class SecretJob
   end
 end
 
+class SubSecretJob < SecretJob
+  encrypted_property extra : String = ""
+end
+
 # Every value Redis holds, as text, whatever the key's type.
 def redis_dump(redis) : String
   String.build do |io|
@@ -158,7 +162,7 @@ module JoobQ
         old.to_json.should_not contain(SECRET_TOKEN)
 
         JoobQ.config.allow_plaintext_payloads = false
-        expect_raises(Encryption::Error, /not encrypted/) { SecretJob.from_json(plain) }
+        expect_raises(Encryption::Error, /not encrypted/) { Encryption.strict { SecretJob.from_json(plain) } }
       end
 
       it "refuses a value sealed for another field" do
@@ -172,6 +176,39 @@ module JoobQ
         JoobQ.config.payload_keys = nil
         Encryption.reset_env_keys
         expect_raises(Encryption::Error, /no payload encryption key/) { SecretJob.new(1, SECRET_TOKEN).to_json }
+      end
+
+      it "applies allow_plaintext_payloads = false to the worker path only" do
+        plain = %({"jid":"#{UUID.random}","queue":"secrets","retries":0,"max_retries":0,"expires":#{Time.utc.to_unix_ms + 100000},"status":"Enqueued","order_id":1,"token":"plain-token"})
+        JoobQ.config.allow_plaintext_payloads = false
+        SecretJob.from_json(plain).token.should eq "plain-token" # Queue#add, the API
+        expect_raises(Encryption::Error, /not encrypted/) { Encryption.strict { SecretJob.from_json(plain) } }
+        Encryption.strict?.should be_false
+      end
+
+      it "works in a subclass, with its own encrypted properties" do
+        job = SubSecretJob.new
+        job.token = SECRET_TOKEN
+        job.extra = "sub-extra-value"
+        json = job.to_json
+        json.should_not contain(SECRET_TOKEN)
+        json.should_not contain("sub-extra-value")
+        back = SubSecretJob.from_json(json)
+        back.token.should eq SECRET_TOKEN
+        back.extra.should eq "sub-extra-value"
+        back.__secret_values.should contain("sub-extra-value")
+        back.__secret_values.should contain(SECRET_TOKEN)
+      end
+
+      it "scrubs every form of a non-string value, longest first" do
+        job = SecretJob.new(1, "abcd", nil, {"pin" => 424242, "n" => 3})
+        forms = job.__secret_values
+        forms.should contain("424242")
+        forms.should contain({"pin" => 424242, "n" => 3}.to_s)
+        forms.should contain(%({"pin":424242,"n":3}))
+        forms.map(&.size).should eq forms.map(&.size).sort.reverse!
+        ex = %(rejected {"pin":424242,"n":3} and 424242)
+        Encryption.scrub(ex, forms).should_not contain("424242")
       end
 
       it "scrubs plain values from errors the library records" do
@@ -224,7 +261,7 @@ module JoobQ
         dump.should_not contain(SECRET_TOKEN)
       end
 
-      it "sends a job that cannot be decrypted to the dead letter set without running it" do
+      it "dead-letters a job whose key is gone, as the job itself, and redrives it when the key is back" do
         JoobQ.reset
         job = SecretJob.new(1, SECRET_TOKEN)
         JoobQ.add job
@@ -234,17 +271,137 @@ module JoobQ
         done = Channel(Nil).new
         worker = Worker(SecretJob).new(1, done, queue)
         worker.run
-        eventually { DeadLetterQueue.new(redis).count == 1 }.should be_true
+        dlq = DeadLetterQueue.new(redis)
+        eventually { dlq.count == 1 }.should be_true
         worker.terminate
 
         SecretJob.performed.should be_empty
-        entry = DeadLetterQueue.new(redis).page(limit: 1).first
+        entry = dlq.page(limit: 1).first
         entry.error.to_s.should contain("could not be decrypted")
         entry.error.to_s.should contain("key \"a1\"")
+        entry.redrivable?.should be_true
         redis_dump(redis).should_not contain(SECRET_TOKEN)
-        # the whole sealed payload is kept, so it can be redriven once the key is back
-        redis_dump(redis).should contain(job.jid.to_s)
         redis_dump(redis).should contain("jqe1:a1:")
+
+        JoobQ.config.payload_encryption KEY_B, [KEY_A] # the key is back
+        dlq.redrive([entry.jid]).succeeded.should eq 1
+        worker = Worker(SecretJob).new(2, done, queue)
+        worker.run
+        eventually { SecretJob.performed.size == 1 }.should be_true
+        worker.terminate
+        SecretJob.performed.should eq [SECRET_TOKEN]
+      end
+
+      it "leaves a job in its queue, not the dead letter set, when the process has no keys" do
+        JoobQ.reset
+        JoobQ.add SecretJob.new(1, SECRET_TOKEN)
+        JoobQ.config.payload_keys = nil
+        Encryption.reset_env_keys
+        Encryption.key_backoff = 50.milliseconds
+        begin
+          queue = Queue(SecretJob).new("secrets", 1)
+          done = Channel(Nil).new
+          worker = Worker(SecretJob).new(1, done, queue)
+          worker.run
+          sleep 300.milliseconds
+          worker.terminate
+          sleep 200.milliseconds
+
+          SecretJob.performed.should be_empty
+          DeadLetterQueue.new(redis).count.should eq 0
+          (redis.llen("secrets") + JoobQ.store.processing_queue_size("secrets")).should eq 1
+          redis_dump(redis).should contain("jqe1:a1:")
+        ensure
+          Encryption.key_backoff = 5.seconds
+        end
+        # with the key back, the same job runs
+        JoobQ.config.payload_encryption KEY_A
+        worker = Worker(SecretJob).new(3, Channel(Nil).new, Queue(SecretJob).new("secrets", 1))
+        worker.run
+        eventually { SecretJob.performed.size == 1 }.should be_true
+        worker.terminate
+      end
+
+      it "refuses to start a queue of encrypted jobs without keys" do
+        JoobQ.config.payload_keys = nil
+        Encryption.reset_env_keys
+        expect_raises(Encryption::ConfigurationError) { Queue(SecretJob).new("secrets", 1).start }
+        ENV["JOOBQ_PAYLOAD_KEYS"] = "not-a-key"
+        Encryption.reset_env_keys
+        begin
+          expect_raises(Encryption::ConfigurationError, /neither 64 hex digits nor base64|bytes/) { Queue(SecretJob).new("secrets", 1).start }
+        ensure
+          ENV.delete("JOOBQ_PAYLOAD_KEYS")
+          Encryption.reset_env_keys
+        end
+      end
+
+      it "keeps ciphertext in the retry set and runs the job later with plain values" do
+        JoobQ.reset
+        SecretJob.mode = "fail"
+        queue = Queue(SecretJob).new("secrets", 1)
+        done = Channel(Nil).new
+        worker = Worker(SecretJob).new(1, done, queue)
+        job = SecretJob.new(1, SECRET_TOKEN)
+        job.retries = 2
+        job.max_retries = 2
+        JoobQ.add job
+        worker.run
+        eventually { redis.zcard(RedisStore::DELAYED_SET) >= 1 }.should be_true
+        worker.terminate
+
+        delayed = redis.zrange(RedisStore::DELAYED_SET, 0, -1).map(&.to_s).join
+        delayed.should contain("jqe1:a1:")
+        delayed.should_not contain(SECRET_TOKEN)
+        redis_dump(redis).should_not contain(SECRET_TOKEN)
+
+        SecretJob.mode = "ok"
+        SecretJob.performed.clear
+        JoobQ.config.schedulers.first.enqueue_due_jobs(current_time: 1.hour.from_now)
+        worker = Worker(SecretJob).new(2, done, queue)
+        worker.run
+        eventually { SecretJob.performed.size >= 1 }.should be_true
+        worker.terminate
+        SecretJob.performed.uniq.should eq [SECRET_TOKEN]
+      end
+
+      it "loses nothing when a batch of due jobs holds one it cannot open" do
+        JoobQ.reset
+        bad = SecretJob.new(1, "other-secret-value").to_json # sealed with key a1
+        JoobQ.config.payload_encryption KEY_B
+        good = SecretJob.new(2, SECRET_TOKEN).to_json
+        queue = Queue(SecretJob).new("secrets", 1)
+
+        queue.add_batch_strings([bad, good])
+        redis.llen("secrets").should eq 2
+
+        redis.del("secrets")
+        redis.zadd(RedisStore::DELAYED_SET, 1, bad)
+        redis.zadd(RedisStore::DELAYED_SET, 2, good)
+        JoobQ.config.schedulers.first.enqueue_due_jobs(current_time: 1.hour.from_now)
+        redis.zcard(RedisStore::DELAYED_SET).should eq 0
+        redis.llen("secrets").should eq 2
+      end
+
+      it "records no plain value in events" do
+        JoobQ.reset
+        SecretJob.mode = "fail"
+        sink = CollectingSink.new
+        Events.subscribe(sink)
+        begin
+          queue = Queue(SecretJob).new("secrets", 1)
+          worker = Worker(SecretJob).new(1, Channel(Nil).new, queue)
+          JoobQ.add SecretJob.new(1, SECRET_TOKEN)
+          worker.run
+          seen = [] of String
+          spawn { loop { seen << sink.received.receive.to_json } }
+          eventually { seen.any?(&.includes?("job.failed")) }.should be_true
+          worker.terminate
+          seen.join.should_not contain(SECRET_TOKEN)
+          seen.join.should contain("gateway rejected [REDACTED]")
+        ensure
+          Events.unsubscribe(sink)
+        end
       end
 
       it "reads a plain job that was queued before encryption" do

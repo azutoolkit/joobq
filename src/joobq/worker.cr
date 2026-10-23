@@ -122,8 +122,9 @@ module JoobQ
       spawn do
         parsed_job = nil
         job_completed_successfully = false
+        keys_missing = false
         begin
-          parsed_job = T.from_json(job)
+          parsed_job = Encryption.strict { T.from_json(job) }
           parsed_job.running!
           Events.emit("job.started") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }
 
@@ -140,6 +141,11 @@ module JoobQ
               worker_id: @worker_id,
               processing_time: (Time.instant - parsed_job.enqueue_time).total_seconds.to_s)
           end
+        rescue ex : Encryption::ConfigurationError
+          # No usable key in this process: the job is fine, the configuration is not. Leave it in the queue.
+          keys_missing = true
+          Log.error &.emit("Payload encryption keys are missing or malformed; leaving the job in the queue",
+            queue: @queue.name, worker_id: @worker_id, error: ex.message)
         rescue ex : JSON::Error
           # Handle unparseable jobs by moving them to dead letter queue
           handle_unparseable_job(job, ex)
@@ -182,7 +188,9 @@ module JoobQ
         ensure
           # Use appropriate cleanup method based on job completion status
           # IMPORTANT: Pass the full job JSON string, not just the job ID
-          if job_completed_successfully && parsed_job
+          if keys_missing
+            requeue_for_missing_keys(job)
+          elsif job_completed_successfully && parsed_job
             # Use enhanced cleanup for successfully completed jobs
             @queue.cleanup_completed_job_pipelined(@worker_id, job)
           else
@@ -191,6 +199,17 @@ module JoobQ
           end
         end
       end
+    end
+
+    # Backs off, then puts the job back at the end of its queue and takes it off the processing list.
+    private def requeue_for_missing_keys(job : String) : Nil
+      sleep Encryption.key_backoff
+      if (store = @queue.store).is_a?(RedisStore)
+        store.redis.rpush(@queue.name, job)
+      end
+      @queue.cleanup_job_processing_pipelined(@worker_id, job)
+    rescue ex
+      Log.error &.emit("Could not return a job to its queue", queue: @queue.name, worker_id: @worker_id, error: ex.message)
     end
 
     # Handle jobs that cannot be parsed (invalid JSON or structure)
@@ -220,7 +239,7 @@ module JoobQ
         error_class: parse_error.class.name,
         backtrace: parse_error.inspect_with_backtrace.split('\n').first(10),
         retry_count: 0,
-        job_data: undecryptable ? job_json : job_json[0, 1000], # Truncate to first 1000 chars
+        job_data: job_json[0, 1000], # Truncate to first 1000 chars (the error record is not where the payload is kept)
         error_cause: nil,
         system_context: {
           "worker_id"         => @worker_id,
@@ -255,7 +274,7 @@ module JoobQ
     private def move_unparseable_job_to_dead_letter(job_json : String, job_id : String, parse_error : Exception) : Nil
       undecryptable = parse_error.is_a?(Encryption::Error)
       # Create a minimal job structure for dead letter queue
-      dead_job_data = {
+      stub = {
         "jid"    => job_id,
         "queue"  => @queue.name,
         "status" => "Dead",
@@ -272,14 +291,23 @@ module JoobQ
             "original_job_data_length" => job_json.size.to_s,
           },
         },
-        "original_job_data" => undecryptable ? job_json : job_json[0, 1000], # Truncate for storage
+        "original_job_data" => job_json[0, 1000], # Truncate for storage
       }
+      dead_job_data = JSON.parse(stub.to_json).as_h
+
+      # An undecryptable job is stored as the job itself (sealed values untouched, status Dead, the error set), not
+      # as a stub: it is the full payload the operator needs to redrive it once the key is back.
+      if undecryptable && (original = JSON.parse(job_json).as_h?) && original["jid"]?.try(&.as_s?) && original["queue"]?.try(&.as_s?)
+        original["status"] = dead_job_data["status"]
+        original["error"] = dead_job_data["error"]
+        dead_job_data = original
+      end
 
       # Store in dead letter queue
       redis_store = @queue.store
       if redis_store.is_a?(RedisStore)
         current_timestamp = Time.local.to_unix_ms
-        DeadLetterQueue.add(redis_store.redis, current_timestamp, [dead_job_data.to_json])
+        DeadLetterQueue.add(redis_store.redis, current_timestamp, [JSON::Any.new(dead_job_data).to_json])
         Events.emit("job.dead") { {jid: job_id, queue: @queue.name} }
 
         Log.info &.emit("Unparseable job moved to dead letter queue",

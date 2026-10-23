@@ -67,13 +67,29 @@ module JoobQ
   #
   # ## Failure mode
   #
-  # A job whose encrypted property cannot be opened (no key, unknown key id, wrong class or field, altered) is never
-  # run. The worker moves it to the dead-letter set with the error type `decryption_error` and a message that names
-  # the class, the field and the reason, never a value; the stored payload is kept whole, so it can be redriven once
-  # the key is back. Enqueuing a job when no key is configured raises `JoobQ::Encryption::Error` to the caller.
+  # A job is never run with a value it could not open.
+  #
+  # * Problems with the *job*: an unknown key id, a bad tag (wrong class or field, altered), a damaged value. The
+  #   worker moves it to the dead-letter set as the job itself (sealed values untouched, status Dead) with error
+  #   type `decryption_error` and a message that names the class, the field and the reason, never a value. It can
+  #   be redriven (`DeadLetterQueue#redrive`, the API's retry) once the key is back, and runs then.
+  # * Problems with this *process's keys*: none configured, or `JOOBQ_PAYLOAD_KEYS` malformed
+  #   (`Encryption::ConfigurationError`). The job is fine, so it is not dead-lettered: the worker logs, waits five
+  #   seconds and puts it back on its queue. A queue of a job class with encrypted properties refuses to start
+  #   (`Queue#start` raises) without valid keys, and enqueuing raises to the caller.
   #
   # Payloads written before the property was encrypted (plain values) are read as they are, and written sealed the
-  # next time the job is stored. To refuse them instead, set `allow_plaintext_payloads = false`.
+  # next time the job is stored. `JoobQ.config.allow_plaintext_payloads = false` makes the *worker* refuse them
+  # (`Queue#add` and the HTTP API still accept them: they are about to be sealed). While it is true, anyone who can
+  # write to Redis can put an unsealed value in a job and it will run: sealing gives confidentiality, and integrity
+  # only against tampering with a sealed value.
+  #
+  # ## Limits worth knowing
+  #
+  # * The associated data is the class and the property, not the job id: a sealed value can be copied between two
+  #   jobs of the same class and property by someone who can write to Redis.
+  # * Nonces are random 96 bit values, so keep to about 2^32 seals per key (billions of values), then rotate.
+  # * Values shorter than `MIN_SCRUB` characters are not scrubbed from recorded errors.
   #
   # ## Format
   #
@@ -94,12 +110,19 @@ module JoobQ
     DEFAULT_ID = "default"
     # Replaces a plain value in text the library records.
     REDACTED = "[REDACTED]"
-    # Values shorter than this are not scrubbed from messages (they would match everywhere).
+    # Plain values shorter than this are not scrubbed from messages: a one- or two-character value would match
+    # everywhere and make every message unreadable. Do not put a secret that short in a job and expect it hidden.
     MIN_SCRUB = 4
 
     # Raised for anything wrong with a sealed value or the keys. It is a `JSON::Error` so a worker that fails to
     # load a job treats it like any unreadable payload (dead letter), but its message never has a value in it.
     class Error < JSON::Error
+    end
+
+    # The keys are missing or malformed: a problem with this process's configuration, not with the job. A worker
+    # leaves such a job in the queue (and backs off) instead of dead-lettering it, and a queue of a job class with
+    # encrypted properties refuses to start without valid keys.
+    class ConfigurationError < Error
     end
 
     # The configured keys: the current one (seals) and the old ones (open only).
@@ -112,13 +135,13 @@ module JoobQ
       # `entries` is a list of `id:key` texts, the first one current.
       def self.parse(entries : Array(String), source : String = "payload keys") : Keys
         entries = entries.map(&.strip).reject(&.empty?)
-        raise Error.new("#{source}: no key given") if entries.empty?
+        raise ConfigurationError.new("#{source}: no key given") if entries.empty?
 
         keys = {} of String => Bytes
         first = nil
         entries.each do |entry|
           id, material = split(entry, source)
-          raise Error.new("#{source}: key id #{id.inspect} appears twice") if keys.has_key?(id)
+          raise ConfigurationError.new("#{source}: key id #{id.inspect} appears twice") if keys.has_key?(id)
 
           keys[id] = decode(id, material, source)
           first ||= id
@@ -142,7 +165,7 @@ module JoobQ
         id, colon, material = entry.partition(':')
         return {DEFAULT_ID, entry} if colon.empty?
 
-        raise Error.new("#{source}: a key id is 1 to 16 of a-z 0-9 _ -") unless KEY_ID.matches?(id)
+        raise ConfigurationError.new("#{source}: a key id is 1 to 16 of a-z 0-9 _ -") unless KEY_ID.matches?(id)
 
         {id, material.strip}
       end
@@ -155,10 +178,10 @@ module JoobQ
                   begin
                     Base64.decode(material.tr("-_", "+/"))
                   rescue Base64::Error
-                    raise Error.new("#{source}: key #{id.inspect} is neither 64 hex digits nor base64")
+                    raise ConfigurationError.new("#{source}: key #{id.inspect} is neither 64 hex digits nor base64")
                   end
                 end
-        raise Error.new("#{source}: key #{id.inspect} must be #{KEY_LEN} bytes (it is #{bytes.size})") unless bytes.size == KEY_LEN
+        raise ConfigurationError.new("#{source}: key #{id.inspect} must be #{KEY_LEN} bytes (it is #{bytes.size})") unless bytes.size == KEY_LEN
 
         bytes
       end
@@ -174,25 +197,60 @@ module JoobQ
 
     @@env_keys : Keys?
     @@env_read = false
+    @@env_mutex = Sync::Mutex.new
 
     # The keys in force: `JoobQ.config.payload_keys`, else the environment (read once).
     def self.keys : Keys
-      JoobQ.config.payload_keys || env_keys || raise Error.new(
+      JoobQ.config.payload_keys || env_keys || raise ConfigurationError.new(
         "no payload encryption key is configured (payload_encryption in JoobQ.configure, or #{ENV_KEYS} / #{ENV_KEY})")
     end
 
     private def self.env_keys : Keys?
-      unless @@env_read
-        @@env_keys = Keys.from_env
-        @@env_read = true
+      @@env_mutex.synchronize do
+        unless @@env_read
+          @@env_keys = Keys.from_env # raises (and stays unread) when the variable is malformed
+          @@env_read = true
+        end
+        @@env_keys
       end
-      @@env_keys
     end
 
     # Forgets the keys read from the environment, so the next use reads it again (specs, tools).
     def self.reset_env_keys : Nil
-      @@env_keys = nil
-      @@env_read = false
+      @@env_mutex.synchronize do
+        @@env_keys = nil
+        @@env_read = false
+      end
+    end
+
+    @@key_backoff = 5.seconds
+
+    # How long a worker waits before it puts back a job it could not open for want of a keys (see ConfigurationError).
+    def self.key_backoff : Time::Span
+      @@key_backoff
+    end
+
+    def self.key_backoff=(value : Time::Span)
+      @@key_backoff = value
+    end
+
+    @@strict = {} of Fiber => Bool
+    @@strict_mutex = Sync::Mutex.new
+
+    # Runs the block with plain payload values refused when `allow_plaintext_payloads` is false. Only the worker
+    # path uses it: `Queue#add` and the HTTP API still accept plain values (they are about to be sealed).
+    def self.strict(&)
+      fiber = Fiber.current
+      @@strict_mutex.synchronize { @@strict[fiber] = true }
+      begin
+        yield
+      ensure
+        @@strict_mutex.synchronize { @@strict.delete(fiber) }
+      end
+    end
+
+    def self.strict? : Bool
+      @@strict_mutex.synchronize { @@strict.has_key?(Fiber.current) }
     end
 
     def self.sealed?(value : String) : Bool
@@ -255,12 +313,34 @@ module JoobQ
       id.gsub(/[^a-z0-9_-]/, "?")[0, 16]
     end
 
-    # `text` with every given plain value replaced by `REDACTED`. Used on what the library records about a failure.
+    # `text` with every given plain value replaced by `REDACTED`, longest first (so a value that contains another is
+    # replaced whole). Used on what the library records about a failure.
     def self.scrub(text : String, secrets : Array(String)) : String
       secrets.each do |secret|
         text = text.gsub(secret, REDACTED) if secret.size >= MIN_SCRUB
       end
       text
+    end
+
+    # Every form in which `value` could show up in a message: itself, its `to_s`, `inspect` and JSON text, and the
+    # leaf strings and numbers inside a hash or array. Longest first.
+    def self.secret_forms(value) : Array(String)
+      forms = [] of String
+      return forms if value.nil?
+
+      forms << value.to_s << value.inspect << value.to_json
+      collect_leaves(JSON.parse(value.to_json), forms)
+      forms.uniq!.reject! { |form| form.size < MIN_SCRUB }
+      forms.sort_by! { |form| -form.size }
+    end
+
+    private def self.collect_leaves(any : JSON::Any, forms : Array(String)) : Nil
+      case raw = any.raw
+      when Hash  then raw.each_value { |item| collect_leaves(item, forms) }
+      when Array then raw.each { |item| collect_leaves(item, forms) }
+      when Nil   then nil
+      else            forms << raw.to_s
+      end
     end
 
     def self.scrub(text : String?, secrets : Array(String)) : String?
@@ -286,7 +366,7 @@ module JoobQ
           {% end %}
         end
         # Not sealed: a payload written before encryption, or a value someone put there.
-        if !any.raw.nil? && !JoobQ.config.allow_plaintext_payloads?
+        if !any.raw.nil? && !JoobQ.config.allow_plaintext_payloads? && Encryption.strict?
           raise Error.new("#{@job}.#{@field} is not encrypted and plain payloads are not allowed")
         end
         T.from_json(any.to_json)

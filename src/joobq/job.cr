@@ -142,12 +142,10 @@ module JoobQ
         \{% for iv in @type.instance_vars %}
           \{% ann = iv.annotation(JSON::Field) %}
           \{% if ann && ann[:converter] && ann[:converter].stringify.includes?("Encryption::Field") %}
-            if value = @\{{iv.name.id}}
-              values << (value.is_a?(String) ? value : value.to_json)
-            end
+            values.concat(::JoobQ::Encryption.secret_forms(@\{{iv.name.id}}))
           \{% end %}
         \{% end %}
-        values
+        values.sort_by! { |value| -value.size }
       end
 
       macro finalized

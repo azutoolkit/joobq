@@ -20,6 +20,7 @@ module JoobQ
     # While set in the future, this worker claims nothing: the process has no usable payload keys (see
     # `Encryption::ConfigurationError`), so claiming would only bounce jobs.
     @claim_paused_until : Atomic(Int64) = Atomic(Int64).new(0_i64)
+    START = Time.instant
 
     private getter middleware_pipeline : MiddlewarePipeline = JoobQ.config.middleware_pipeline
 
@@ -207,8 +208,9 @@ module JoobQ
       end
     end
 
+    # Monotonic milliseconds since the process started (a wall clock step must not stretch or cut the pause).
     private def now_ms : Int64
-      Time.utc.to_unix_ms
+      (Time.instant - START).total_milliseconds.to_i64
     end
 
     private def pause_claiming : Nil
@@ -236,7 +238,7 @@ module JoobQ
         queue: @queue.name,
         worker_id: @worker_id,
         job_data_length: job_json.size,
-        parse_error: parse_error.message || "Unknown JSON parsing error"
+        parse_error: safe_message(parse_error)
       )
 
       # Try to extract job ID from the raw JSON if possible
@@ -248,7 +250,7 @@ module JoobQ
       undecryptable = parse_error.is_a?(Encryption::Error)
       # A plain payload that was refused holds the secrets in the clear: it goes nowhere (not the error monitor, not
       # the dead-letter stub).
-      withheld = parse_error.is_a?(Encryption::PlaintextRefused)
+      withheld = withhold_payload?(parse_error)
 
       error_context = ErrorContext.new(
         job_id: job_id,
@@ -256,9 +258,9 @@ module JoobQ
         worker_id: @worker_id,
         job_type: "Unknown",
         error_type: undecryptable ? "decryption_error" : "serialization_error",
-        error_message: undecryptable ? "Job payload could not be decrypted: #{parse_error.message}" : "Job could not be parsed: #{parse_error.message}",
+        error_message: undecryptable ? "Job payload could not be decrypted: #{parse_error.message}" : "Job could not be parsed: #{safe_message(parse_error)}",
         error_class: parse_error.class.name,
-        backtrace: parse_error.inspect_with_backtrace.split('\n').first(10),
+        backtrace: withheld && !undecryptable ? [safe_message(parse_error)] : parse_error.inspect_with_backtrace.split('\n').first(10),
         retry_count: 0,
         job_data: withheld ? WITHHELD : job_json[0, 1000], # Truncate to first 1000 chars (the error record is not where the payload is kept)
         error_cause: nil,
@@ -291,9 +293,31 @@ module JoobQ
       "unparseable_#{job_json.hash.abs.to_s(16)}"
     end
 
+    # Whether the payload must stay out of the dead-letter stub and the error record: it holds (or may hold) plain
+    # values of encrypted properties. That is the case for a refused plain payload, and for any other parse error
+    # in a job class with encrypted properties (the error may come before the encrypted field is reached). A
+    # payload that failed only to *decrypt* holds sealed values and is kept whole.
+    private def withhold_payload?(parse_error : Exception) : Bool
+      return true if parse_error.is_a?(Encryption::PlaintextRefused)
+      return false if parse_error.is_a?(Encryption::Error)
+
+      encrypts?
+    end
+
+    # A parse error's message can quote the payload; for a job class with encrypted properties it is not shown.
+    private def safe_message(parse_error : Exception) : String
+      return parse_error.message || "Unknown JSON parsing error" if parse_error.is_a?(Encryption::Error) || !encrypts?
+
+      "details withheld (the job class has encrypted properties)"
+    end
+
+    private def encrypts? : Bool
+      {{ T.union_types.any? { |type| type.instance_vars.any? { |iv| (ann = iv.annotation(JSON::Field)) && ann[:converter] && ann[:converter].stringify.includes?("Encryption::Field") } } }}
+    end
+
     # Move unparseable job to dead letter queue
     private def move_unparseable_job_to_dead_letter(job_json : String, job_id : String, parse_error : Exception) : Nil
-      withheld = parse_error.is_a?(Encryption::PlaintextRefused)
+      withheld = withhold_payload?(parse_error)
       undecryptable = parse_error.is_a?(Encryption::Error)
       # Create a minimal job structure for dead letter queue
       stub = {

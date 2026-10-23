@@ -31,6 +31,7 @@ class SecretJob
     raise "gateway rejected #{token}" if SecretJob.mode == "fail"
     raise NotImplementedError.new("not built for #{token}") if SecretJob.mode == "notimpl"
     raise "multi\nline #{token}\nend" if SecretJob.mode == "multiline"
+    raise String.new(Bytes[0xff, 0xfe, 0x41] + "bad #{token}".to_slice) if SecretJob.mode == "badutf8"
   end
 end
 
@@ -371,7 +372,7 @@ module JoobQ
         worker = Worker(SecretJob).new(2, done, queue)
         worker.run
         eventually { SecretJob.performed.size >= members }.should be_true
-        sleep 200.milliseconds
+        eventually { JoobQ.store.processing_queue_size("secrets") == 0 && redis.llen("secrets") == 0 }.should be_true
         worker.terminate
         SecretJob.performed.should eq [SECRET_TOKEN] * members # each stored retry runs once
       end
@@ -404,8 +405,7 @@ module JoobQ
         job.max_retries = 1
         JoobQ.add job
         worker.run
-        eventually { DeadLetterQueue.new(redis).count >= 1 }.should be_true
-        sleep 300.milliseconds
+        eventually { DeadLetterQueue.new(redis).count >= 1 && JoobQ.store.processing_queue_size("secrets") == 0 }.should be_true
         worker.terminate
 
         DeadLetterQueue.new(redis).count.should eq 1
@@ -440,13 +440,48 @@ module JoobQ
         dlq.page(limit: 1).first.redrivable?.should be_false
       end
 
-      it "seals the same job state to the same text, and other jobs differently" do
-        job = SecretJob.new(1, SECRET_TOKEN)
-        job.to_json.should eq job.to_json
-        other = SecretJob.new(1, SECRET_TOKEN)
-        JSON.parse(other.to_json)["token"].should_not eq JSON.parse(job.to_json)["token"]
-        job.token = "changed-token-value"
-        Encryption.seal("v", "J", "f").should_not eq Encryption.seal("v", "J", "f") # no job: random nonce
+      describe "scrubbing never stops a failing job from being recorded" do
+        [{"a 50 KB secret", "fail", "big"},
+         {"6000 leaves", "fail", "leaves"},
+         {"invalid UTF-8 in the message", "badutf8", "plain"}].each do |(name, mode, build)|
+          it "dead-letters a job with #{name}" do
+            JoobQ.reset
+            SecretJob.mode = mode
+            job = SecretJob.new(1, "tok-xxxxxxxx")
+            case build
+            when "big"    then job.token = "A" * 50_000
+            when "leaves" then job.meta = (0...6000).to_h { |i| {"k#{i}", 1_000_000 + i} }
+            end
+            job.retries = 0
+            job.max_retries = 1
+            worker = Worker(SecretJob).new(1, Channel(Nil).new, Queue(SecretJob).new("secrets", 1))
+            JoobQ.add job
+            worker.run
+            eventually { DeadLetterQueue.new(redis).count == 1 }.should be_true
+            worker.terminate
+            redis_dump(redis).should_not contain("A" * 100)
+            redis_dump(redis).should_not contain("1000042")
+          end
+        end
+
+        it "scrubs a 50 KB secret and 6000 leaves without raising" do
+          big = "S" * 50_000
+          Encryption.scrub("x #{big} y", [big]).should eq "x [REDACTED] y"
+          leaves = (0...6000).map { |i| "leaf-value-#{i}" }
+          Encryption.scrub("a leaf-value-5999 b", leaves).should eq "a [REDACTED] b"
+          Encryption.scrub("bad \xff bytes secret1234", ["secret1234"]).should eq "bad \uFFFD bytes [REDACTED]"
+        end
+      end
+
+      it "withholds the payload when it cannot be parsed in a job class with encrypted properties" do
+        JoobQ.reset
+        broken = %({"jid":"#{UUID.random}","queue":"secrets","token":"plain-secret-xyz","order_id":"not a number"})
+        redis.rpush "secrets", broken
+        worker = Worker(SecretJob).new(1, Channel(Nil).new, Queue(SecretJob).new("secrets", 1))
+        worker.run
+        eventually { DeadLetterQueue.new(redis).count == 1 }.should be_true
+        worker.terminate
+        redis_dump(redis).should_not contain("plain-secret-xyz")
       end
 
       it "records no plain value in events" do

@@ -2,7 +2,6 @@ require "base64"
 require "json"
 require "openssl"
 require "openssl/cipher"
-require "openssl/hmac"
 
 # Crystal's `OpenSSL::Cipher` can set and read a GCM tag but has no way to feed additional authenticated data (AAD);
 # in OpenSSL that is an update call with no output buffer.
@@ -89,17 +88,18 @@ module JoobQ
   #
   # * The associated data is the class and the property, not the job id: a sealed value can be copied between two
   #   jobs of the same class and property by someone who can write to Redis.
-  # * Nonces are 96 bit values (random, or derived per job id and value): keep to about 2^32 seals per key, then
-  #   rotate.
-  # * Values shorter than `MIN_SCRUB` characters are not scrubbed from recorded errors.
+  # * Nonces are random 96 bit values: keep to about 2^32 seals per key, then rotate.
+  # * Sealing is not deterministic: two serialisations of one job differ. Code that relies on identical strings
+  #   collapsing (a sorted set member, a LREM by value) must not re-serialise a job to find it again.
+  # * Strings shorter than `MIN_SCRUB` (4) characters and numbers of fewer than `MIN_NUMBER` (6) digits are not
+  #   scrubbed from recorded errors, booleans never: they would match everywhere.
+  # * With `allow_plaintext_payloads = false` a worker that meets a plain value dead-letters the job *without* its
+  #   payload (it holds the plain values); that legacy job is gone, so drain old jobs before flipping the flag.
   #
   # ## Format
   #
-  # `jqe1:<key id>:<base64url (no padding) of nonce, ciphertext and tag>`: AES-256-GCM, the additional authenticated data
-  # being `joobq/payload/v1`, the job class and the property name (separated by NUL). The 96 bit nonce is random
-  # for a value sealed on its own, and derived (HMAC of key, job id, property and value) when a job serialises
-  # itself, so the same job state always gives the same text: Redis structures that rely on identical members
-  # collapsing (the dead-letter set) keep working. The same value in another job gives another text. A `String` is sealed as it is; any other type is sealed as its JSON text. `nil` is stored
+  # `jqe1:<key id>:<base64url (no padding) of nonce, ciphertext and tag>`: AES-256-GCM, a fresh random 96 bit nonce per value, the additional authenticated data
+  # being `joobq/payload/v1`, the job class and the property name (separated by NUL). A `String` is sealed as it is; any other type is sealed as its JSON text. `nil` is stored
   # as `null`. Renaming the class or the property makes existing sealed values unreadable: pass `job_name:` to
   # `encrypted_property` to keep the name stable.
   module Encryption
@@ -287,39 +287,9 @@ module JoobQ
       "joobq/payload/v1\0#{job}\0#{field}".to_slice
     end
 
-    @@sealing = {} of Fiber => String
-    @@sealing_mutex = Sync::Mutex.new
-
-    # Runs the block with sealing tied to a job (its id). Within it a value is sealed with a nonce derived from the
-    # key, the job id, the property and the plain value, so serialising the same job state twice gives the same
-    # text. That matters: Redis structures rely on identical members collapsing (the dead-letter set is a sorted
-    # set), and two writers of one dead job must not become two entries. The same value in two different jobs still
-    # seals differently, because the job id is part of the derivation. Used by `Job#to_json`, only for jobs that
-    # have encrypted properties.
-    def self.sealing_as(jid : String, &)
-      fiber = Fiber.current
-      previous = @@sealing_mutex.synchronize { @@sealing.fetch(fiber, nil).tap { @@sealing[fiber] = jid } }
-      begin
-        yield
-      ensure
-        @@sealing_mutex.synchronize { previous ? (@@sealing[fiber] = previous) : @@sealing.delete(fiber) }
-      end
-    end
-
-    private def self.sealing_job : String?
-      @@sealing_mutex.synchronize { @@sealing[Fiber.current]? }
-    end
-
-    private def self.nonce_for(key : Bytes, jid : String?, job : String, field : String, plain : String) : Bytes
-      return Random::Secure.random_bytes(NONCE_LEN) unless jid
-
-      subkey = OpenSSL::HMAC.digest(:sha256, key, "joobq/nonce-key/v1")
-      OpenSSL::HMAC.digest(:sha256, subkey, "#{jid}\0#{job}\0#{field}\0#{plain}")[0, NONCE_LEN]
-    end
-
     def self.seal(plain : String, job : String, field : String, keys : Keys = self.keys) : String
       id = keys.current_id
-      nonce = nonce_for(keys[id].not_nil!, sealing_job, job, field, plain)
+      nonce = Random::Secure.random_bytes(NONCE_LEN)
       cipher = OpenSSL::Cipher.new("aes-256-gcm")
       cipher.encrypt
       cipher.key = keys[id].not_nil!
@@ -368,13 +338,49 @@ module JoobQ
       id.gsub(/[^a-z0-9_-]/, "?")[0, 16]
     end
 
-    # `text` with every given plain value replaced by `REDACTED`, in one pass (longest value first, so one that
-    # contains another is replaced whole, and the replacement is never searched again).
+    # Shown instead of a message that could not be scrubbed.
+    NOT_SCRUBBABLE = "[REDACTED: not scrubbable]"
+    # Above this many bytes of secrets a single regex would not compile (PCRE2 has a pattern size limit).
+    UNION_LIMIT = 16_384
+
+    # `text` with every given plain value replaced by `REDACTED`: in one pass when the values are few and small
+    # (longest first, the replacement never searched again), value by value (longest first) otherwise. Invalid
+    # UTF-8 in the text is replaced first.
     def self.scrub(text : String, secrets : Array(String)) : String
-      usable = secrets.select { |secret| secret.size >= MIN_SCRUB }
+      usable = secrets.select { |secret| secret.size >= MIN_SCRUB }.uniq!.sort_by! { |secret| -secret.size }
       return text if usable.empty?
 
-      text.gsub(Regex.union(usable.sort_by { |secret| -secret.size }.uniq), REDACTED)
+      text = text.scrub unless text.valid_encoding?
+      if usable.sum(&.bytesize) <= UNION_LIMIT
+        begin
+          return text.gsub(Regex.union(usable), REDACTED)
+        rescue ArgumentError | Regex::Error
+          # fall through to the plain way
+        end
+      end
+      usable.each { |secret| text = text.gsub(secret, REDACTED) }
+      text
+    end
+
+    # Like `scrub`, but it never raises: whatever goes wrong, the text is replaced by `NOT_SCRUBBABLE`, so the
+    # failure path that records an error can always finish (the job must still retry or dead-letter).
+    def self.scrub_safely(text : String, secrets : Array(String)) : String
+      scrub(text, secrets)
+    rescue
+      NOT_SCRUBBABLE
+    end
+
+    # The plain values of the job's encrypted properties, or nil when they cannot be worked out.
+    def self.secrets_of(job) : Array(String)?
+      job.__secret_values
+    rescue
+      nil
+    end
+
+    # `text` scrubbed of `job`'s plain values; `NOT_SCRUBBABLE` when that cannot be done. Never raises.
+    def self.scrub_for(text : String, job) : String
+      secrets = secrets_of(job)
+      secrets ? scrub_safely(text, secrets) : NOT_SCRUBBABLE
     end
 
     # Every form in which `value` could show up in a message: for a string itself and its `inspect`/JSON text; for

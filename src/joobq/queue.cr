@@ -114,11 +114,12 @@ module JoobQ
         Log.warn &.emit("Job kept as stored; it could not be loaded here", queue: name, error: ex.message)
         unreadable << job_str
       end
-      # The unreadable ones first, so nothing that goes wrong with the rest can lose them.
-      if !unreadable.empty? && (redis_store = store).is_a?(RedisStore)
-        redis_store.redis.pipelined { |pipe| unreadable.each { |job_str| pipe.rpush(name, job_str) } }
-      end
+      # After the rest is stored, and in one transaction: if enqueue_batch raises, nothing was written for the
+      # unreadable ones, so a caller that retries the whole batch cannot duplicate them.
       store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
+      if !unreadable.empty? && (redis_store = store).is_a?(RedisStore)
+        redis_store.redis.multi { |multi| unreadable.each { |job_str| multi.rpush(name, job_str) } }
+      end
     end
 
     private def handle_enqueue_error(ex : Exception, job_data : String, job_type : String)

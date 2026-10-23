@@ -135,6 +135,19 @@ module JoobQ
       @[JSON::Field(ignore: true)]
       property enqueue_time = Time.instant
 
+      # The plain values of this job's encrypted properties (see `JoobQ::Encryption`); empty, and free, for a job
+      # without any. Used to keep them out of the errors the library records.
+      def __secret_values : Array(String)
+        values = [] of String
+        \{% for iv in @type.instance_vars %}
+          \{% ann = iv.annotation(JSON::Field) %}
+          \{% if ann && ann[:converter] && ann[:converter].stringify.includes?("Encryption::Field") %}
+            values.concat(::JoobQ::Encryption.secret_forms(@\{{iv.name.id}}))
+          \{% end %}
+        \{% end %}
+        values.sort_by! { |value| -value.size }
+      end
+
       macro finalized
         # Register the job type with QueueFactory for YAML-based queue creation
         # This allows queues to be created from configuration files
@@ -245,6 +258,11 @@ module JoobQ
     end
 
     abstract def perform
+
+    # See the override that `included` defines.
+    def __secret_values : Array(String)
+      [] of String
+    end
 
     def <=>(other)
       self.jid <=> other.jid

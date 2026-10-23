@@ -43,6 +43,8 @@ module JoobQ
       additional_context : Hash(String, String) = {} of String => String,
     ) : ErrorContext
       error_type = classify_error(exception)
+      # Plain values of encrypted properties must not reach the error record, the logs or the stored job.
+      secrets = Encryption.secrets_of(job)
 
       new(
         job_id: job.jid.to_s,
@@ -50,12 +52,12 @@ module JoobQ
         worker_id: worker_id,
         job_type: job.class.name,
         error_type: error_type,
-        error_message: exception.message || "Unknown error",
+        error_message: scrubbed(exception.message || "Unknown error", secrets),
         error_class: exception.class.name,
-        backtrace: extract_backtrace(exception),
+        backtrace: extract_backtrace(exception, secrets),
         retry_count: retry_count,
         job_data: job.to_json,
-        error_cause: exception.cause.try(&.message),
+        error_cause: exception.cause.try { |cause| scrubbed(cause.message.to_s, secrets) },
         system_context: build_system_context(queue, additional_context),
         occurred_at: Time.local.to_rfc3339
       )
@@ -80,8 +82,14 @@ module JoobQ
       end
     end
 
-    def self.extract_backtrace(exception : Exception) : Array(String)
-      exception.inspect_with_backtrace
+    # `text` without the job's plain values; `secrets` nil means they could not be worked out, so nothing is shown.
+    private def self.scrubbed(text : String, secrets : Array(String)?) : String
+      secrets ? Encryption.scrub_safely(text, secrets) : Encryption::NOT_SCRUBBABLE
+    end
+
+    def self.extract_backtrace(exception : Exception, secrets : Array(String)? = [] of String) : Array(String)
+      # Scrub the whole text before splitting it into lines: a secret may span lines.
+      scrubbed(exception.inspect_with_backtrace, secrets)
         .split('\n')
         .first(20) # Limit to first 20 lines
         .map(&.strip)
@@ -203,7 +211,7 @@ module JoobQ
       # Log the error with rich context
       log_error(error_context)
       Events.emit("job.failed") do
-        {jid: job.jid.to_s, queue: queue.name, worker_id: worker_id, error: exception.message}
+        {jid: job.jid.to_s, queue: queue.name, worker_id: worker_id, error: exception.message.try { |message| Encryption.scrub_for(message, job) }}
       end
 
       # Update job with error information

@@ -61,6 +61,13 @@ module JoobQ
       FlakyJob.runs = 0
     end
 
+    # Let a terminated worker finish the job it held, then leave Redis empty for the specs that follow.
+    after_each do
+      eventually(2.seconds) { JoobQ.store.processing_queue_size("flaky") == 0 }
+      sleep 100.milliseconds
+      JoobQ.reset
+    end
+
     it "are scheduled for retry once per attempt, not twice" do
       FlakyJob.mode = "error"
       worker = start_flaky(flaky_job(2))

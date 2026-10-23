@@ -68,6 +68,12 @@ module JoobQ
 
     after_each do
       JoobQ.config.payload_keys = nil
+      # A terminated worker can still be finishing the job it held (its retry, dead letter or error record is
+      # written before the job leaves the processing list). Let it finish, then leave Redis empty, so a late
+      # write cannot land in a later spec's data.
+      eventually(2.seconds) { JoobQ.store.processing_queue_size("secrets") == 0 }
+      sleep 100.milliseconds
+      JoobQ.reset
     end
 
     describe "sealing" do

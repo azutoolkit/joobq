@@ -34,7 +34,13 @@ private def hammer(pool : Pool(PoolSpecConn), fibers : Int32, iterations : Int32
       done.send(nil)
     end
   end
-  fibers.times { done.receive }
+  fibers.times do
+    select
+    when done.receive
+    when timeout(120.seconds)
+      raise "a pool fiber did not finish within 120 s (a checkout or checkin is stuck)"
+    end
+  end
   {overlaps.get, timeouts.get}
 end
 

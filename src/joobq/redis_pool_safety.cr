@@ -19,8 +19,9 @@ require "redis"
 # * a fiber waiting on the pipe can sleep with a byte waiting in it, until its read times out (seen with the mutex
 #   alone, in 3 runs of 20), and one stress run faulted in `Crystal::FdLock#lock_slow`.
 #
-# This reopens `Pool` (and so `ConnectionPool`, which joobqui builds its own pool from) to protect the idle list and
-# the counters with a mutex, and to wait on a `Channel` instead of the pipe. The mutex is never held across a connect
+# This reopens `Pool` (joobqui builds its own pool from `ConnectionPool(Redis)`, which inherits `checkout` and
+# `checkin`; its `connection`/`release` helpers keep their unlocked Hash and nothing in joobq or joobqui calls them) to
+# protect the idle list and the counters with a mutex, and to wait on a `Channel` instead of the pipe. The mutex is never held across a connect
 # or a wait. A failed connect now also gives its slot back (it used to leave `size` one too high for ever, so a pool
 # could end up unable to grow).
 #
@@ -78,7 +79,14 @@ class Pool(T)
         true
       end
     end
-    @tokens.send(nil) if added
+    return unless added
+
+    # A connection the pool did not hand out can find the channel full: keep it idle without waiting for room
+    # (the original appended it and wrote to the pipe), so a misuse cannot hang the fiber.
+    select
+    when @tokens.send(nil)
+    else
+    end
   end
 
   # Counts one more instance as started when there is room (and, from `checkout`, nothing is idle).

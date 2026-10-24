@@ -125,6 +125,7 @@ module JoobQ
 
     # Async job handling for batch processing
     private def handle_job_async(job : String)
+      InFlight.started # counted from now, so `JoobQ.shutdown` cannot miss a job whose fiber has not run yet
       spawn do
         parsed_job = nil
         job_completed_successfully = false
@@ -193,16 +194,20 @@ module JoobQ
             )
           end
         ensure
-          # Use appropriate cleanup method based on job completion status
-          # IMPORTANT: Pass the full job JSON string, not just the job ID
-          if keys_missing
-            requeue_for_missing_keys(job)
-          elsif job_completed_successfully && parsed_job
-            # Use enhanced cleanup for successfully completed jobs
-            @queue.cleanup_completed_job_pipelined(@worker_id, job)
-          else
-            # Use standard cleanup for failed or unparseable jobs
-            @queue.cleanup_job_processing_pipelined(@worker_id, job)
+          begin
+            # Use appropriate cleanup method based on job completion status
+            # IMPORTANT: Pass the full job JSON string, not just the job ID
+            if keys_missing
+              requeue_for_missing_keys(job)
+            elsif job_completed_successfully && parsed_job
+              # Use enhanced cleanup for successfully completed jobs
+              @queue.cleanup_completed_job_pipelined(@worker_id, job)
+            else
+              # Use standard cleanup for failed or unparseable jobs
+              @queue.cleanup_job_processing_pipelined(@worker_id, job)
+            end
+          ensure
+            InFlight.finished
           end
         end
       end

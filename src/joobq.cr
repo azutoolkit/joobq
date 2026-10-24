@@ -173,8 +173,15 @@ module JoobQ
     YamlConfigLoader.find_config_file
   end
 
-  def self.forge
+  # Starts the schedulers, the reaper, the queues and (when enabled) the REST API, then blocks.
+  #
+  # Unless `trap_signals` is false, SIGTERM and SIGINT run `JoobQ.shutdown` (with `shutdown_timeout`) and then
+  # exit the process with status 0; a second signal while that runs exits at once with status 1. The default of
+  # `trap_signals` is false when the environment variable `JOOBQ_TRAP_SIGNALS` is `0`, `false` or `no`. Pass
+  # `trap_signals: false` when the application installs its own handlers and calls `JoobQ.shutdown` itself.
+  def self.forge(trap_signals : Bool = trap_signals_default?, shutdown_timeout : Time::Span = SHUTDOWN_TIMEOUT)
     Log.info { "JoobQ starting..." }
+    trap_termination(shutdown_timeout) if trap_signals
 
     config.schedulers.each do |scheduler|
       scheduler.run
@@ -198,6 +205,9 @@ module JoobQ
       APIServer.start
     end
 
-    sleep
+    # Stays here until `shutdown` has finished (the signal handler calls it, then exits)
+    until shutdown_finished?
+      sleep 100.milliseconds
+    end
   end
 end

@@ -225,6 +225,25 @@ JoobQ.configure do |config|
 end
 ```
 
+### Shutting Down
+
+`JoobQ.forge` traps `SIGTERM` and `SIGINT`: it calls `JoobQ.shutdown` and then exits with status 0. A second signal
+more than a second later exits at once with status 1. Pass `trap_signals: false` (or set `JOOBQ_TRAP_SIGNALS=0`) when
+your application installs its own handlers, and call `JoobQ.shutdown` from them:
+
+```crystal
+JoobQ.forge(trap_signals: false, shutdown_timeout: 20.seconds)
+# elsewhere, in your own handler:
+JoobQ.shutdown(20.seconds)
+```
+
+`JoobQ.shutdown(timeout = JoobQ::SHUTDOWN_TIMEOUT)` (15 seconds) stops, in order and within `timeout` in total: the
+REST API started by `forge`, the schedulers (cron, recurring, delayed, the reaper), the workers of every queue, then
+waits for the jobs still executing and flushes the latency counters. It is safe to call more than once and from any
+fiber: the first call does the work and returns `true`, later calls return `false`. A job that is still running
+when the time is up stays in the processing list and is re-queued by the next start, so it runs again.
+After a shutdown the queues of the process cannot be started again.
+
 ### Defining Queues
 
 Queues are of type Hash(String, Queue(T)) where the name of the key matches the name of the Queue.

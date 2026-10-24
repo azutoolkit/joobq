@@ -6,8 +6,17 @@ module JoobQ
   class APIServer
     Log = ::Log.for("API SERVER")
 
+    @@server : HTTP::Server?
+
     def self.start
       new.start
+    end
+
+    # Closes the listener started by `start` (which then returns). Does nothing when none is running.
+    def self.stop : Nil
+      server = @@server
+      @@server = nil
+      server.try { |s| s.close unless s.closed? }
     end
 
     def start
@@ -16,6 +25,7 @@ module JoobQ
       port = 8080
       Log.info &.emit("Listening on http://#{address}:#{port}")
       server.bind_tcp(address, port)
+      @@server = server
       server.listen
     end
   end

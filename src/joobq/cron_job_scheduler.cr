@@ -7,18 +7,21 @@ module JoobQ
     def initialize(@error_backoff : Time::Span = BackgroundLoop::ERROR_BACKOFF)
       @jobs = {} of String => Scheduler::CronJob
       @loops = [] of BackgroundLoop
+      @lock = Sync::Mutex.new
     end
 
     def cron(pattern : String, timezone : Time::Location = time_location, &block : ->)
       job_key = "#{pattern}:#{timezone.name}"
       parser = CronParser.new(pattern)
 
-      @jobs[job_key] = Scheduler::CronJob.new(
-        pattern: pattern,
-        timezone: timezone,
-        next_run: parser.next(Time.local(timezone)).to_s,
-        block: block
-      )
+      @lock.synchronize do
+        @jobs[job_key] = Scheduler::CronJob.new(
+          pattern: pattern,
+          timezone: timezone,
+          next_run: parser.next(Time.local(timezone)).to_s,
+          block: block
+        )
+      end
 
       # One iteration either schedules the next run (and returns how long to
       # wait for it) or fires the run that is now due. If an iteration raises,
@@ -27,7 +30,7 @@ module JoobQ
       due = false
       prev_nxt = 1.minute.ago
       scheduler_loop = BackgroundLoop.new("cron:#{job_key}", @error_backoff)
-      @loops << scheduler_loop
+      @lock.synchronize { @loops << scheduler_loop }
 
       scheduler_loop.start do
         if due
@@ -37,7 +40,8 @@ module JoobQ
 
         now = Time.local(timezone) # Adjust to the provided timezone
         nxt = parser.next(now)
-        @jobs[job_key].next_run(nxt)
+        # CronJob is a record (a struct): write the updated copy back.
+        @lock.synchronize { @jobs[job_key] = @jobs[job_key].with_next_run(nxt) }
 
         # Avoid duplicate executions
         nxt = parser.next(nxt) if nxt <= prev_nxt
@@ -50,7 +54,8 @@ module JoobQ
 
     # Stops every cron loop. Returns once no loop will run another iteration.
     def stop : Nil
-      @loops.each(&.stop)
+      loops = @lock.synchronize { @loops.dup }
+      loops.each(&.stop)
     end
 
     private def fire(block : ->, pattern : String, timezone : Time::Location) : Nil

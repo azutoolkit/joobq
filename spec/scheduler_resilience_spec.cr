@@ -66,6 +66,10 @@ module JoobQ
         key = scheduler.jobs.keys.first
         entry = scheduler.jobs[key]
 
+        # Wait for the loop's first iteration, so the failure below really
+        # hits a running loop (and not one that has not been scheduled yet).
+        eventually { scheduler.jobs[key].next_run != entry.next_run }.should be_true
+
         # Make the loop's own bookkeeping raise (KeyError) for a while.
         scheduler.jobs.delete(key)
         sleep 100.milliseconds
@@ -78,6 +82,17 @@ module JoobQ
         scheduler.stop
 
         runs.get.should be >= 2
+      end
+
+      it "advances the stored next_run (records are structs)" do
+        scheduler = CronJobScheduler.new
+        scheduler.cron("* * * * * *", Time::Location::UTC) { }
+        key = scheduler.jobs.keys.first
+        initial = scheduler.jobs[key].next_run
+
+        eventually { scheduler.jobs[key].next_run != initial }.should be_true
+        Time.parse_rfc3339(scheduler.jobs[key].next_run).should be > Time.utc - 2.seconds
+        scheduler.stop
       end
 
       it "survives a job block that raises" do

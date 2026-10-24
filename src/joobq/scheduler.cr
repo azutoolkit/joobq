@@ -14,6 +14,12 @@ module JoobQ
         @next_run = next_time.to_rfc3339
       end
 
+      # Records are structs, so `next_run(Time)` only changes a copy. Use this
+      # and store the result when the change must stick.
+      def with_next_run(next_time : Time) : CronJob
+        copy_with(next_run: next_time.to_rfc3339)
+      end
+
       def to_h
         {
           "pattern"  => @pattern,
@@ -60,6 +66,14 @@ module JoobQ
 
     def enqueue(time : Time::Span)
       delayed_scheduler.enqueue(time)
+    end
+
+    # Stops the cron, recurring and delayed loops. Nothing in `JoobQ.forge`
+    # calls this (forge sleeps forever); it is for embedders and specs.
+    def stop : Nil
+      cron_scheduler.stop
+      recurring_scheduler.stop
+      delayed_scheduler.stop
     end
 
     def run

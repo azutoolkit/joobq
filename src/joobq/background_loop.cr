@@ -23,7 +23,7 @@ module JoobQ
     @lock = Sync::Mutex.new
     @run : Run?
 
-    def initialize(@name : String)
+    def initialize(@name : String, @error_backoff : Time::Span = ERROR_BACKOFF)
     end
 
     def running? : Bool
@@ -46,8 +46,8 @@ module JoobQ
             delay = begin
               body.call
             rescue ex
-              Log.error &.emit("Iteration failed", loop: @name, error: ex.message)
-              ERROR_BACKOFF
+              Log.error &.emit("Iteration failed", loop: @name, error_class: ex.class.name, error: ex.message)
+              @error_backoff
             end
 
             stopped = false

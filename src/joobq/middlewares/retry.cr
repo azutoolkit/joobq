@@ -20,7 +20,7 @@ module JoobQ
       private def handle_failure(job : JoobQ::Job, queue : BaseQueue, ex : Exception, worker_id : String)
         # Shutdown gave up on this execution and put the job back on its queue: retrying or dead-lettering it here
         # would schedule it a second time
-        if InFlight.abandoned?
+        unless InFlight.settle # also marks the job as settling, so shutdown does not requeue it meanwhile
           Log.info &.emit("Failure of an execution abandoned at shutdown; the requeued job is not touched",
             job_id: job.jid.to_s, queue: queue.name, error: ex.message)
           return

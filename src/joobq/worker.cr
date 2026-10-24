@@ -73,24 +73,33 @@ module JoobQ
               if !jobs.empty?
                 # Counted before any fiber exists, so `JoobQ.shutdown` cannot miss a claimed job
                 claims = jobs.zip(InFlight.claimed(@queue.name, jobs))
-                # Process jobs in smaller concurrent batches to reduce connection pressure
-                claims.each_slice(WORKER_BATCH_SLICE_SIZE) do |job_batch|
-                  job_batch.each do |(job, token)|
-                    # Spawn with error containment to prevent fiber crashes from affecting worker
-                    spawn do
-                      begin
-                        handle_job_async(job, token)
-                      rescue ex : Exception
-                        Log.error &.emit("Unhandled error in job fiber",
-                          queue: @queue.name,
-                          worker_id: @worker_id,
-                          error: ex.message,
-                          error_class: ex.class.name)
+                unspawned = claims.map(&.last)
+                begin
+                  # Process jobs in smaller concurrent batches to reduce connection pressure
+                  claims.each_slice(WORKER_BATCH_SLICE_SIZE) do |job_batch|
+                    job_batch.each do |(job, token)|
+                      # Spawn with error containment to prevent fiber crashes from affecting worker
+                      unspawned.delete(token)
+                      spawn do
+                        begin
+                          handle_job_async(job, token)
+                        rescue ex : Exception
+                          Log.error &.emit("Unhandled error in job fiber",
+                            queue: @queue.name,
+                            worker_id: @worker_id,
+                            error: ex.message,
+                            error_class: ex.class.name)
+                        end
                       end
                     end
+                    # Small delay between batches to allow connection reuse
+                    sleep WORKER_BATCH_DELAY if job_batch.size > 1
                   end
-                  # Small delay between batches to allow connection reuse
-                  sleep WORKER_BATCH_DELAY if job_batch.size > 1
+                rescue ex
+                  # claims that never got a fiber would otherwise count as in flight for ever (the jobs stay in the
+                  # processing list, as after any crash)
+                  unspawned.each { |token| InFlight.finished(token) }
+                  raise ex
                 end
               else
                 # Adaptive delay to prevent busy waiting and reduce connection frequency
@@ -246,7 +255,7 @@ module JoobQ
 
     # Handle jobs that cannot be parsed (invalid JSON or structure)
     private def handle_unparseable_job(job_json : String, parse_error : Exception) : Nil
-      return if InFlight.abandoned? # the requeued copy will meet the same error and dead-letter it once
+      return unless InFlight.settle # abandoned: the requeued copy will meet the same error and dead-letter it once
 
       Log.error &.emit("Unparseable job detected, moving to dead letter queue",
         queue: @queue.name,

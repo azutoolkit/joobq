@@ -212,7 +212,7 @@ module JoobQ
       log_error(error_context)
       # An execution that shutdown abandoned (its job is back on the queue) schedules, dead-letters and announces
       # nothing: the requeued copy owns the job now
-      abandoned = InFlight.abandoned?
+      abandoned = !InFlight.settle # settling from here on: shutdown waits for this outcome to be applied
       unless abandoned
         Events.emit("job.failed") do
           {jid: job.jid.to_s, queue: queue.name, worker_id: worker_id, error: exception.message.try { |message| Encryption.scrub_for(message, job) }}

@@ -20,6 +20,19 @@ class FailingPollScheduler < JoobQ::Scheduler
   end
 end
 
+# Specs only: reach into the parts of the library that cannot be driven from outside.
+module JoobQ
+  def self.spec_shut_down(value : Bool) : Nil
+    @@shut_down.set(value)
+  end
+end
+
+class JoobQ::Worker(T)
+  def test_unparseable(job_json : String, error : Exception) : Nil
+    handle_unparseable_job(job_json, error)
+  end
+end
+
 PROBE_BINARY = File.join(Dir.tempdir, "joobq-shutdown-probe-#{Random::Secure.hex(4)}")
 Spec.after_suite { File.delete?(PROBE_BINARY) }
 
@@ -197,6 +210,220 @@ module JoobQ
       end
     end
 
+    describe "settling" do
+      after_each { InFlight.clear }
+
+      # Runs the block in a fiber that runs a claimed job, abandoning the claim first when asked.
+      run_claimed = ->(abandon : Bool, body : -> Nil) do
+        token = InFlight.claimed("example", ["{}"]).first
+        ready = Channel(Nil).new
+        go = Channel(Nil).new
+        done = Channel(Nil).new
+        spawn do
+          InFlight.begin_run(token)
+          ready.send(nil)
+          go.receive
+          begin
+            body.call
+          ensure
+            InFlight.finished(token)
+            done.send(nil)
+          end
+        end
+        ready.receive
+        InFlight.abandon_all if abandon
+        go.send(nil)
+        done.receive
+      end
+
+      it "settle is true for a fiber that runs no claimed job" do
+        InFlight.settle.should be_true
+      end
+
+      it "a settling job is not abandoned by the usual pass, still counts, and is taken by the last resort" do
+        token = InFlight.claimed("q", ["a"]).first
+        entered = Channel(Nil).new
+        leave = Channel(Nil).new
+        result = Channel(Bool).new(1)
+        spawn do
+          InFlight.begin_run(token)
+          InFlight.settle.should be_true
+          entered.send(nil)
+          leave.receive
+          result.send(InFlight.finished(token))
+        end
+        entered.receive
+        InFlight.abandon_all.should be_empty
+        InFlight.count.should eq(1)
+        InFlight.abandon_all(settling: true).should eq([{"q", "a"}])
+        InFlight.count.should eq(0)
+        leave.send(nil)
+        result.receive.should be_true # abandoned after all: its end is reported
+      end
+
+      it "settle after an abandonment answers false, once" do
+        saw = Channel(Bool).new(1)
+        run_claimed.call(true, -> { saw.send(InFlight.settle); nil })
+        saw.receive.should be_false
+      end
+
+      it "a failure being settled when shutdown looks is not requeued, and its retry is scheduled exactly once" do
+        redis = JoobQ.store.as(JoobQ::RedisStore).redis
+        queue = JoobQ.queues["example"]
+        job = ExampleJob.new
+        job.retries = 3
+        taken = [] of {String, String}
+        InFlight.after_settle = -> do
+          InFlight.after_settle = nil
+          taken.concat(InFlight.abandon_all) # shutdown looks right between the settle and the retry scheduling
+          nil
+        end
+        run_claimed.call(false, -> do
+          JoobQ::Middleware::Retry.new.call(job, queue, "w", Proc(Nil).new { raise "boom" })
+          nil
+        end)
+        taken.should be_empty
+        scheduled = redis.zrange("joobq:delayed_jobs", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
+        scheduled.size.should eq(1)
+        redis.zrem("joobq:delayed_jobs", scheduled)
+      end
+
+      it "ErrorHandler.handle_job_error with schedule: true neither schedules nor announces for an abandoned execution" do
+        redis = JoobQ.store.as(JoobQ::RedisStore).redis
+        queue = JoobQ.queues["example"]
+        sink = CollectingSink.new
+        Events.subscribe(sink)
+        begin
+          [true, false].each do |abandon|
+            job = ExampleJob.new
+            job.retries = 3
+            run_claimed.call(abandon, -> do
+              ErrorHandler.handle_job_error(job, queue, Exception.new("bad"), "w", schedule: true)
+              nil
+            end)
+            sleep 300.milliseconds
+            seen = [] of String
+            loop do
+              select
+              when event = sink.received.receive
+                seen << event.type if event.data.to_s.includes?(job.jid.to_s)
+              else
+                break
+              end
+            end
+            where = redis.zrange("joobq:delayed_jobs", 0, -1).any? { |e| e.to_s.includes?(job.jid.to_s) } ||
+                    redis.zrange("joobq:dead_letter", 0, -1).any? { |e| e.to_s.includes?(job.jid.to_s) }
+            if abandon
+              where.should be_false
+              seen.should_not contain("job.failed")
+            else
+              where.should be_true
+              seen.should contain("job.failed")
+              redis.zremrangebyscore("joobq:delayed_jobs", "-inf", "+inf")
+              redis.zremrangebyscore("joobq:dead_letter", "-inf", "+inf")
+            end
+          end
+        ensure
+          Events.unsubscribe(sink)
+        end
+      end
+
+      it "the timeout middleware dead-letters an expired job unless its execution was abandoned" do
+        redis = JoobQ.store.as(JoobQ::RedisStore).redis
+        queue = JoobQ.queues["example"]
+        [true, false].each do |abandon|
+          job = ExampleJob.new
+          job.expires = 0_i64
+          run_claimed.call(abandon, -> do
+            JoobQ::Middleware::Timeout.new.call(job, queue, "w", -> { })
+            nil
+          end)
+          dead = redis.zrange("joobq:dead_letter", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
+          dead.empty?.should eq(abandon)
+          redis.zrem("joobq:dead_letter", dead) unless dead.empty?
+        end
+      end
+
+      it "an unparseable job is dead-lettered unless its execution was abandoned" do
+        redis = JoobQ.store.as(JoobQ::RedisStore).redis
+        queue = JoobQ.queues["example"]
+        worker = Worker(ExampleJob).new(1, Channel(Nil).new(1), queue)
+        [true, false].each do |abandon|
+          before = redis.zcard("joobq:dead_letter")
+          run_claimed.call(abandon, -> do
+            worker.test_unparseable("{\"jid\": \"not-a-job", Exception.new("bad json"))
+            nil
+          end)
+          (redis.zcard("joobq:dead_letter") - before).should eq(abandon ? 0 : 1)
+        end
+        redis.zremrangebyscore("joobq:dead_letter", "-inf", "+inf")
+      end
+    end
+
+    describe "claiming" do
+      it "a worker claims nothing once the shutdown has begun" do
+        name = "claim_guard_#{Random::Secure.hex(3)}"
+        queue = JoobQ::Queue(ExampleJob).new(name, 1) # a queue of its own: the shared ones are stopped between examples
+        job = ExampleJob.from_json(ExampleJob.new.to_json.sub("\"queue\":\"example\"", "\"queue\":\"#{name}\""))
+        JoobQ.spec_shut_down(true)
+        begin
+          queue.start
+          queue.add(job)
+          sleep 600.milliseconds
+          queue.size.should eq(1)
+        ensure
+          JoobQ.spec_shut_down(false)
+        end
+        eventually(5.seconds) { queue.size == 0 }.should be_true # the guard was the only thing holding it back
+      ensure
+        queue.try(&.stop!)
+        queue.try(&.clear)
+      end
+    end
+
+    describe "RedisStore#requeue_many_from_processing" do
+      it "puts back what is in the processing list, skips what is not, and does nothing twice" do
+        store = JoobQ.store.as(JoobQ::RedisStore)
+        redis = store.redis
+        qa = "requeue_a_#{Random::Secure.hex(3)}"
+        qb = "requeue_b_#{Random::Secure.hex(3)}"
+        begin
+          redis.rpush("joobq:processing:#{qa}", "a1", "a2")
+          redis.rpush("joobq:processing:#{qb}", "b1")
+          entries = [{qa, "a1"}, {qa, "missing"}, {qb, "b1"}, {qa, "a2"}]
+
+          store.requeue_many_from_processing(entries).should eq(3)
+          redis.lrange(qa, 0, -1).map(&.to_s).sort.should eq(["a1", "a2"])
+          redis.lrange(qb, 0, -1).should eq(["b1"])
+          redis.llen("joobq:processing:#{qa}").should eq(0)
+
+          store.requeue_many_from_processing(entries).should eq(0) # nothing is queued twice
+          redis.llen(qa).should eq(2)
+          store.requeue_many_from_processing([] of {String, String}).should eq(0)
+        ensure
+          redis.del(qa, qb, "joobq:processing:#{qa}", "joobq:processing:#{qb}")
+        end
+      end
+
+      it "skips an entry whose keys fail (wrong type) without losing the others or desyncing the connection" do
+        store = JoobQ.store.as(JoobQ::RedisStore)
+        redis = store.redis
+        good = "requeue_good_#{Random::Secure.hex(3)}"
+        bad = "requeue_bad_#{Random::Secure.hex(3)}"
+        begin
+          redis.set("joobq:processing:#{bad}", "not a list")
+          redis.rpush("joobq:processing:#{good}", "g1")
+
+          store.requeue_many_from_processing([{bad, "x"}, {good, "g1"}]).should eq(1)
+          redis.lrange(good, 0, -1).should eq(["g1"])
+          redis.ping.should eq("PONG") # the connection still answers in step
+          redis.get("joobq:processing:#{bad}").should eq("not a list")
+        ensure
+          redis.del(good, bad, "joobq:processing:#{good}", "joobq:processing:#{bad}")
+        end
+      end
+    end
+
     describe "signal handling settings" do
       it "reads JOOBQ_TRAP_SIGNALS" do
         previous = ENV["JOOBQ_TRAP_SIGNALS"]?
@@ -333,6 +560,17 @@ module JoobQ
           redis.zrange("joobq:delayed_jobs", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
           redis.zrange("joobq:dead_letter", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
           redis.llen("joobq:processing:#{queue}").should eq(0)
+        end
+      end
+
+      it "does not count, ack or announce an abandoned job that succeeds afterwards" do
+        with_probe("succeeding", {"PROBE_TIMEOUT" => "1"}) do |process, queue, dir, redis|
+          exit_of(process, 30.seconds).exit_code.should eq(0)
+          File.exists?(File.join(dir, "finished")).should be_true # the abandoned execution did finish
+          File.read(File.join(dir, "completed-events")).should eq("0")
+          redis.llen(queue).should eq(1) # the requeued copy is untouched
+          redis.llen("joobq:processing:#{queue}").should eq(0)
+          redis.hget("joobq:stats:processed", queue).should be_nil
         end
       end
 

@@ -79,7 +79,7 @@ module JoobQ
       unless InFlight.wait(wait_for)
         # the requeue gets the first half of the reserve, the latency flush the second; each at least a grace period
         requeue_deadline = {deadline - reserve / 2, Time.instant + SHUTDOWN_GRACE}.max
-        step("requeue", requeue_deadline) { requeue_unfinished }
+        step("requeue", requeue_deadline) { requeue_unfinished(requeue_deadline) }
       end
       step("latency", {deadline, Time.instant + SHUTDOWN_GRACE}.max) { Latency.stop }
 
@@ -90,17 +90,28 @@ module JoobQ
     end
   end
 
-  # Puts every job that is still claimed or running back on its queue, atomically per job (one pipeline).
-  private def self.requeue_unfinished : Nil
-    jobs = InFlight.abandon_all
+  # Puts every job that is still claimed or running back on its queue, atomically per job. Jobs that are settling
+  # (applying the outcome of a failure) are given a moment to finish first; one still unfinished then is
+  # abandoned as a last resort, with its retry or dead-letter side effects possibly applied already.
+  private def self.requeue_unfinished(deadline : Time::Instant) : Nil
+    requeue(InFlight.abandon_all)
+    return if InFlight.wait({deadline - Time.instant, 500.milliseconds}.min.clamp(Time::Span.zero, 500.milliseconds))
+
+    late = InFlight.abandon_all(settling: true)
+    Log.warn &.emit("Jobs still settling a failure at the deadline were returned to their queues anyway; their retry or dead-letter side effects may have been applied", count: late.size) unless late.empty?
+    requeue(late)
+  end
+
+  private def self.requeue(jobs : Array({String, String})) : Nil
     return if jobs.empty?
 
+    # The exit status says "gave up on jobs": it counts the jobs abandoned, whatever the requeue then manages
+    @@abandoned.add(jobs.size)
     Log.warn &.emit("Jobs still executing at the shutdown deadline; returning them to their queues", count: jobs.size)
     store = config.store
     return unless store.is_a?(RedisStore)
 
-    put_back = store.requeue_many_from_processing(jobs) # one round trip
-    @@abandoned.add(put_back)
+    put_back = store.requeue_many_from_processing(jobs)
     Log.warn &.emit("Abandoned jobs that were no longer in the processing list", count: jobs.size - put_back) if put_back < jobs.size
   rescue ex
     Log.error &.emit("Could not return abandoned jobs to their queues", error: ex.message)

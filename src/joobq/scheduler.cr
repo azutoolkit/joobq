@@ -36,6 +36,8 @@ module JoobQ
     private getter time_location : Time::Location
     private getter delay_set : String
 
+    @poller = BackgroundLoop.new("scheduler")
+
     # Singleton instance
     def initialize(
       @time_location : Time::Location = JoobQ.config.time_location,
@@ -68,46 +70,49 @@ module JoobQ
       delayed_scheduler.enqueue(time)
     end
 
-    # Stops the cron, recurring and delayed loops. Nothing in `JoobQ.forge`
-    # calls this (forge sleeps forever); it is for embedders and specs.
+    # Stops the cron, recurring and delayed loops and the `run` loop. `JoobQ.shutdown` calls this for every
+    # scheduler of the configuration; embedders and specs may call it directly. Returns once no loop will
+    # start another iteration (an iteration already under way finishes first).
     def stop : Nil
+      @poller.stop
       cron_scheduler.stop
       recurring_scheduler.stop
       delayed_scheduler.stop
     end
 
+    # Polls the delayed set every 5 seconds (with backoff when that fails) until `stop`; calling it on a
+    # scheduler that already runs does nothing.
     def run
       Log.info { "Scheduler starting..." }
-      spawn do
-        retry_count = 0
-        max_retries = 10
-        base_delay = 1.second
+      retry_count = 0
+      max_retries = 10
+      base_delay = 1.second
 
-        loop do
-          begin
-            enqueue_due_jobs
-            retry_count = 0 # Reset retry count on successful iteration
-            sleep 5.seconds
-          rescue ex : Exception
-            retry_count += 1
+      @poller.start do
+        begin
+          enqueue_due_jobs
+          retry_count = 0 # Reset retry count on successful iteration
+          5.seconds
+        rescue ex : Exception
+          retry_count += 1
 
-            if retry_count > max_retries
-              Log.error &.emit("Scheduler exceeded maximum retry count, stopping",
-                retry_count: retry_count, max_retries: max_retries, reason: ex.message)
-              break
-            end
-
-            # Exponential backoff with jitter
-            delay = (base_delay * (2 ** (retry_count - 1)))
-            jitter = Random.rand(0.1..0.5) * delay.to_f
-            total_delay = delay + jitter.seconds
-
-            Log.error &.emit("Scheduler error, retrying with backoff",
-              retry_count: retry_count, max_retries: max_retries,
-              delay_seconds: total_delay.total_seconds, reason: ex.message)
-
-            sleep total_delay
+          if retry_count > max_retries
+            Log.error &.emit("Scheduler exceeded maximum retry count, stopping",
+              retry_count: retry_count, max_retries: max_retries, reason: ex.message)
+            @poller.stop
+            next Time::Span.zero
           end
+
+          # Exponential backoff with jitter
+          delay = (base_delay * (2 ** (retry_count - 1)))
+          jitter = Random.rand(0.1..0.5) * delay.to_f
+          total_delay = delay + jitter.seconds
+
+          Log.error &.emit("Scheduler error, retrying with backoff",
+            retry_count: retry_count, max_retries: max_retries,
+            delay_seconds: total_delay.total_seconds, reason: ex.message)
+
+          total_delay
         end
       end
     end

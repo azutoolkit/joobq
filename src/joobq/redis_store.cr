@@ -242,6 +242,44 @@ module JoobQ
       redis.eval(REQUEUE, [processing_queue(queue_name), queue_name], [job_json]) == 1
     end
 
+    # Several `requeue_from_processing` in one script: KEYS are processing list and queue per entry, ARGV the jobs.
+    # An entry whose commands fail (a key of the wrong type, say) is skipped inside the script, so one bad entry
+    # neither stops the others nor produces an error reply; a pipeline would raise at the first error reply and
+    # leave the connection with unread replies.
+    REQUEUE_MANY = <<-LUA
+      local n = 0
+      for i = 1, #ARGV do
+        local ok, removed = pcall(redis.call, 'LREM', KEYS[2 * i - 1], 1, ARGV[i])
+        if ok and removed == 1 then
+          if pcall(redis.call, 'RPUSH', KEYS[2 * i], ARGV[i]) then n = n + 1 end
+        end
+      end
+      return n
+    LUA
+
+    REQUEUE_BATCH = 100
+
+    # `requeue_from_processing` for many {queue, job} pairs; returns how many were put back. One script per
+    # hundred entries; if a script itself fails, its entries are tried one by one and a failing one is logged and
+    # skipped.
+    def requeue_many_from_processing(entries : Array({String, String})) : Int32
+      put_back = 0
+      entries.each_slice(REQUEUE_BATCH) do |batch|
+        begin
+          keys = batch.flat_map { |(queue_name, _)| [processing_queue(queue_name), queue_name] }
+          put_back += redis.eval(REQUEUE_MANY, keys, batch.map(&.last)).as(Int).to_i
+        rescue ex
+          Log.error &.emit("Batch requeue failed, requeuing one by one", error: ex.message)
+          batch.each do |(queue_name, job_json)|
+            put_back += 1 if requeue_from_processing(job_json, queue_name)
+          rescue ex2
+            Log.error &.emit("Could not requeue a job", queue: queue_name, error: ex2.message)
+          end
+        end
+      end
+      put_back
+    end
+
     # Simplified job cleanup for BRPOPLPUSH pattern - just remove from processing queue
     def cleanup_job(job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)

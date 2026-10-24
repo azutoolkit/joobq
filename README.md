@@ -225,6 +225,51 @@ JoobQ.configure do |config|
 end
 ```
 
+### Shutting Down
+
+**Changed:** `JoobQ.forge` now traps `SIGTERM`, `SIGINT` and `SIGHUP` by default, replacing any handler your
+application installed for them earlier (use `trap_signals: false` to keep yours).
+
+`JoobQ.forge` traps `SIGTERM`, `SIGINT` and `SIGHUP` (`Process.on_terminate` covers all three): it calls
+`JoobQ.shutdown` and then exits the process. **With the trap installed `forge` never returns**, and code after the
+call does not run.
+
+| Exit status | Meaning |
+|---|---|
+| 0 | clean shutdown: every job finished |
+| 3 | the deadline passed with jobs still running; they were returned to their queues |
+| 1 | a second signal, more than a second after the first, ended the shutdown early |
+
+Pass `trap_signals: false` (or set `JOOBQ_TRAP_SIGNALS=0`) when your application installs its own handlers and
+calls `JoobQ.shutdown` itself; `forge` then returns once the shutdown has finished.
+
+```crystal
+JoobQ.forge(trap_signals: false, shutdown_timeout: 20.seconds)
+# elsewhere, in your own handler:
+JoobQ.shutdown(20.seconds)
+```
+
+`JoobQ.shutdown(timeout = JoobQ::SHUTDOWN_TIMEOUT)` (15 seconds) stops, in order and within `timeout` in total: the
+REST API started by `forge`, the schedulers (cron, recurring, delayed, the reaper) and the workers of every queue. It
+then waits for the jobs that are running, and at the deadline (one second before `timeout`, which is kept for what
+follows) it puts every job that is still running, and every job that was claimed but had not started, back at the end
+of its queue, one atomic step per job, and flushes the latency counters. `JoobQ.abandoned_jobs` says how many it had
+to put back. It is safe to call more than once and from any fiber: the first call does the work and returns `true`,
+later calls (also while the first runs) wait for it and return `false`. After a shutdown the queues of the process
+cannot be started again.
+
+A job that is put back keeps executing in the old process until it ends (a fiber cannot be killed), and may finish
+its own side effects inside `perform`. What JoobQ does for that execution is switched off: it is not retried,
+dead-lettered, counted, announced or removed from the processing list, so the requeued copy is the only one JoobQ
+schedules. Workers claim nothing once the shutdown has begun.
+
+Jobs put back run again from the start, possibly in another process while this one winds down, so they must be safe to
+run twice, as they must be after a crash. A process that is killed (`SIGKILL`) cannot do this; its jobs stay in the
+queue's processing list. Start-up recovery (`Queue#start`) moves at most **one** job per queue from that list back to
+the queue, and it takes jobs of any process serving the queue: a process that starts while another one is working on
+the same queue can move that process's running job back, so it runs twice. Prefer a graceful stop (`SIGTERM`) in
+rolling deploys.
+
 ### Defining Queues
 
 Queues are of type Hash(String, Queue(T)) where the name of the key matches the name of the Queue.

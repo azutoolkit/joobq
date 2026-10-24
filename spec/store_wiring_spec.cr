@@ -3,17 +3,34 @@ require "./spec_helper"
 module JoobQ
   # Split-brain: RedisStore.instance is built from ENV and is not JoobQ.store.
   # Classes defaulting to RedisStore.instance.redis ignore a reconfigured store.
+  #
+  # The split-brain example needs a SECOND, throwaway Redis and is opt-in: set
+  # JOOBQ_SPEC_SECOND_REDIS_PORT to its port (host: REDIS_HOST or localhost). It must be a
+  # different server from the REDIS_PORT one. Nothing is flushed; only the keys the example
+  # writes are deleted.
   describe "store wiring" do
+    env_host = ENV["REDIS_HOST"]? || "localhost"
     env_port = ENV.fetch("REDIS_PORT", "6379").to_i
-    other_port = env_port == 6392 ? 6391 : 6392
+    second_port = ENV["JOOBQ_SPEC_SECOND_REDIS_PORT"]?.try(&.to_i?)
 
-    it "current behaviour: DeadLetterQueue.new and WorkerRegistry.all follow the ENV instance, not config.store" do
+    it "current behaviour: DeadLetterQueue.new and WorkerRegistry.new follow the ENV instance, not config.store" do
+      other_port = second_port
+      if other_port.nil?
+        pending!("set JOOBQ_SPEC_SECOND_REDIS_PORT to a throwaway Redis to run this example")
+        next
+      end
+      if other_port == env_port
+        pending!("JOOBQ_SPEC_SECOND_REDIS_PORT must differ from REDIS_PORT (#{env_port}): two different servers are required")
+        next
+      end
+
       original = JoobQ.config.store
-      other = RedisStore.new(host: "localhost", port: other_port)
+      other = RedisStore.new(host: env_host, port: other_port)
       begin
         other.redis.ping
       rescue Redis::CannotConnectError
         pending!("needs a second Redis on port #{other_port}")
+        next
       end
 
       begin
@@ -34,8 +51,17 @@ module JoobQ
         other.redis.zcard(WorkerRegistry::INDEX).should eq(0)
       ensure
         JoobQ.config.store = original
-        other.redis.flushdb
-        RedisStore.instance.redis.flushdb
+        redis = RedisStore.instance.redis
+        [
+          -> { redis.del(DeadLetterQueue::KEY) },
+          -> { redis.del(DeadLetterQueue::COUNTS) },
+          -> { redis.zrem(WorkerRegistry::INDEX, "wiring:1") },
+        ].each do |cleanup|
+          begin
+            cleanup.call
+          rescue
+          end
+        end
       end
     end
 

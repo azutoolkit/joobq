@@ -227,6 +227,9 @@ end
 
 ### Shutting Down
 
+**Changed:** `JoobQ.forge` now traps `SIGTERM`, `SIGINT` and `SIGHUP` by default, replacing any handler your
+application installed for them earlier (use `trap_signals: false` to keep yours).
+
 `JoobQ.forge` traps `SIGTERM`, `SIGINT` and `SIGHUP` (`Process.on_terminate` covers all three): it calls
 `JoobQ.shutdown` and then exits the process. **With the trap installed `forge` never returns**, and code after the
 call does not run.
@@ -254,6 +257,11 @@ of its queue, one atomic step per job, and flushes the latency counters. `JoobQ.
 to put back. It is safe to call more than once and from any fiber: the first call does the work and returns `true`,
 later calls (also while the first runs) wait for it and return `false`. After a shutdown the queues of the process
 cannot be started again.
+
+A job that is put back keeps executing in the old process until it ends (a fiber cannot be killed), and may finish
+its own side effects inside `perform`. What JoobQ does for that execution is switched off: it is not retried,
+dead-lettered, counted, announced or removed from the processing list, so the requeued copy is the only one JoobQ
+schedules. Workers claim nothing once the shutdown has begun.
 
 Jobs put back run again from the start, possibly in another process while this one winds down, so they must be safe to
 run twice, as they must be after a crash. A process that is killed (`SIGKILL`) cannot do this; its jobs stay in the

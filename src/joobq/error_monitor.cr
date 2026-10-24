@@ -446,7 +446,7 @@ module JoobQ
       error_context = ErrorHandler.handle_job_error(job, queue, exception, worker_id, retry_count, additional_context, schedule)
 
       # Record in error monitor
-      JoobQ.error_monitor.record_error(error_context)
+      JoobQ.error_monitor.record_error(error_context) unless InFlight.abandoned?
 
       error_context
     end

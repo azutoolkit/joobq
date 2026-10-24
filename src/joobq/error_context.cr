@@ -210,8 +210,13 @@ module JoobQ
 
       # Log the error with rich context
       log_error(error_context)
-      Events.emit("job.failed") do
-        {jid: job.jid.to_s, queue: queue.name, worker_id: worker_id, error: exception.message.try { |message| Encryption.scrub_for(message, job) }}
+      # An execution that shutdown abandoned (its job is back on the queue) schedules, dead-letters and announces
+      # nothing: the requeued copy owns the job now
+      abandoned = InFlight.abandoned?
+      unless abandoned
+        Events.emit("job.failed") do
+          {jid: job.jid.to_s, queue: queue.name, worker_id: worker_id, error: exception.message.try { |message| Encryption.scrub_for(message, job) }}
+        end
       end
 
       # Update job with error information
@@ -219,7 +224,7 @@ module JoobQ
 
       # Handle retry or dead letter based on error type. A caller that decides this itself (the Retry middleware, the
       # Timeout middleware) passes `schedule: false`: scheduling here as well would run the job once more per attempt.
-      if !schedule
+      if !schedule || abandoned
         nil
       elsif error_context.should_retry?
         schedule_retry(job, queue, error_context)

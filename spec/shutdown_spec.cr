@@ -76,34 +76,124 @@ module JoobQ
       after_each { InFlight.clear }
 
       it "waits for the jobs that are executing, up to the timeout" do
-        InFlight.claimed("q", ["a"])
-        InFlight.begin_run("a").should be_true
-        InFlight.wait(50.milliseconds).should be_false
-        spawn do
-          sleep 30.milliseconds
-          InFlight.finished("a")
+        token = InFlight.claimed("q", ["a"]).first
+        begin
+          InFlight.begin_run(token).should be_true
+          InFlight.wait(50.milliseconds).should be_false
+          spawn do
+            sleep 30.milliseconds
+            InFlight.finished(token)
+          end
+          InFlight.wait(2.seconds).should be_true
+          InFlight.count.should eq(0)
+        ensure
+          InFlight.clear
         end
-        InFlight.wait(2.seconds).should be_true
-        InFlight.count.should eq(0)
       end
 
       it "abandons claimed and running jobs: they are not counted, not started, and their end is reported" do
-        InFlight.claimed("q1", ["a", "b"])
-        InFlight.claimed("q2", ["c"])
-        InFlight.begin_run("a")
+        a, b = InFlight.claimed("q1", ["a", "b"])
+        c = InFlight.claimed("q2", ["c"]).first
+        InFlight.begin_run(a)
 
         InFlight.abandon_all.sort.should eq([{"q1", "a"}, {"q1", "b"}, {"q2", "c"}])
         InFlight.count.should eq(0)
-        InFlight.begin_run("b").should be_false # claimed, never started: it must not start now
-        InFlight.finished("a").should be_true   # it was running: its cleanup is skipped
-        InFlight.finished("b").should be_true
+        InFlight.begin_run(b).should be_false # claimed, never started: it must not start now
+        InFlight.finished(a).should be_true   # it was running: its cleanup is skipped
+        InFlight.finished(b).should be_true
+        InFlight.finished(c).should be_true
         InFlight.abandon_all.should be_empty
       end
 
+      it "keeps claims of identical raw strings apart" do
+        first, second = InFlight.claimed("q", ["same", "same"])
+        first.should_not eq(second)
+        InFlight.count.should eq(2)
+        InFlight.finished(first).should be_false
+        InFlight.count.should eq(1)
+        InFlight.finished(second).should be_false
+        InFlight.count.should eq(0)
+      end
+
       it "reports a normal end as not abandoned" do
-        InFlight.claimed("q", ["a"])
-        InFlight.begin_run("a")
-        InFlight.finished("a").should be_false
+        token = InFlight.claimed("q", ["a"]).first
+        InFlight.begin_run(token)
+        InFlight.abandoned?.should be_false
+        InFlight.finished(token).should be_false
+      end
+
+      it "knows the fiber of an abandoned execution, and only that fiber" do
+        token = InFlight.claimed("q", ["a"]).first
+        seen = Channel(Bool).new(1)
+        go = Channel(Nil).new
+        spawn do
+          InFlight.begin_run(token)
+          go.receive
+          seen.send(InFlight.abandoned?)
+        end
+        sleep 20.milliseconds
+        InFlight.abandoned?.should be_false # this fiber runs no claimed job
+        InFlight.abandon_all
+        go.send(nil)
+        seen.receive.should be_true
+        InFlight.abandoned?.should be_false
+      end
+    end
+
+    describe "the failure handling of an abandoned execution" do
+      jid_in = ->(redis : Redis::PooledClient, key : String, jid : String) do
+        redis.zrange(key, 0, -1).any? { |entry| entry.to_s.includes?(jid) }
+      end
+
+      # Runs the retry middleware around a job that sleeps and then raises, optionally abandoning it meanwhile.
+      run_failing = ->(retries : Int32, abandon : Bool) do
+        queue = JoobQ.queues["example"]
+        job = ExampleJob.new
+        job.retries = retries
+        token = InFlight.claimed("example", [job.to_json]).first
+        done = Channel(Nil).new
+        spawn do
+          InFlight.begin_run(token)
+          failing = Proc(Nil).new { sleep 100.milliseconds; raise "boom" }
+          JoobQ::Middleware::Retry.new.call(job, queue, "w", failing)
+        ensure
+          InFlight.finished(token)
+          done.send(nil)
+        end
+        sleep 30.milliseconds
+        InFlight.abandon_all if abandon
+        done.receive
+        job.jid.to_s
+      end
+
+      after_each { InFlight.clear }
+
+      it "control: a running execution that fails with retries left is scheduled for a retry" do
+        redis = JoobQ.store.as(JoobQ::RedisStore).redis
+        jid = run_failing.call(3, false)
+        jid_in.call(redis, "joobq:delayed_jobs", jid).should be_true
+        redis.zrem("joobq:delayed_jobs", redis.zrange("joobq:delayed_jobs", 0, -1).select { |e| e.to_s.includes?(jid) })
+      end
+
+      it "control: a running execution that fails without retries left is dead-lettered" do
+        redis = JoobQ.store.as(JoobQ::RedisStore).redis
+        jid = run_failing.call(0, false)
+        jid_in.call(redis, "joobq:dead_letter", jid).should be_true
+        redis.zrem("joobq:dead_letter", redis.zrange("joobq:dead_letter", 0, -1).select { |e| e.to_s.includes?(jid) })
+      end
+
+      it "an abandoned execution that fails is not scheduled a second time" do
+        redis = JoobQ.store.as(JoobQ::RedisStore).redis
+        jid = run_failing.call(3, true)
+        jid_in.call(redis, "joobq:delayed_jobs", jid).should be_false
+        jid_in.call(redis, "joobq:dead_letter", jid).should be_false
+      end
+
+      it "an abandoned execution that fails with no retries left is not dead-lettered" do
+        redis = JoobQ.store.as(JoobQ::RedisStore).redis
+        jid = run_failing.call(0, true)
+        jid_in.call(redis, "joobq:dead_letter", jid).should be_false
+        jid_in.call(redis, "joobq:delayed_jobs", jid).should be_false
       end
     end
 
@@ -230,6 +320,19 @@ module JoobQ
           process.terminated?.should be_false
           process.signal(Signal::TERM)
           exit_of(process, 10.seconds).exit_code.should eq(1)
+        end
+      end
+
+      it "does not schedule a requeued job a second time when its abandoned execution fails afterwards" do
+        with_probe("failing", {"PROBE_TIMEOUT" => "1"}) do |process, queue, dir, redis|
+          exit_of(process, 30.seconds).exit_code.should eq(0)
+          redis.llen(queue).should eq(1)
+          jid = File.basename(Dir.glob(File.join(dir, "started-*")).first).sub("started-", "")
+          # the job raised after the shutdown gave up on it (the probe lives on for that), and nothing was scheduled
+          File.exists?(File.join(dir, "raised")).should be_true
+          redis.zrange("joobq:delayed_jobs", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
+          redis.zrange("joobq:dead_letter", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
+          redis.llen("joobq:processing:#{queue}").should eq(0)
         end
       end
 

@@ -242,6 +242,16 @@ module JoobQ
       redis.eval(REQUEUE, [processing_queue(queue_name), queue_name], [job_json]) == 1
     end
 
+    # `requeue_from_processing` for many {queue, job} pairs in one round trip; returns how many were put back.
+    def requeue_many_from_processing(entries : Array({String, String})) : Int32
+      return 0 if entries.empty?
+
+      results = redis.pipelined do |pipe|
+        entries.each { |(queue_name, job_json)| pipe.eval(REQUEUE, [processing_queue(queue_name), queue_name], [job_json]) }
+      end
+      results.count { |result| result == 1 }
+    end
+
     # Simplified job cleanup for BRPOPLPUSH pattern - just remove from processing queue
     def cleanup_job(job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)

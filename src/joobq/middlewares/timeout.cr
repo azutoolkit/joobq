@@ -27,7 +27,7 @@ module JoobQ
             schedule: false # it dead-letters the job itself, just below
           )
 
-          DeadLetterManager.add(job)
+          DeadLetterManager.add(job) unless InFlight.abandoned?
         else
           next_middleware.call
         end

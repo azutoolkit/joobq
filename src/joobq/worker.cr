@@ -68,18 +68,18 @@ module JoobQ
               break
             else
               # Use batch processing for improved performance and minimal connection usage
-              jobs = @queue.paused? || keys_backoff? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
+              jobs = @queue.paused? || keys_backoff? || JoobQ.shut_down? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
 
               if !jobs.empty?
                 # Counted before any fiber exists, so `JoobQ.shutdown` cannot miss a claimed job
-                InFlight.claimed(@queue.name, jobs)
+                claims = jobs.zip(InFlight.claimed(@queue.name, jobs))
                 # Process jobs in smaller concurrent batches to reduce connection pressure
-                jobs.each_slice(WORKER_BATCH_SLICE_SIZE) do |job_batch|
-                  job_batch.each do |job|
+                claims.each_slice(WORKER_BATCH_SLICE_SIZE) do |job_batch|
+                  job_batch.each do |(job, token)|
                     # Spawn with error containment to prevent fiber crashes from affecting worker
                     spawn do
                       begin
-                        handle_job_async(job)
+                        handle_job_async(job, token)
                       rescue ex : Exception
                         Log.error &.emit("Unhandled error in job fiber",
                           queue: @queue.name,
@@ -126,10 +126,10 @@ module JoobQ
     end
 
     # Async job handling for batch processing
-    private def handle_job_async(job : String)
+    private def handle_job_async(job : String, token : Int64)
       spawn do
         # The job was registered as claimed when the batch came back; shutdown may have given up on it since
-        next InFlight.finished(job) unless InFlight.begin_run(job)
+        next InFlight.finished(token) unless InFlight.begin_run(token)
 
         parsed_job = nil
         job_completed_successfully = false
@@ -143,7 +143,8 @@ module JoobQ
             perform_timed(parsed_job)
             parsed_job.completed!
             job_completed_successfully = true
-            Events.emit("job.completed") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }
+            # an abandoned execution announces nothing: the requeued copy owns the job now
+            Events.emit("job.completed") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} } unless InFlight.abandoned?
 
             # Log successful completion
             Log.info &.emit("Job completed successfully",
@@ -198,7 +199,7 @@ module JoobQ
             )
           end
         ensure
-          if InFlight.finished(job)
+          if InFlight.finished(token)
             # Shutdown already put this job back on its queue; another process may hold it now, so the
             # processing list is not touched
             Log.warn &.emit("Job outlived the shutdown deadline; it was returned to its queue", queue: @queue.name, worker_id: @worker_id)
@@ -245,6 +246,8 @@ module JoobQ
 
     # Handle jobs that cannot be parsed (invalid JSON or structure)
     private def handle_unparseable_job(job_json : String, parse_error : Exception) : Nil
+      return if InFlight.abandoned? # the requeued copy will meet the same error and dead-letter it once
+
       Log.error &.emit("Unparseable job detected, moving to dead letter queue",
         queue: @queue.name,
         worker_id: @worker_id,

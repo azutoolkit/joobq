@@ -2,9 +2,12 @@ module JoobQ
   # How long `JoobQ.shutdown` waits, all steps together, before it gives up and returns.
   SHUTDOWN_TIMEOUT = 15.seconds
 
-  # Time kept back at the end of the budget for putting abandoned jobs back and flushing the latency counters,
-  # so a stuck job that used up the wait does not leave those steps with nothing.
+  # Time kept back at the end of the budget (at most half of it) for putting abandoned jobs back and flushing the
+  # latency counters, so a stuck job that used up the wait does not leave those steps with nothing.
   SHUTDOWN_RESERVE = 1.second
+
+  # The least a step that must run gets, whatever is left of the budget.
+  SHUTDOWN_GRACE = 200.milliseconds
 
   # Exit status of `forge` after a clean shutdown, and after one that had to abandon jobs at the deadline.
   EXIT_CLEAN     = 0
@@ -38,11 +41,17 @@ module JoobQ
   # 1. the REST API started by `forge` (no new requests)
   # 2. every scheduler of the configuration, the delayed-job scheduler and the expired-job reaper (no new work)
   # 3. the workers of every queue (they claim nothing more)
-  # 4. the jobs claimed or running, waited for until `timeout` minus `SHUTDOWN_RESERVE`
+  # 4. the jobs claimed or running, waited for until `timeout` minus `SHUTDOWN_RESERVE` (at most half of `timeout`)
   # 5. the jobs still not finished then: each is put back at the end of its queue in one atomic step
   #    (`RedisStore#requeue_from_processing`), jobs not yet started are never started, and `abandoned_jobs`
   #    counts them
   # 6. the latency counters (flushed to Redis)
+  #
+  # What a job does after it was put back: its execution may well go on (a fiber cannot be killed) and finish its
+  # own side effects inside `perform` (a call to another system, a row written). What JoobQ itself does for it is
+  # switched off: it is not retried, dead-lettered, counted as processed or failed, announced, or removed from the
+  # processing list, so the requeued copy is the only one JoobQ schedules. Workers also claim nothing once the
+  # shutdown has begun.
   #
   # Step 5 is the shutdown's own recovery: it does not rely on the start-up recovery of the next process
   # (`Queue#start` moves at most one job per queue back, and moves jobs of any process serving the queue). A job
@@ -65,9 +74,14 @@ module JoobQ
       step("schedulers", deadline) { stop_schedulers }
       step("queues", deadline) { stop_queues(deadline) }
 
-      wait_for = {deadline - SHUTDOWN_RESERVE - Time.instant, Time::Span.zero}.max
-      requeue_unfinished unless InFlight.wait(wait_for)
-      step("latency", Time.instant + SHUTDOWN_RESERVE) { Latency.stop }
+      reserve = {SHUTDOWN_RESERVE, timeout / 2}.min
+      wait_for = {deadline - reserve - Time.instant, Time::Span.zero}.max
+      unless InFlight.wait(wait_for)
+        # the requeue gets the first half of the reserve, the latency flush the second; each at least a grace period
+        requeue_deadline = {deadline - reserve / 2, Time.instant + SHUTDOWN_GRACE}.max
+        step("requeue", requeue_deadline) { requeue_unfinished }
+      end
+      step("latency", {deadline, Time.instant + SHUTDOWN_GRACE}.max) { Latency.stop }
 
       Log.info &.emit("JoobQ stopped", abandoned_jobs: abandoned_jobs)
       true
@@ -76,22 +90,20 @@ module JoobQ
     end
   end
 
-  # Puts every job that is still claimed or running back on its queue, atomically per job.
+  # Puts every job that is still claimed or running back on its queue, atomically per job (one pipeline).
   private def self.requeue_unfinished : Nil
     jobs = InFlight.abandon_all
     return if jobs.empty?
 
     Log.warn &.emit("Jobs still executing at the shutdown deadline; returning them to their queues", count: jobs.size)
     store = config.store
-    jobs.each do |(queue, job)|
-      if store.is_a?(RedisStore) && store.requeue_from_processing(job, queue)
-        @@abandoned.add(1)
-      else
-        Log.warn &.emit("Abandoned job was not in the processing list", queue: queue)
-      end
-    rescue ex
-      Log.error &.emit("Could not return a job to its queue", queue: queue, error: ex.message)
-    end
+    return unless store.is_a?(RedisStore)
+
+    put_back = store.requeue_many_from_processing(jobs) # one round trip
+    @@abandoned.add(put_back)
+    Log.warn &.emit("Abandoned jobs that were no longer in the processing list", count: jobs.size - put_back) if put_back < jobs.size
+  rescue ex
+    Log.error &.emit("Could not return abandoned jobs to their queues", error: ex.message)
   end
 
   # The cron, recurring and delayed loops of every scheduler, the delayed-job scheduler and the reaper.

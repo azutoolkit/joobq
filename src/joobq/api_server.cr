@@ -7,26 +7,46 @@ module JoobQ
     Log = ::Log.for("API SERVER")
 
     @@server : HTTP::Server?
+    @@server_lock = Sync::Mutex.new
 
-    def self.start
-      new.start
+    def self.start(address : String = "0.0.0.0", port : Int32 = 8080)
+      new.start(address, port)
     end
 
     # Closes the listener started by `start` (which then returns). Does nothing when none is running.
     def self.stop : Nil
-      server = @@server
-      @@server = nil
+      server = @@server_lock.synchronize do
+        current = @@server
+        @@server = nil
+        current
+      end
       server.try { |s| s.close unless s.closed? }
     end
 
-    def start
+    # Serves until `APIServer.stop` (or `JoobQ.shutdown`). Returns at once, without listening, when the shutdown
+    # has begun.
+    def start(address : String = "0.0.0.0", port : Int32 = 8080)
       server = HTTP::Server.new([APIHandler.new])
-      address = "0.0.0.0"
-      port = 8080
       Log.info &.emit("Listening on http://#{address}:#{port}")
       server.bind_tcp(address, port)
-      @@server = server
-      server.listen
+      # registered after the bind, and the shutdown checked after registering: a `stop` that ran in between
+      # either finds the server (and closes it) or has set the flag this sees
+      @@server_lock.synchronize { @@server = server }
+      if JoobQ.shut_down?
+        stop_if_current(server)
+        return
+      end
+
+      begin
+        server.listen
+      rescue ex
+        raise ex unless server.closed? # closed by `stop` while starting to listen
+      end
+    end
+
+    private def stop_if_current(server : HTTP::Server) : Nil
+      @@server_lock.synchronize { @@server = nil if @@server.same?(server) }
+      server.close unless server.closed?
     end
   end
 

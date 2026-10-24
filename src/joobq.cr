@@ -175,10 +175,14 @@ module JoobQ
 
   # Starts the schedulers, the reaper, the queues and (when enabled) the REST API, then blocks.
   #
-  # Unless `trap_signals` is false, SIGTERM and SIGINT run `JoobQ.shutdown` (with `shutdown_timeout`) and then
-  # exit the process with status 0; a second signal while that runs exits at once with status 1. The default of
-  # `trap_signals` is false when the environment variable `JOOBQ_TRAP_SIGNALS` is `0`, `false` or `no`. Pass
-  # `trap_signals: false` when the application installs its own handlers and calls `JoobQ.shutdown` itself.
+  # With `trap_signals` (the default), `forge` never returns: SIGTERM, SIGINT and SIGHUP (`Process.on_terminate`
+  # traps all three) run `JoobQ.shutdown` with `shutdown_timeout` and then exit the process, with status 0, or 3
+  # when jobs were still running at the deadline and had to be returned to their queues. A second signal more
+  # than a second after the first exits at once with status 1. Code after the `forge` call does not run.
+  #
+  # With `trap_signals: false` (also the default when the environment variable `JOOBQ_TRAP_SIGNALS` is `0`,
+  # `false` or `no`) the application owns the signals: it calls `JoobQ.shutdown` itself, and `forge` returns
+  # once that has finished.
   def self.forge(trap_signals : Bool = trap_signals_default?, shutdown_timeout : Time::Span = SHUTDOWN_TIMEOUT)
     Log.info { "JoobQ starting..." }
     trap_termination(shutdown_timeout) if trap_signals
@@ -205,9 +209,13 @@ module JoobQ
       APIServer.start
     end
 
-    # Stays here until `shutdown` has finished (the signal handler calls it, then exits)
-    until shutdown_finished?
-      sleep 100.milliseconds
+    if trap_signals
+      # the signal handler shuts down and exits the process
+      Channel(Nil).new.receive
+    else
+      until shutdown_finished?
+        sleep 100.milliseconds
+      end
     end
   end
 end

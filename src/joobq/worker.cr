@@ -71,6 +71,8 @@ module JoobQ
               jobs = @queue.paused? || keys_backoff? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
 
               if !jobs.empty?
+                # Counted before any fiber exists, so `JoobQ.shutdown` cannot miss a claimed job
+                InFlight.claimed(@queue.name, jobs)
                 # Process jobs in smaller concurrent batches to reduce connection pressure
                 jobs.each_slice(WORKER_BATCH_SLICE_SIZE) do |job_batch|
                   job_batch.each do |job|
@@ -125,8 +127,10 @@ module JoobQ
 
     # Async job handling for batch processing
     private def handle_job_async(job : String)
-      InFlight.started # counted from now, so `JoobQ.shutdown` cannot miss a job whose fiber has not run yet
       spawn do
+        # The job was registered as claimed when the batch came back; shutdown may have given up on it since
+        next InFlight.finished(job) unless InFlight.begin_run(job)
+
         parsed_job = nil
         job_completed_successfully = false
         keys_missing = false
@@ -194,7 +198,11 @@ module JoobQ
             )
           end
         ensure
-          begin
+          if InFlight.finished(job)
+            # Shutdown already put this job back on its queue; another process may hold it now, so the
+            # processing list is not touched
+            Log.warn &.emit("Job outlived the shutdown deadline; it was returned to its queue", queue: @queue.name, worker_id: @worker_id)
+          else
             # Use appropriate cleanup method based on job completion status
             # IMPORTANT: Pass the full job JSON string, not just the job ID
             if keys_missing
@@ -206,8 +214,6 @@ module JoobQ
               # Use standard cleanup for failed or unparseable jobs
               @queue.cleanup_job_processing_pipelined(@worker_id, job)
             end
-          ensure
-            InFlight.finished
           end
         end
       end

@@ -60,5 +60,41 @@ module JoobQ
         end
       end
     end
+
+    describe "#ssl_context" do
+      ca_file = File.expand_path("fixtures/tls/ca.pem", __DIR__)
+
+      it "is nil for a plain connection" do
+        RedisEndpoint.parse("redis://localhost").ssl_context.should be_nil
+      end
+
+      it "verifies the server certificate by default and refuses the old protocols" do
+        context = RedisEndpoint.parse("rediss://localhost").ssl_context.not_nil!
+
+        context.verify_mode.should eq(OpenSSL::SSL::VerifyMode::PEER)
+        options = context.options
+        [LibSSL::Options::NO_SSL_V3, LibSSL::Options::NO_TLS_V1, LibSSL::Options::NO_TLS_V1_1].each do |flag|
+          options.includes?(flag).should be_true
+        end
+      end
+
+      it "turns verification off only when asked to" do
+        context = RedisEndpoint.parse("rediss://localhost", verify: false).ssl_context.not_nil!
+
+        context.verify_mode.should eq(OpenSSL::SSL::VerifyMode::NONE)
+      end
+
+      it "trusts the given CA file" do
+        endpoint = RedisEndpoint.parse("rediss://localhost", ca_file: ca_file)
+
+        endpoint.ssl_context.should_not be_nil
+      end
+
+      it "rejects a CA file that cannot be read" do
+        endpoint = RedisEndpoint.parse("rediss://localhost", ca_file: "/nonexistent/ca.pem")
+
+        expect_raises(RedisEndpoint::Invalid, /CA file/) { endpoint.ssl_context }
+      end
+    end
   end
 end

@@ -46,6 +46,10 @@ module JoobQ
         endpoint.to_s.should contain("[::1]:6380")
       end
 
+      it "refuses an IPv6 zone id, which cannot be connected to or verified" do
+        expect_raises(RedisEndpoint::Invalid, /zone/) { RedisEndpoint.parse("rediss://[fe80::1%25eth0]:6380") }
+      end
+
       it "asks for percent-encoding when the password contains a raw @" do
         error = expect_raises(RedisEndpoint::Invalid, /percent-encode/) { RedisEndpoint.parse("redis://u:p@ss@localhost") }
 
@@ -131,6 +135,12 @@ module JoobQ
         endpoint = RedisEndpoint.parse("rediss://localhost", ca_file: ca_file)
 
         endpoint.ssl_context.should_not be_nil
+      end
+
+      it "fails closed instead of skipping the host name check for a host that is only a dot" do
+        endpoint = RedisEndpoint.parse("rediss://.")
+
+        expect_raises(RedisEndpoint::Invalid, /host/) { endpoint.ssl_context }
       end
 
       it "rejects a CA file that cannot be read" do

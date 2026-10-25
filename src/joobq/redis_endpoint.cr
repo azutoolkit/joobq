@@ -50,6 +50,7 @@ module JoobQ
       when "redis", "rediss"
         raise Invalid.new("Redis URL must not have a query") if uri.query
         host = uri.hostname.presence || raise Invalid.new("Redis URL has no host")
+        raise Invalid.new("Redis URL host must not carry an IPv6 zone id") if host.includes?('%')
         user, password = credentials(url)
         new(host, uri.port || DEFAULT_PORT, user, password, database(uri.path), uri.scheme == "rediss", verify, ca_file)
       when "unix"
@@ -103,6 +104,8 @@ module JoobQ
     private def verify_host(context : OpenSSL::SSL::Context::Client) : Nil
       # an absolute name ("redis.example.com.") is the same host; OpenSSL would not match it to the certificate
       name = host.rchop('.')
+      # an empty name would clear the expected host (and with it the check) instead of failing
+      raise Invalid.new("Redis TLS host name is empty") if name.empty?
       param = LibSSL.ssl_ctx_get0_param(context.to_unsafe)
       set = if Socket::IPAddress.valid?(name)
               LibCrypto.x509_verify_param_set1_ip_asc(param, name)

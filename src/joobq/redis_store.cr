@@ -45,6 +45,31 @@ module JoobQ
       )
     end
 
+    # Connects to the server a `redis://` or `rediss://` URL names (see `RedisEndpoint`): as an ACL user when the
+    # URL has a user name, over TLS for `rediss`, on the database in its path. `verify` and `ca_file` control how
+    # the server certificate is checked.
+    def initialize(*, url : String, pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "500").to_i,
+                   pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64,
+                   verify : Bool = true, ca_file : String? = nil)
+      endpoint = RedisEndpoint.parse(url, verify, ca_file)
+      @host = endpoint.host
+      @port = endpoint.port
+      @password = endpoint.password
+      @pool_size = pool_size
+      @pool_timeout = pool_timeout
+      @redis = RedisPool.new(endpoint, pool_size, pool_timeout)
+
+      @health = RedisHealth.new(@redis, @pool_size, @pool_timeout)
+      @pipeline = RedisPipeline.new(@redis)
+      @metrics = RedisMetrics.new(@redis)
+
+      Log.info &.emit("Redis store initialized",
+        endpoint: endpoint.to_s,
+        pool_size: @pool_size,
+        pool_timeout: @pool_timeout
+      )
+    end
+
     # Connection pool health check with detailed metrics
     def health_check : Hash(String, String | Int32 | Bool | Float64)
       health_data = @health.health_check

@@ -51,6 +51,38 @@ module JoobQ
       error.message.to_s.should_not contain("not-the-password")
     end
 
+    it "keeps failing after a failed AUTH instead of falling back to the default user" do
+      # One pooled connection is reused, so a half-open connection would run the second command as the default user.
+      store = RedisStore.new(url: "redis://#{user}:not-the-password@#{host}:#{port}", pool_size: 1)
+
+      2.times { expect_raises(Redis::Error) { store.redis.get("acl_spec:key") } }
+    end
+
+    it "does not fall back to the default user when AUTH fails on a reconnect" do
+      store = RedisStore.new(url: url, pool_size: 1)
+      store.redis.set("acl_spec:key", "value") # one connection, authenticated as the ACL user
+
+      # The password is rotated and the live connection dropped, so the next command has to reconnect and AUTH again.
+      admin_client = admin.call
+      admin_client.command(["ACL", "SETUSER", user, "resetpass", ">rotated-password"])
+      admin_client.command(["CLIENT", "KILL", "USER", user])
+
+      3.times { expect_raises(Redis::Error) { store.redis.get("acl_spec:key") } }
+    ensure
+      admin.call.del("acl_spec:key")
+    end
+
+    it "does not print the password when the store or its pool is inspected" do
+      store = RedisStore.new(url: url, pool_size: 1)
+      store.redis.set("acl_spec:key", "value")
+
+      [store.inspect, store.redis.inspect, store.pretty_inspect, store.redis.pretty_inspect].each do |text|
+        text.should_not contain(secret)
+      end
+    ensure
+      admin.call.del("acl_spec:key")
+    end
+
     it "selects the database from the URL" do
       store = RedisStore.new(url: "#{url}/5")
 
@@ -63,6 +95,12 @@ module JoobQ
       cleanup = admin.call
       cleanup.select(5)
       cleanup.del("acl_spec:db")
+    end
+
+    it "fails at construction, not at the first command, when the CA file cannot be read" do
+      expect_raises(RedisEndpoint::Invalid, /CA file/) do
+        RedisStore.new(url: "rediss://#{host}:#{port}", ca_file: "/nonexistent/ca.pem")
+      end
     end
 
     it "leaves the host, port and password constructor working" do

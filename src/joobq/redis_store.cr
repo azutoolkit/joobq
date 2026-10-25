@@ -56,7 +56,7 @@ module JoobQ
       endpoint = RedisEndpoint.parse(url, verify, ca_file)
       @host = endpoint.host
       @port = endpoint.port
-      @password = endpoint.password
+      @password = nil # the endpoint's clients hold the credentials; the store keeps none
       @pool_size = pool_size
       @pool_timeout = pool_timeout
       @redis = RedisPool.new(endpoint, pool_size, pool_timeout)
@@ -70,6 +70,11 @@ module JoobQ
         pool_size: @pool_size,
         pool_timeout: @pool_timeout
       )
+    end
+
+    # Host, port and pool only: the default `inspect` would print the password this store was given.
+    def inspect(io : IO) : Nil
+      io << "#<" << self.class.name << ' ' << host << ':' << port << '>'
     end
 
     # Connection pool health check with detailed metrics

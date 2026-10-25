@@ -180,5 +180,40 @@ module JoobQ
         error.message.to_s.should_not contain("hunter2")
       end
     end
+
+    describe "merged sources" do
+      write = ->(yaml : String) do
+        path = File.tempname("joobq_redis_url", ".yml")
+        File.write(path, yaml)
+        path
+      end
+
+      it "keeps the url of the source that set it, whichever order the sources come in" do
+        with_url = write.call("joobq:\n  redis:\n    url: \"rediss://merged.example.com:6397\"\n")
+        without = write.call("joobq:\n  settings:\n    retries: 4\n")
+        begin
+          [[with_url, without], [without, with_url]].each do |sources|
+            store = YamlConfigLoader.load_from_sources(sources).store.as(RedisStore)
+
+            store.host.should eq("merged.example.com")
+            store.endpoint.not_nil!.tls?.should be_true
+          end
+        ensure
+          File.delete(with_url)
+          File.delete(without)
+        end
+      end
+
+      it "lets a later source override an earlier url" do
+        first = write.call("joobq:\n  redis:\n    url: \"rediss://first.example.com\"\n")
+        second = write.call("joobq:\n  redis:\n    url: \"rediss://second.example.com\"\n")
+        begin
+          YamlConfigLoader.load_from_sources([first, second]).store.as(RedisStore).host.should eq("second.example.com")
+        ensure
+          File.delete(first)
+          File.delete(second)
+        end
+      end
+    end
   end
 end

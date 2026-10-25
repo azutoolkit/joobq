@@ -38,6 +38,21 @@ module JoobQ
         endpoint.password.should eq("pa+ss+word")
       end
 
+      it "unwraps an IPv6 literal for connecting and wraps it again for display" do
+        endpoint = RedisEndpoint.parse("rediss://[::1]:6380")
+
+        endpoint.host.should eq("::1")
+        endpoint.port.should eq(6380)
+        endpoint.to_s.should contain("[::1]:6380")
+      end
+
+      it "asks for percent-encoding when the password contains a raw @" do
+        error = expect_raises(RedisEndpoint::Invalid, /percent-encode/) { RedisEndpoint.parse("redis://u:p@ss@localhost") }
+
+        error.message.to_s.should_not contain("p@ss")
+        RedisEndpoint.parse("redis://u:p%40ss@localhost").password.should eq("p@ss")
+      end
+
       it "rejects a query or fragment so a misplaced credential is not ignored" do
         expect_raises(RedisEndpoint::Invalid, /query/) { RedisEndpoint.parse("redis://localhost/0?password=x") }
         expect_raises(RedisEndpoint::Invalid, /fragment/) { RedisEndpoint.parse("redis://localhost/0#x") }

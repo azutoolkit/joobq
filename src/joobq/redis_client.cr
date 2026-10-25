@@ -24,7 +24,15 @@ module JoobQ
         end
         @acl_database.try { |db| strategy.command(["SELECT", db.to_s]) }
       rescue ex
-        close
+        begin
+          close
+        rescue
+          # closing a broken socket can fail too; the authentication error is the one to report
+        ensure
+          # whatever happened, the next command must reconnect and authenticate again
+          @connection = nil
+          @strategy = nil
+        end
         raise ex
       end
     end

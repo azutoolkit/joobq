@@ -49,7 +49,7 @@ module JoobQ
       case uri.scheme
       when "redis", "rediss"
         raise Invalid.new("Redis URL must not have a query") if uri.query
-        host = uri.host.presence || raise Invalid.new("Redis URL has no host")
+        host = uri.hostname.presence || raise Invalid.new("Redis URL has no host")
         user, password = credentials(url)
         new(host, uri.port || DEFAULT_PORT, user, password, database(uri.path), uri.scheme == "rediss", verify, ca_file)
       when "unix"
@@ -89,7 +89,7 @@ module JoobQ
       if path = unixsocket
         io << "unix://" << path
       else
-        io << (tls? ? "rediss://" : "redis://") << host << ':' << port
+        io << (tls? ? "rediss://" : "redis://") << (host.includes?(':') ? "[#{host}]" : host) << ':' << port
       end
       database.try { |db| io << '/' << db }
       user.try { |name| io << " (user " << name << ')' }
@@ -101,7 +101,8 @@ module JoobQ
 
     # SSL objects copy the context's verification parameters, so the expected host set here applies to every connection.
     private def verify_host(context : OpenSSL::SSL::Context::Client) : Nil
-      name = host.lchop('[').rchop(']')
+      # an absolute name ("redis.example.com.") is the same host; OpenSSL would not match it to the certificate
+      name = host.rchop('.')
       param = LibSSL.ssl_ctx_get0_param(context.to_unsafe)
       set = if Socket::IPAddress.valid?(name)
               LibCrypto.x509_verify_param_set1_ip_asc(param, name)
@@ -114,7 +115,10 @@ module JoobQ
     # The user name and password as written, percent-decoded. The URI class decodes them as form data, which would turn
     # a literal `+` in a password into a space.
     private def self.credentials(url : String) : {String?, String?}
-      userinfo = url.match(%r{\A[A-Za-z][A-Za-z0-9+.\-]*://([^@/?#]*)@}).try(&.[1])
+      authority = url.match(%r{\A[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)}).try(&.[1]) || ""
+      raise Invalid.new("Redis URL has a raw @ in its credentials: percent-encode it as %40") if authority.count('@') > 1
+
+      userinfo = authority.rpartition('@')[0] if authority.includes?('@')
       return {nil, nil} unless userinfo
 
       user, separator, password = userinfo.partition(':')

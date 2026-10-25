@@ -58,11 +58,12 @@ module JoobQ
       error.message.to_s.should_not contain("not-the-password")
     end
 
-    it "keeps failing after a failed AUTH instead of falling back to the default user" do
-      # One pooled connection is reused, so a half-open connection would run the second command as the default user.
+    it "reports the authentication failure on every attempt, not a pool timeout after the first" do
+      # A client whose AUTH fails must still take its place in the pool, or each failure would use up one slot of a
+      # one-connection pool and the second attempt would time out waiting for a connection that never comes back.
       store = connect.call("redis://#{user}:not-the-password@#{host}:#{port}", 1)
 
-      2.times { expect_raises(Redis::Error) { store.redis.get("acl_spec:key") } }
+      3.times { expect_raises(Redis::Error, /WRONGPASS/) { store.redis.get("acl_spec:key") } }
     end
 
     it "does not fall back to the default user when AUTH fails on a reconnect" do

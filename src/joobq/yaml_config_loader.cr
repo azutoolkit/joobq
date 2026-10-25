@@ -259,8 +259,10 @@ module JoobQ
         merged.error_monitor.max_recent_errors = base.error_monitor.max_recent_errors
       end
 
-      # Override store if specified (avoid default RedisStore comparison)
-      merged.store = override.store unless override.store.is_a?(RedisStore)
+      # The store a source chose wins (the later source when both did); otherwise the default built from the
+      # environment stays. Comparing store types cannot tell the two apart: both are RedisStores.
+      merged.store = override.store_configured? ? override.store : base.store
+      merged.store_configured = override.store_configured? || base.store_configured?
 
       # Merge schedulers
       merged.schedulers = base.schedulers + override.schedulers

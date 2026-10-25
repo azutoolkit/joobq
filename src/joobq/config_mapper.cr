@@ -209,6 +209,7 @@ module JoobQ
     end
 
     private def self.map_redis_config(config : Configure, redis_config : YAML::Any)
+      config.store_configured = true
       # Start with YAML values as defaults
       host = "localhost"
       port = 6379

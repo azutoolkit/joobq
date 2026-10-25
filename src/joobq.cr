@@ -111,6 +111,12 @@ module JoobQ
     config.store
   end
 
+  # The configured store, or nil while no configuration exists. Never loads the configuration, so it is safe to
+  # call from code that runs while the configuration itself is being built.
+  def self.configured_store? : Store?
+    @@config.try(&.store)
+  end
+
   def self.reset
     store.reset
   end

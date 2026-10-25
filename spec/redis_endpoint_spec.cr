@@ -31,6 +31,34 @@ module JoobQ
         endpoint.password.should eq("secret")
       end
 
+      it "keeps a literal + in the user name and password and decodes percent escapes" do
+        endpoint = RedisEndpoint.parse("redis://a+b:pa+ss%2Bword@localhost")
+
+        endpoint.user.should eq("a+b")
+        endpoint.password.should eq("pa+ss+word")
+      end
+
+      it "rejects a query or fragment so a misplaced credential is not ignored" do
+        expect_raises(RedisEndpoint::Invalid, /query/) { RedisEndpoint.parse("redis://localhost/0?password=x") }
+        expect_raises(RedisEndpoint::Invalid, /fragment/) { RedisEndpoint.parse("redis://localhost/0#x") }
+      end
+
+      it "reads a unix socket path and its database" do
+        endpoint = RedisEndpoint.parse("unix:///var/run/redis.sock?db=2")
+
+        endpoint.unixsocket.should eq("/var/run/redis.sock")
+        endpoint.database.should eq(2)
+        endpoint.tls?.should be_false
+        endpoint.ssl_context.should be_nil
+        endpoint.to_s.should contain("/var/run/redis.sock")
+      end
+
+      it "rejects a unix URL without a path or with other parameters" do
+        expect_raises(RedisEndpoint::Invalid, /socket/) { RedisEndpoint.parse("unix://") }
+        expect_raises(RedisEndpoint::Invalid, /parameter/) { RedisEndpoint.parse("unix:///tmp/r.sock?password=x") }
+        expect_raises(RedisEndpoint::Invalid, /database/) { RedisEndpoint.parse("unix:///tmp/r.sock?db=x") }
+      end
+
       it "rejects a scheme other than redis and rediss" do
         expect_raises(RedisEndpoint::Invalid, /scheme/) { RedisEndpoint.parse("http://localhost") }
       end

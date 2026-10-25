@@ -72,6 +72,11 @@ module JoobQ
       )
     end
 
+    # Closes the connections of a store made with `url:`. A store made with host and port keeps its pool open.
+    def close : Nil
+      @redis.as?(RedisPool).try(&.close)
+    end
+
     # Host, port and pool only: the default `inspect` would print the password this store was given.
     def inspect(io : IO) : Nil
       io << "#<" << self.class.name << ' ' << host << ':' << port << '>'

@@ -10,7 +10,7 @@ module JoobQ
       @acl_user = endpoint.user
       @acl_password = endpoint.password
       @acl_database = endpoint.database
-      super(host: endpoint.host, port: endpoint.port, password: nil, database: nil,
+      super(host: endpoint.host, port: endpoint.port, unixsocket: endpoint.unixsocket, password: nil, database: nil,
         ssl_context: ssl_context, connect_timeout: connect_timeout, command_timeout: command_timeout)
     end
 
@@ -39,10 +39,21 @@ module JoobQ
   class RedisPool < Redis::PooledClient
     def initialize(endpoint : RedisEndpoint, pool_size : Int32 = 5, pool_timeout : Float64 = 5.0)
       ssl_context = endpoint.ssl_context
+      @clients = [] of RedisClient
+      @clients_lock = Sync::Mutex.new
       @pool = ConnectionPool(Redis).new(capacity: pool_size, timeout: pool_timeout) do
-        RedisClient.new(endpoint, ssl_context: ssl_context).as(Redis)
+        client = RedisClient.new(endpoint, ssl_context: ssl_context)
+        @clients_lock.synchronize { @clients << client }
+        client.as(Redis)
       end
       @description = endpoint.to_s
+    end
+
+    # Closes every connection the pool has opened. A command issued afterwards reconnects, so this is for letting go of
+    # a server (an environment that is removed, a process that is ending), not for pausing.
+    def close : Nil
+      clients = @clients_lock.synchronize { @clients.dup }
+      clients.each(&.close)
     end
 
     def inspect(io : IO) : Nil

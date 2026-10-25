@@ -10,7 +10,10 @@ module JoobQ
     secret = "s3cr3t-for-spec"
     url = "redis://#{user}:#{secret}@#{host}:#{port}"
 
-    admin = -> { Redis.new(host: host, port: port) }
+    stores = [] of RedisStore
+    connect = ->(target : String, pool_size : Int32) { RedisStore.new(url: target, pool_size: pool_size).tap { |store| stores << store } }
+    admins = [] of Redis
+    admin = -> { admins.first? || Redis.new(host: host, port: port).tap { |client| admins << client } }
 
     before_each do
       begin
@@ -25,10 +28,14 @@ module JoobQ
         admin.call.command(["ACL", "DELUSER", user])
       rescue Redis::Error
       end
+      stores.each(&.close)
+      stores.clear
+      admins.each(&.close)
+      admins.clear
     end
 
     it "authenticates as the ACL user and can use the keys it is allowed" do
-      store = RedisStore.new(url: url)
+      store = connect.call(url, 2)
 
       store.redis.set("acl_spec:key", "value")
       store.redis.get("acl_spec:key").should eq("value")
@@ -37,14 +44,14 @@ module JoobQ
     end
 
     it "is held to the user's ACL: other keys and dangerous commands are refused" do
-      store = RedisStore.new(url: url)
+      store = connect.call(url, 2)
 
       expect_raises(Redis::Error, /NOPERM/) { store.redis.set("other:key", "value") }
       expect_raises(Redis::Error, /NOPERM/) { store.redis.flushdb }
     end
 
     it "fails on a wrong password without repeating it" do
-      store = RedisStore.new(url: "redis://#{user}:not-the-password@#{host}:#{port}")
+      store = connect.call("redis://#{user}:not-the-password@#{host}:#{port}", 2)
 
       error = expect_raises(Redis::Error) { store.redis.get("acl_spec:key") }
 
@@ -53,19 +60,18 @@ module JoobQ
 
     it "keeps failing after a failed AUTH instead of falling back to the default user" do
       # One pooled connection is reused, so a half-open connection would run the second command as the default user.
-      store = RedisStore.new(url: "redis://#{user}:not-the-password@#{host}:#{port}", pool_size: 1)
+      store = connect.call("redis://#{user}:not-the-password@#{host}:#{port}", 1)
 
       2.times { expect_raises(Redis::Error) { store.redis.get("acl_spec:key") } }
     end
 
     it "does not fall back to the default user when AUTH fails on a reconnect" do
-      store = RedisStore.new(url: url, pool_size: 1)
+      store = connect.call(url, 1)
       store.redis.set("acl_spec:key", "value") # one connection, authenticated as the ACL user
 
       # The password is rotated and the live connection dropped, so the next command has to reconnect and AUTH again.
-      admin_client = admin.call
-      admin_client.command(["ACL", "SETUSER", user, "resetpass", ">rotated-password"])
-      admin_client.command(["CLIENT", "KILL", "USER", user])
+      admin.call.command(["ACL", "SETUSER", user, "resetpass", ">rotated-password"])
+      admin.call.command(["CLIENT", "KILL", "USER", user])
 
       3.times { expect_raises(Redis::Error) { store.redis.get("acl_spec:key") } }
     ensure
@@ -73,7 +79,7 @@ module JoobQ
     end
 
     it "does not print the password when the store or its pool is inspected" do
-      store = RedisStore.new(url: url, pool_size: 1)
+      store = connect.call(url, 1)
       store.redis.set("acl_spec:key", "value")
 
       [store.inspect, store.redis.inspect, store.pretty_inspect, store.redis.pretty_inspect].each do |text|
@@ -84,23 +90,35 @@ module JoobQ
     end
 
     it "selects the database from the URL" do
-      store = RedisStore.new(url: "#{url}/5")
+      store = connect.call("#{url}/5", 2)
 
       store.redis.set("acl_spec:db", "five")
 
-      other = admin.call
-      other.select(5)
-      other.get("acl_spec:db").should eq("five")
+      db_client = Redis.new(host: host, port: port, database: 5)
+      db_client.get("acl_spec:db").should eq("five")
     ensure
-      cleanup = admin.call
-      cleanup.select(5)
+      cleanup = Redis.new(host: host, port: port, database: 5)
       cleanup.del("acl_spec:db")
+      cleanup.close
+      db_client.try(&.close)
     end
 
     it "fails at construction, not at the first command, when the CA file cannot be read" do
       expect_raises(RedisEndpoint::Invalid, /CA file/) do
         RedisStore.new(url: "rediss://#{host}:#{port}", ca_file: "/nonexistent/ca.pem")
       end
+    end
+
+    it "closes its connections on #close" do
+      store = connect.call(url, 2)
+      store.redis.set("acl_spec:key", "value")
+      admin.call.command(["CLIENT", "LIST"]).to_s.should contain("user=#{user}")
+
+      store.close
+
+      admin.call.command(["CLIENT", "LIST"]).to_s.should_not contain("user=#{user}")
+    ensure
+      admin.call.del("acl_spec:key")
     end
 
     it "leaves the host, port and password constructor working" do

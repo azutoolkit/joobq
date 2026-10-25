@@ -78,6 +78,7 @@ module JoobQ
     # (`JSON::ParseException`, `JSON::SerializableError`) instead of being logged, and the job id comes back.
     # Store and connection errors raise as well. The job always lands on this queue: a `queue` in the payload is
     # overridden, because the store pushes onto `job.queue`, which would otherwise let a payload pick any Redis key.
+    # `add`, `add_batch` and `add_batch_strings` still trust the `queue` in the payload, so do not feed them untrusted input.
     def add!(job : String) : String
       job_object = T.from_json(job)
       job_object.queue = name

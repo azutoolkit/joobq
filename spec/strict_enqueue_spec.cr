@@ -36,7 +36,7 @@ module JoobQ
         queue = JoobQ["example"]
         queue.clear
         redis = JoobQ.store.as(RedisStore).redis
-        redis.del("joobq:processing:example", "other_key")
+        redis.del("joobq:processing:example")
         job = ExampleJob.new(1)
         job.queue = "joobq:processing:example"
 
@@ -44,7 +44,6 @@ module JoobQ
 
         queue.size.should eq(1)
         redis.llen("joobq:processing:example").should eq(0)
-        redis.exists("other_key").should eq(0)
       end
 
       it "enqueues onto a non-default queue when the payload names no queue" do

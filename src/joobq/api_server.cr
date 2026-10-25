@@ -189,6 +189,8 @@ module JoobQ
     ENDPOINTS = {
       {method: "POST", path: "/joobq/jobs"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
+        # Deprecated: this route enqueues without authentication. `JoobQ.enqueue` behind an authenticated API replaces it.
+        context.response.headers["Deprecation"] = "true"
 
         # Validate content type
         content_type_validation = APIValidation.validate_content_type(context.request.headers["Content-Type"]?)

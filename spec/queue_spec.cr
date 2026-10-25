@@ -125,6 +125,29 @@ module JoobQ
       end
     end
 
+    # The future strict variant (Queue#add!) is meant to raise on unparseable input; these document today's swallow:
+    # Queue#add(String) rescues the JSON error, logs it in handle_enqueue_error and returns nil.
+    describe "#add(String) with invalid data" do
+      # fetched here: the outer `queue` is reassigned by the #start example above (closure), so it is not reliably Queue(ExampleJob)
+      it "current behaviour: swallows unparseable JSON, returns nil and enqueues nothing" do
+        example = JoobQ["example"]
+        example.clear
+        result = example.add("not json")
+        result.should be_nil
+        example.size.should eq(0)
+        JoobQ.store.as(RedisStore).redis.llen("example").should eq(0)
+      end
+
+      it "current behaviour: swallows valid JSON of the wrong shape, returns nil and enqueues nothing" do
+        example = JoobQ["example"]
+        example.clear
+        result = example.add(%({"x": "not an int"}))
+        result.should be_nil
+        example.size.should eq(0)
+        JoobQ.store.as(RedisStore).redis.llen("example").should eq(0)
+      end
+    end
+
     # describe "queue lifecycle" do
     #   # Ensure all queues and workers are stopped after these tests
     #   after_all do

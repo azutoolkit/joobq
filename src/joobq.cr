@@ -131,13 +131,19 @@ module JoobQ
   end
 
   class UnknownQueue < Exception
+    getter queue_name : String
+
+    # The message carries a cleaned, truncated name (callers log it or return it); `queue_name` has the raw value.
+    def initialize(@queue_name : String)
+      super("Unknown queue: #{@queue_name[0, 100].inspect}")
+    end
   end
 
   # Enqueues a serialized job onto a registered queue and returns its job id. Unlike `Queue#add`, which logs a
   # payload that does not fit the queue's job type and moves on, this raises: `UnknownQueue` for a queue that is not
   # registered, and the JSON error (`JSON::ParseException`, `JSON::SerializableError`) for a bad payload.
   def self.enqueue(queue_name : String, json : String) : String
-    queue = queues[queue_name]? || config.queues[queue_name]? || raise UnknownQueue.new("Unknown queue: #{queue_name}")
+    queue = queues[queue_name]? || config.queues[queue_name]? || raise UnknownQueue.new(queue_name)
     queue.add!(json)
   end
 

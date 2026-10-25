@@ -12,6 +12,8 @@ module JoobQ
     end
 
     getter redis : Redis::PooledClient
+    getter host : String
+    getter port : Int32
     getter pool_size : Int32
     getter pool_timeout : Float64
     getter health : RedisHealth

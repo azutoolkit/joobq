@@ -258,6 +258,18 @@ module JoobQ
         pool_timeout = env_pool_timeout.to_f64
       end
 
+      # A URL (REDIS_URL, else `url` in the YAML file) carries host, port, ACL user, password, TLS and database
+      # together, so it is used as it is: host, port and password settings do not change it.
+      url = ENV["REDIS_URL"]?.presence || redis_config["url"]?.try(&.as_s?).presence
+      if url
+        verify = ENV["REDIS_TLS_VERIFY"]?.try { |value| !%w[false 0 no off].includes?(value.downcase) }
+        verify = redis_config["tls_verify"]?.try(&.as_bool?) if verify.nil?
+        ca_file = ENV["REDIS_CA_FILE"]?.presence || redis_config["ca_file"]?.try(&.as_s?).presence
+        config.store = RedisStore.new(url: url, pool_size: pool_size, pool_timeout: pool_timeout,
+          verify: verify.nil? ? true : verify, ca_file: ca_file)
+        return
+      end
+
       # Create Redis store with proper parameters from YAML config and ENV overrides
       config.store = RedisStore.new(host, port, password, pool_size, pool_timeout)
     end

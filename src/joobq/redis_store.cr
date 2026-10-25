@@ -7,11 +7,40 @@ module JoobQ
 
     # The configured store when it is a RedisStore, so classes that default to it talk to the same Redis as the
     # queues. Only before any configuration exists (or for another Store) is a store built from ENV.
+    @@instance : RedisStore? = nil
+
     def self.instance : RedisStore
-      JoobQ.configured_store?.as?(RedisStore) || (@@instance ||= new)
+      JoobQ.configured_store?.as?(RedisStore) || (@@instance ||= from_env)
     end
 
+    # The store the environment asks for: REDIS_URL (with REDIS_TLS_VERIFY and REDIS_CA_FILE) when it is set, otherwise
+    # REDIS_HOST, REDIS_PORT and REDIS_PASS. A REDIS_URL that cannot be used raises `RedisEndpoint::Invalid` rather
+    # than falling back to a plain connection to REDIS_HOST.
+    def self.from_env : RedisStore
+      url = ENV["REDIS_URL"]?.presence
+      return new unless url
+
+      new(url: url, verify: verify_setting(ENV["REDIS_TLS_VERIFY"]?, "REDIS_TLS_VERIFY") != false,
+        ca_file: ENV["REDIS_CA_FILE"]?.presence)
+    end
+
+    # `true`/`1`/`yes`/`on` and `false`/`0`/`no`/`off` (any case); nil when `value` is unset or empty. Anything else
+    # raises, because a misspelt "off" would otherwise be read as "on".
+    def self.verify_setting(value : String?, name : String) : Bool?
+      word = value.try(&.strip.downcase).presence
+      return unless word
+      return true if %w[true 1 yes on].includes?(word)
+      return false if %w[false 0 no off].includes?(word)
+
+      raise RedisEndpoint::Invalid.new("#{name} must be true or false")
+    end
+
+    # The parsed URL of a store made with `url:`; nil for one made with host and port.
+    getter endpoint : RedisEndpoint? = nil
+
     getter redis : Redis::PooledClient
+    getter host : String
+    getter port : Int32
     getter pool_size : Int32
     getter pool_timeout : Float64
     getter health : RedisHealth
@@ -43,6 +72,42 @@ module JoobQ
         pool_size: @pool_size,
         pool_timeout: @pool_timeout
       )
+    end
+
+    # Connects to the server a `redis://` or `rediss://` URL names (see `RedisEndpoint`): as an ACL user when the
+    # URL has a user name, over TLS for `rediss`, on the database in its path. `verify` and `ca_file` control how
+    # the server certificate is checked.
+    def initialize(*, url : String, pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "500").to_i,
+                   pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64,
+                   verify : Bool = true, ca_file : String? = nil)
+      endpoint = RedisEndpoint.parse(url, verify, ca_file)
+      @endpoint = endpoint
+      @host = endpoint.host
+      @port = endpoint.port
+      @password = nil # the endpoint's clients hold the credentials; the store keeps none
+      @pool_size = pool_size
+      @pool_timeout = pool_timeout
+      @redis = RedisPool.new(endpoint, pool_size, pool_timeout)
+
+      @health = RedisHealth.new(@redis, @pool_size, @pool_timeout)
+      @pipeline = RedisPipeline.new(@redis)
+      @metrics = RedisMetrics.new(@redis)
+
+      Log.info &.emit("Redis store initialized",
+        endpoint: endpoint.to_s,
+        pool_size: @pool_size,
+        pool_timeout: @pool_timeout
+      )
+    end
+
+    # Closes the connections of a store made with `url:`. A store made with host and port keeps its pool open.
+    def close : Nil
+      @redis.as?(RedisPool).try(&.close)
+    end
+
+    # Host, port and pool only: the default `inspect` would print the password this store was given.
+    def inspect(io : IO) : Nil
+      io << "#<" << self.class.name << ' ' << host << ':' << port << '>'
     end
 
     # Connection pool health check with detailed metrics

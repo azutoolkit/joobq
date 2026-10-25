@@ -5,8 +5,10 @@ module JoobQ
     private PROCESSING_QUEUE = "joobq:processing"
     private BLOCKING_TIMEOUT = 0.5
 
+    # The configured store when it is a RedisStore, so classes that default to it talk to the same Redis as the
+    # queues. Only before any configuration exists (or for another Store) is a store built from ENV.
     def self.instance : RedisStore
-      @@instance ||= new
+      JoobQ.configured_store?.as?(RedisStore) || (@@instance ||= new)
     end
 
     getter redis : Redis::PooledClient

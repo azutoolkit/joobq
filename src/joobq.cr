@@ -130,6 +130,17 @@ module JoobQ
     store.enqueue(job)
   end
 
+  class UnknownQueue < Exception
+  end
+
+  # Enqueues a serialized job onto a registered queue and returns its job id. Unlike `Queue#add`, which logs a
+  # payload that does not fit the queue's job type and moves on, this raises: `UnknownQueue` for a queue that is not
+  # registered, and the JSON error (`JSON::ParseException`, `JSON::SerializableError`) for a bad payload.
+  def self.enqueue(queue_name : String, json : String) : String
+    queue = queues[queue_name]? || config.queues[queue_name]? || raise UnknownQueue.new("Unknown queue: #{queue_name}")
+    queue.add!(json)
+  end
+
   def self.scheduler
     Scheduler.instance
   end

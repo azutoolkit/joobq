@@ -27,7 +27,7 @@ module JoobQ
     getter queue_configs = {} of String => NamedTuple(job_class_name: String, workers: Int32, throttle: NamedTuple(limit: Int32, period: Time::Span)?)
     getter time_location : Time::Location = Time::Location.load("America/New_York")
 
-    property store : Store = RedisStore.new
+    property store : Store = RedisStore.from_env
     property? rest_api_enabled : Bool = false
     property? stats_enabled : Bool = true
     property default_queue : String = "default"

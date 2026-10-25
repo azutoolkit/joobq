@@ -179,9 +179,13 @@ JOOBQ_PAYLOAD_KEYS=2026a:<64 hex digits>,2025:<64 hex digits> # see "Encrypting 
 
 ### Connecting with a URL
 
-`REDIS_URL` (or `redis.url` in the YAML file) names the server in one value: `redis://[user:password@]host[:port][/database]`, and `rediss://` for TLS. A user name selects a Redis 6+ ACL user (`AUTH user password`; the `redis` shard alone only authenticates the default user), a password alone is the default user's, and the path is the database. Percent-encode `@ / : ? # %` inside the user name or password. A URL is used as it is: `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASS` do not change it, and `REDIS_URL` wins over `redis.url`.
+`REDIS_URL` (or `redis.url` in the YAML file) names the server in one value: `redis://[user:password@]host[:port][/database]`, `rediss://` for TLS, or `unix:///path/to/redis.sock[?db=N]`. A user name selects a Redis 6+ ACL user (`AUTH user password`; the `redis` shard alone only authenticates the default user), a password alone is the default user's, and the path is the database. Percent-encode `@ / : ? # %` inside the user name or password; a literal `+` stays a `+`. A query or fragment is refused (a credential put there would otherwise be ignored), except `db` on a unix URL.
 
-For TLS the server certificate is checked against the system's certificate authorities, or against the PEM file in `REDIS_CA_FILE` (`redis.ca_file`); `REDIS_TLS_VERIFY=false` (`redis.tls_verify: false`) turns the check off. SSLv3 and TLS 1.0/1.1 are refused. The server's name is not matched against its certificate (the `redis` shard does not pass it to the handshake), so point `REDIS_CA_FILE` at a CA that signs only your Redis if that matters. The password never appears in logs or error messages. In code: `JoobQ::RedisStore.new(url: "rediss://...", ca_file: "ca.pem")`.
+`REDIS_URL` is used as it is, by the YAML loader and by the default store alike: `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASS` do not change it, and it wins over `redis.url`. A URL that cannot be used stops start-up with a message that does not repeat it; JoobQ never falls back to a plain connection to `REDIS_HOST` because of a bad URL.
+
+For `rediss://` the server certificate must be signed by a certificate authority JoobQ trusts (the system's, plus the PEM file in `REDIS_CA_FILE` / `redis.ca_file` if given: the file adds to the system's authorities, it does not replace them) and must be issued for the host in the URL. A certificate any trusted authority issued for another host is refused. `REDIS_TLS_VERIFY=false` (`redis.tls_verify: false`) turns both checks off; any value other than true/false/1/0/yes/no/on/off is an error. SSLv3 and TLS 1.0/1.1 are refused. The `redis` shard sends no server name (SNI), so a server that chooses its certificate by name needs a default one. The password never appears in logs, error messages or `inspect`. A connection that fails to authenticate is closed, never used as the default user.
+
+In code: `JoobQ::RedisStore.new(url: "rediss://...", ca_file: "ca.pem")`; `store.close` ends its connections (a store made with `host:` and `port:` keeps its pool open).
 
 ### Configuration
 

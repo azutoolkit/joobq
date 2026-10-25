@@ -82,5 +82,103 @@ module JoobQ
       error.message.to_s.should contain("scheme")
       error.message.to_s.should_not contain("hunter2")
     end
+
+    it "ignores REDIS_HOST, REDIS_PORT and REDIS_PASS when a url is given" do
+      ENV["REDIS_HOST"] = "other.example.com"
+      ENV["REDIS_PORT"] = "6000"
+      ENV["REDIS_PASS"] = "other-secret"
+
+      store = load.call(<<-YAML)
+        joobq:
+          redis:
+            url: "rediss://url.example.com:6390"
+      YAML
+
+      store.host.should eq("url.example.com")
+      store.port.should eq(6390)
+    end
+
+    it "reads TLS verification and the CA file from the environment, then the YAML file" do
+      fixture = File.expand_path("fixtures/tls/ca.pem", __DIR__)
+      ENV["REDIS_CA_FILE"] = fixture
+      ENV["REDIS_TLS_VERIFY"] = "off"
+
+      from_env = load.call(<<-YAML).endpoint.not_nil!
+        joobq:
+          redis:
+            url: "rediss://u.example.com"
+            ca_file: "/etc/ssl/unreadable-yaml-ca.pem"
+            tls_verify: true
+      YAML
+      from_env.verify?.should be_false
+      from_env.ca_file.should eq(fixture)
+
+      ENV.delete("REDIS_CA_FILE")
+      ENV.delete("REDIS_TLS_VERIFY")
+      from_yaml = load.call(<<-YAML).endpoint.not_nil!
+        joobq:
+          redis:
+            url: "rediss://u.example.com"
+            ca_file: "#{fixture}"
+            tls_verify: false
+      YAML
+      from_yaml.verify?.should be_false
+      from_yaml.ca_file.should eq(fixture)
+    end
+
+    it "verifies by default" do
+      load.call(<<-YAML).endpoint.not_nil!.verify?.should be_true
+        joobq:
+          redis:
+            url: "rediss://u.example.com"
+      YAML
+    end
+
+    it "refuses values it cannot read instead of guessing" do
+      ENV["REDIS_TLS_VERIFY"] = "fasle"
+      expect_raises(ConfigLoadError, /REDIS_TLS_VERIFY/) do
+        load.call("joobq:\n  redis:\n    url: \"rediss://u.example.com\"\n")
+      end
+
+      ENV.delete("REDIS_TLS_VERIFY")
+      expect_raises(ConfigLoadError, /tls_verify/) do
+        load.call("joobq:\n  redis:\n    url: \"rediss://u.example.com\"\n    tls_verify: \"false\"\n")
+      end
+      expect_raises(ConfigLoadError, /redis.url/) do
+        load.call("joobq:\n  redis:\n    url: 6379\n")
+      end
+    end
+
+    describe "the default store" do
+      it "is built from REDIS_URL when no YAML file says otherwise" do
+        ENV["REDIS_URL"] = "rediss://default.example.com:6395"
+        ENV["REDIS_HOST"] = "must-not-be-used.example.com"
+
+        store = Configure.new.store.as(RedisStore)
+
+        store.host.should eq("default.example.com")
+        store.port.should eq(6395)
+        store.endpoint.not_nil!.tls?.should be_true
+      end
+
+      it "is built from REDIS_HOST, REDIS_PORT and REDIS_PASS without a URL" do
+        ENV["REDIS_HOST"] = "legacy.example.com"
+        ENV["REDIS_PORT"] = "6396"
+
+        store = RedisStore.from_env
+
+        store.host.should eq("legacy.example.com")
+        store.port.should eq(6396)
+        store.endpoint.should be_nil
+      end
+
+      it "refuses an unusable REDIS_URL instead of falling back to a plain connection" do
+        ENV["REDIS_URL"] = "http://svc:hunter2@redis.example.com"
+
+        error = expect_raises(RedisEndpoint::Invalid) { RedisStore.from_env }
+
+        error.message.to_s.should_not contain("hunter2")
+      end
+    end
   end
 end

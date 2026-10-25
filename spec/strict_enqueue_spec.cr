@@ -40,6 +40,32 @@ module JoobQ
       end
     end
 
+    describe "Queue#add_delayed" do
+      it "schedules the job in the delayed set at the given time and returns its jid" do
+        queue = JoobQ["example"]
+        queue.clear
+        redis = JoobQ.store.as(RedisStore).redis
+        job = ExampleJob.new(5)
+        at = Time.utc + 10.minutes
+
+        queue.add_delayed(job.to_json, at).should eq(job.jid.to_s)
+
+        queue.size.should eq(0)
+        redis.zcard(RedisStore::DELAYED_SET).should eq(1)
+        member = redis.zrange(RedisStore::DELAYED_SET, 0, -1, with_scores: true)
+        JSON.parse(member[0].as(String))["jid"].as_s.should eq(job.jid.to_s)
+        member[1].as(String).to_i64.should eq(at.to_unix_ms)
+      end
+
+      it "raises on a bad payload and schedules nothing" do
+        queue = JoobQ["example"]
+
+        expect_raises(JSON::ParseException) { queue.add_delayed("not json", Time.utc + 1.minute) }
+
+        JoobQ.store.as(RedisStore).redis.zcard(RedisStore::DELAYED_SET).should eq(0)
+      end
+    end
+
     describe "JoobQ.enqueue" do
       it "enqueues onto the named queue and returns the jid" do
         JoobQ["example"].clear

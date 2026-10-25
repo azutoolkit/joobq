@@ -3,6 +3,7 @@ module JoobQ
   module BaseQueue
     abstract def add(job : String)
     abstract def add!(job : String) : String
+    abstract def add_delayed(job : String, at : Time) : String
     abstract def start
     abstract def stop!
     abstract def pause!
@@ -78,6 +79,15 @@ module JoobQ
     # Store and connection errors raise as well.
     def add!(job : String) : String
       store.enqueue T.from_json(job)
+    end
+
+    # Schedules a serialized job to move onto the queue at `at`, and returns its job id. Raises like `add!` when the
+    # payload does not fit this queue's job type. The delayed-job scheduler moves it when it is due.
+    def add_delayed(job : String, at : Time) : String
+      job_object = T.from_json(job)
+      job_object.scheduled!
+      store.schedule_job(job_object.to_json, at.to_unix_ms)
+      job_object.jid.to_s
     end
 
     def add(job : T)

@@ -2,6 +2,7 @@ module JoobQ
   # BaseQueue remains as the abstract base class
   module BaseQueue
     abstract def add(job : String)
+    abstract def add!(job : String) : String
     abstract def start
     abstract def stop!
     abstract def pause!
@@ -70,6 +71,13 @@ module JoobQ
       raise ex # a key problem must reach the caller, not just the log
     rescue ex
       handle_enqueue_error(ex, job, "string_job")
+    end
+
+    # Strict variant of `add`: a payload that does not deserialize into this queue's job type raises
+    # (`JSON::ParseException`, `JSON::SerializableError`) instead of being logged, and the job id comes back.
+    # Store and connection errors raise as well.
+    def add!(job : String) : String
+      store.enqueue T.from_json(job)
     end
 
     def add(job : T)

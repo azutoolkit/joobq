@@ -139,6 +139,8 @@ end
 | `REDIS_HOST` | Redis server host | localhost |
 | `REDIS_PORT` | Redis server port | 6379 |
 | `REDIS_PASS` | Redis password | nil |
+| `REDIS_URL` | `redis://[user:password@]host[:port][/db]` or `rediss://` (TLS, ACL user); used as is, wins over `REDIS_HOST/PORT/PASS` | nil |
+| `REDIS_TLS_VERIFY`, `REDIS_CA_FILE` | Check the TLS server certificate (default true), CA PEM to trust | true, system CAs |
 | `REDIS_POOL_SIZE` | Connection pool size | 500 |
 | `REDIS_POOL_TIMEOUT` | Pool timeout seconds | 2.0 |
 | `JOOBQ_ENV` | Environment (development/test/production) | development |

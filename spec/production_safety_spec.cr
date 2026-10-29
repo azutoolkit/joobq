@@ -36,6 +36,15 @@ module JoobQ
       store.redis.lrange("joobq:processing:example", 0, -1).should eq([raw])
     end
 
+    it "propagates DLQ settlement failure to the worker boundary" do
+      store = JoobQ.config.store.as(RedisStore)
+      queue = Queue(ExampleJob).new("example", 1)
+      job = ExampleJob.new(1)
+      context = ErrorContext.from_exception(job, queue, ArgumentError.new("invalid"), "worker")
+      store.redis.set(DeadLetterQueue::KEY, "wrong-type")
+      expect_raises(Redis::Error) { ErrorHandler.send_to_dead_letter(job, queue, context) }
+    end
+
     it "keeps malformed payloads recoverable when DLQ storage fails" do
       store = JoobQ.config.store.as(RedisStore)
       raw = "not-json"
@@ -83,7 +92,7 @@ module JoobQ
       store.redis.ping.should eq("PONG")
       JoobQ.config.store.as(RedisStore).redis.command(["CLIENT", "PAUSE", "150", "ALL"])
       started = Time.instant
-      expect_raises(Redis::ConnectionLostError, /[Tt]imed out/) { store.redis.ping }
+      expect_raises(RedisOutcomeUnknown, /outcome is unknown/) { store.redis.ping }
       (Time.instant - started).should be < 1.second
       sleep 250.milliseconds
       store.redis.ping.should eq("PONG")

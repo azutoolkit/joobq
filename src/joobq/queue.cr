@@ -1,6 +1,12 @@
 module JoobQ
   # BaseQueue remains as the abstract base class
   module BaseQueue
+    # Override for explicitly injected execution dependencies; serialized jobs do
+    # not carry process-local store handles.
+    def perform(job : Job) : Nil
+      job.perform
+    end
+
     abstract def add(job : String)
     abstract def add!(job : String) : String
     abstract def add_delayed(job : String, at : Time) : String
@@ -23,7 +29,7 @@ module JoobQ
   # The Queue class now focuses solely on queue operations
   class Queue(T)
     include BaseQueue
-    getter store : Store = ::JoobQ.config.store
+    getter store : Store
     getter name : String
     getter job_type : String = T.name
     getter total_workers : Int32
@@ -35,8 +41,21 @@ module JoobQ
     @started = Atomic(Bool).new(false)
 
     def initialize(@name : String, @total_workers : Int32,
-                   @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
+                   @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil,
+                   *, @store : Store = ::JoobQ.config.store, @handler : Proc(T, Nil)? = nil)
       @pause = CachedFlag.new(PAUSE_CACHE_TTL) { store.paused?(name) }
+    end
+
+    def perform(job : Job) : Nil
+      if job.is_a?(T)
+        if handler = @handler
+          handler.call(job)
+        else
+          job.perform
+        end
+      else
+        raise ArgumentError.new("Job type does not belong to queue #{name}")
+      end
     end
 
     # Starting a running queue does nothing: `reprocess_busy_jobs!` would move a job that a worker is

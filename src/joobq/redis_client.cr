@@ -4,14 +4,44 @@ module JoobQ
   # selects the database. If either step fails the connection is closed before the error is raised, so the next
   # command reconnects and authenticates again instead of running on a connection that never did: as the default
   # user, which is often `nopass` with every right, and on database 0.
+  # The server may have executed a command whose reply was lost. The caller must
+  # resolve its request identity rather than blindly replay a mutation.
+  class RedisOutcomeUnknown < Redis::ConnectionLostError
+  end
+
   class RedisClient < Redis
-    def initialize(endpoint : RedisEndpoint, connect_timeout : Time::Span? = 5.seconds, command_timeout : Time::Span? = nil,
+    def initialize(endpoint : RedisEndpoint, connect_timeout : Time::Span? = 5.seconds, command_timeout : Time::Span? = 5.seconds,
                    ssl_context : OpenSSL::SSL::Context::Client? = endpoint.ssl_context)
       @acl_user = endpoint.user
       @acl_password = endpoint.password
       @acl_database = endpoint.database
       super(host: endpoint.host, port: endpoint.port, unixsocket: endpoint.unixsocket, password: nil, database: nil,
-        ssl_context: ssl_context, connect_timeout: connect_timeout, command_timeout: command_timeout)
+        ssl_context: ssl_context, dns_timeout: connect_timeout, connect_timeout: connect_timeout, command_timeout: command_timeout)
+    end
+
+    # Reconnect before a new request, but never replay a request after a lost reply.
+    # The dependency's implementation retries *all* commands once, including RPUSH.
+    def command(request : Redis::Request)
+      transport = strategy
+      begin
+        transport.command(request).as(Redis::RedisValue)
+      rescue ex : Redis::ConnectionError | Redis::CommandTimeoutError
+        close
+        raise RedisOutcomeUnknown.new("Redis reply unavailable; command outcome is unknown (#{ex.class})")
+      end
+    end
+
+    # Redis errors can interrupt reply draining midway through a pipeline. Never
+    # return that socket to the pool with unread replies for the next borrower.
+    # A pipeline is not a transaction: any prefix may already have executed.
+    def pipelined(&)
+      super { |pipeline| yield pipeline }
+    rescue ex : Redis::ConnectionError | Redis::CommandTimeoutError
+      close
+      raise RedisOutcomeUnknown.new("Redis pipeline reply unavailable; outcome is unknown (#{ex.class})")
+    rescue ex
+      close
+      raise ex
     end
 
     private def connect
@@ -45,12 +75,14 @@ module JoobQ
 
   # `Redis::PooledClient` whose connections are `RedisClient`s. The TLS context is built once and shared.
   class RedisPool < Redis::PooledClient
-    def initialize(endpoint : RedisEndpoint, pool_size : Int32 = 5, pool_timeout : Float64 = 5.0)
+    def initialize(endpoint : RedisEndpoint, pool_size : Int32 = 5, pool_timeout : Float64 = 5.0,
+                   connect_timeout : Time::Span = 5.seconds, command_timeout : Time::Span = 5.seconds)
+      raise ArgumentError.new("Redis pool size and timeouts must be positive and finite") unless pool_size > 0 && pool_timeout.finite? && pool_timeout > 0 && connect_timeout > Time::Span.zero && command_timeout > Time::Span.zero
       ssl_context = endpoint.ssl_context
       @clients = [] of RedisClient
       @clients_lock = Sync::Mutex.new
       @pool = ConnectionPool(Redis).new(capacity: pool_size, timeout: pool_timeout) do
-        client = RedisClient.new(endpoint, ssl_context: ssl_context)
+        client = RedisClient.new(endpoint, connect_timeout: connect_timeout, command_timeout: command_timeout, ssl_context: ssl_context)
         @clients_lock.synchronize { @clients << client }
         client.as(Redis)
       end

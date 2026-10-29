@@ -183,9 +183,9 @@ JOOBQ_PAYLOAD_KEYS=2026a:<64 hex digits>,2025:<64 hex digits> # see "Encrypting 
 
 `REDIS_URL` is used as it is, by the YAML loader and by the default store alike: `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASS` do not change it, and it wins over `redis.url`. A URL that cannot be used stops start-up with a message that does not repeat it; JoobQ never falls back to a plain connection to `REDIS_HOST` because of a bad URL.
 
-For `rediss://` the server certificate must be signed by a certificate authority JoobQ trusts (the system's, plus the PEM file in `REDIS_CA_FILE` / `redis.ca_file` if given: the file adds to the system's authorities, it does not replace them) and must be issued for the host in the URL. A certificate any trusted authority issued for another host is refused. `REDIS_TLS_VERIFY=false` (`redis.tls_verify: false`) turns both checks off; any value other than true/false/1/0/yes/no/on/off is an error. SSLv3 and TLS 1.0/1.1 are refused. The `redis` shard sends no server name (SNI), so a server that chooses its certificate by name needs a default one. For a store made from a URL the password never appears in logs, error messages or `inspect`/`pp`, and a connection that fails to authenticate is closed, never used as the default user. (A store made with `host:`, `port:` and `password:` is unchanged, and its connections still print the password when inspected.) When several YAML files are merged, the `redis` section of the last one that has one wins. A host written with a trailing dot or an IPv6 literal in brackets is accepted.
+For `rediss://` the server certificate must be signed by a certificate authority JoobQ trusts (the system's, plus the PEM file in `REDIS_CA_FILE` / `redis.ca_file` if given: the file adds to the system's authorities, it does not replace them) and must be issued for the host in the URL. A certificate any trusted authority issued for another host is refused. `REDIS_TLS_VERIFY=false` (`redis.tls_verify: false`) turns both checks off; any value other than true/false/1/0/yes/no/on/off is an error. SSLv3 and TLS 1.0/1.1 are refused. The `redis` shard sends no server name (SNI), so a server that chooses its certificate by name needs a default one. For a store made from a URL the password never appears in logs, error messages or `inspect`/`pp`, and a connection that fails to authenticate is closed, never used as the default user. The host/port constructor uses the same credential-safe client and timeout policy. When several YAML files are merged, the `redis` section of the last one that has one wins. A host written with a trailing dot or an IPv6 literal in brackets is accepted.
 
-In code: `JoobQ::RedisStore.new(url: "rediss://...", ca_file: "ca.pem")`; `store.close` ends its connections (a store made with `host:` and `port:` keeps its pool open).
+In code: `JoobQ::RedisStore.new(url: "rediss://...", ca_file: "ca.pem")`; `store.close` ends current connections for either constructor; later requests reconnect.
 
 ### Configuration
 
@@ -600,7 +600,7 @@ See the [production v1 audit and prioritized roadmap](design/production-v1-audit
 
 `worker_batch_size` caps claimed/executing jobs per worker. A queue's normal capacity is approximately `workers * worker_batch_size`; this is not yet a global cap across replacement workers or detached application fibers.
 
-`REDIS_CONNECT_TIMEOUT` and `REDIS_COMMAND_TIMEOUT` configure DNS/connect and socket command limits in seconds (default `5.0`, positive). They are distinct from `REDIS_POOL_TIMEOUT`, and do not constitute an end-to-end request deadline. The Redis client can retry after a connection error; a lost response can leave a write's outcome unknown.
+`REDIS_CONNECT_TIMEOUT` and `REDIS_COMMAND_TIMEOUT` configure DNS/connect and socket command limits in seconds (default `5.0`, positive). They are distinct from `REDIS_POOL_TIMEOUT`, and do not constitute an end-to-end request deadline. A command whose reply is lost raises `JoobQ::RedisOutcomeUnknown` instead of being replayed automatically. A later, explicit request reconnects. Resolve mutating requests by their application identity before retrying them.
 
 ```crystal
 store = JoobQ::RedisStore.new(connect_timeout: 2.seconds, command_timeout: 3.seconds)
@@ -643,3 +643,21 @@ The MIT License (MIT). Please see License File for more information.
 [Elias J. Perez](https://github.com/eliasjpr/) - creator and maintainer
 [Crystal Language](https://crystal-lang.org/)
 [Redis](https://redis.io/)
+
+### Enterprise hardening branch
+
+The delivery/storage migration is tracked in [the implementation status](design/implementation-status.md).
+The experimental [delivery ledger](design/delivery-prototype.md) provides explicit admission outcomes,
+claim tokens and index repair in a separate versioned namespace. Existing queues still use the legacy
+protocol; this is not a production cutover or an enterprise-v1 release declaration.
+
+Run integration specs with `python3 scripts/run_integration.py` (or add `--url`). It starts isolated
+plain, second-store and verified TLS Redis fixtures and rejects skipped specs and runtime crashes.
+`python3 scripts/redis_restart_smoke.py` exercises an owned Redis SIGKILL/AOF restart. Both require
+Crystal, Redis with TLS support, OpenSSL and Python 3. They never use an inherited Redis endpoint.
+
+`RedisPipeline#execute_batch` takes `Proc(Redis::PipelineApi, Nil)` operations and returns the actual
+pipeline results. A batch uses one pooled connection; errors propagate and a failed pipeline's
+connection is discarded so unread replies cannot reach another borrower. Pipelines are not atomic:
+an error can follow partially applied commands. Resolve identities before retrying mutations.
+Legacy zero-argument batch closures are deprecated and execute independently.

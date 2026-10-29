@@ -15,7 +15,8 @@ with tempfile.TemporaryDirectory(prefix="joobq-redis-restart-") as temp:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    env = {**os.environ, "JOOBQ_ENV": "test", "REDIS_HOST": "127.0.0.1", "REDIS_PORT": str(port)}
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("REDIS_", "JOOBQ_SPEC_"))}
+    env.update(JOOBQ_ENV="test", REDIS_HOST="127.0.0.1", REDIS_PORT=str(port))
     binary = str(Path(temp) / "probe")
     subprocess.run(["crystal", "build", str(ROOT / "spec/fixtures/redis_restart_probe.cr"), "-o", binary],
                    cwd=ROOT, env=env, check=True, timeout=180)

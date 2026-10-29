@@ -140,7 +140,7 @@ module JoobQ
     private def perform_timed(job : T) : Nil
       started = Time.instant
       begin
-        job.perform
+        @queue.perform(job)
       ensure
         Latency.observe(@queue.name, (Time.instant - started).total_seconds)
       end

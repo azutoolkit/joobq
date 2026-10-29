@@ -10,9 +10,8 @@ module JoobQ
   # expiration time is configurable and defaults to 7 days.
   module DeadLetterManager
     private class_getter expires : Int64 = ::JoobQ.config.dead_letter_ttl.to_i
-    private class_getter store : Store = ::JoobQ.config.store
 
-    def self.add(job)
+    def self.add(job, store : Store = JoobQ.store)
       store.mark_as_dead(job, expires)
     end
   end

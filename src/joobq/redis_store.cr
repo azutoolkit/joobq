@@ -55,16 +55,8 @@ module JoobQ
                    connect_timeout : Time::Span = ENV.fetch("REDIS_CONNECT_TIMEOUT", "5.0").to_f64.seconds,
                    command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds)
       raise ArgumentError.new("Redis timeouts must be positive") if connect_timeout <= Time::Span.zero || command_timeout <= Time::Span.zero
-      @redis = Redis::PooledClient.new(
-        host: @host,
-        port: @port,
-        password: @password,
-        pool_size: @pool_size,
-        pool_timeout: @pool_timeout,
-        dns_timeout: connect_timeout,
-        connect_timeout: connect_timeout,
-        command_timeout: command_timeout
-      )
+      @redis = RedisPool.new(RedisEndpoint.new(@host, @port, password: @password),
+        @pool_size, @pool_timeout, connect_timeout, command_timeout)
 
       # Initialize specialized components
       @health = RedisHealth.new(@redis, @pool_size, @pool_timeout)
@@ -85,7 +77,9 @@ module JoobQ
     # the server certificate is checked.
     def initialize(*, url : String, pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "500").to_i,
                    pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64,
-                   verify : Bool = true, ca_file : String? = nil)
+                   verify : Bool = true, ca_file : String? = nil,
+                   connect_timeout : Time::Span = ENV.fetch("REDIS_CONNECT_TIMEOUT", "5.0").to_f64.seconds,
+                   command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds)
       endpoint = RedisEndpoint.parse(url, verify, ca_file)
       @endpoint = endpoint
       @host = endpoint.host
@@ -93,7 +87,7 @@ module JoobQ
       @password = nil # the endpoint's clients hold the credentials; the store keeps none
       @pool_size = pool_size
       @pool_timeout = pool_timeout
-      @redis = RedisPool.new(endpoint, pool_size, pool_timeout)
+      @redis = RedisPool.new(endpoint, pool_size, pool_timeout, connect_timeout, command_timeout)
 
       @health = RedisHealth.new(@redis, @pool_size, @pool_timeout)
       @pipeline = RedisPipeline.new(@redis)
@@ -106,7 +100,7 @@ module JoobQ
       )
     end
 
-    # Closes the connections of a store made with `url:`. A store made with host and port keeps its pool open.
+    # Closes current connections for either constructor. Later commands reconnect.
     def close : Nil
       @redis.as?(RedisPool).try(&.close)
     end

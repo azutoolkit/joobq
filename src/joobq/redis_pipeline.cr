@@ -17,66 +17,60 @@ module JoobQ
 
     # Pipeline performance tracking
     @@pipeline_stats = PipelineStats.new(0, 0, 0.0, 0, Time.local)
+    @@stats_lock = Sync::Mutex.new
 
     def self.pipeline_stats : PipelineStats
-      @@pipeline_stats
+      @@stats_lock.synchronize { @@pipeline_stats }
     end
 
     def self.reset_pipeline_stats : Nil
-      @@pipeline_stats = PipelineStats.new(0, 0, 0.0, 0, Time.local)
+      @@stats_lock.synchronize { @@pipeline_stats = PipelineStats.new(0, 0, 0.0, 0, Time.local) }
     end
 
     def initialize(@redis : Redis::PooledClient)
     end
 
     def track_pipeline_operation(commands_count : Int32, success : Bool) : Nil
-      @@pipeline_stats = PipelineStats.new(
-        @@pipeline_stats.total_pipeline_calls + 1,
-        @@pipeline_stats.total_commands_batched + commands_count,
-        @@pipeline_stats.total_commands_batched.to_f / @@pipeline_stats.total_pipeline_calls,
-        success ? @@pipeline_stats.pipeline_failures : @@pipeline_stats.pipeline_failures + 1,
-        @@pipeline_stats.last_reset
-      )
+      @@stats_lock.synchronize do
+        previous = @@pipeline_stats
+        calls = previous.total_pipeline_calls + 1
+        commands = previous.total_commands_batched + commands_count
+        @@pipeline_stats = PipelineStats.new(calls, commands, commands.to_f / calls,
+          previous.pipeline_failures + (success ? 0 : 1), previous.last_reset)
+      end
     end
 
-    # Connection reuse optimization: Batch multiple single operations into pipelines
-    # This reduces connection overhead for operations that don't need to be immediate
-    def batch_operations(operations : Array(Proc(Nil)), max_batch_size : Int32 = 10) : Nil
-      return if operations.empty?
+    alias Operation = Proc(Redis::PipelineApi, Nil)
 
-      # Process operations in batches to optimize connection reuse
+    # Every operation uses the same checked-out connection. Errors propagate:
+    # a failed pipeline can have a partially applied/unknown outcome.
+    def execute_batch(operations : Array(Operation), max_batch_size : Int32 = 100) : Array(Redis::RedisValue)
+      raise ArgumentError.new("batch size must be between 1 and 1000") unless 1 <= max_batch_size <= 1000
+      results = [] of Redis::RedisValue
       operations.each_slice(max_batch_size) do |batch|
-        @redis.pipelined do |_|
-          batch.each do |operation|
-            operation.call
-          end
+        begin
+          values = @redis.pipelined { |pipe| batch.each { |operation| operation.call(pipe) } }
+          track_pipeline_operation(batch.size, true)
+          results.concat(values)
+        rescue ex
+          track_pipeline_operation(batch.size, false)
+          raise ex
         end
-        track_pipeline_operation(batch.size, true)
       end
-    rescue ex
-      track_pipeline_operation(operations.size, false)
-      Log.error &.emit("Error in batch operations", error: ex.message)
-      raise ex
+      results
     end
 
-    # Connection pooling optimization: Execute multiple read operations in a single pipeline
-    # This is ideal for operations that can tolerate slightly stale data
-    def execute_read_operations_batch(operations : Array(-> Redis::RedisValue)) : Array(Redis::RedisValue)
-      return [] of Redis::RedisValue if operations.empty?
+    # Legacy closures execute independently: do not hold an unused connection
+    # around them (a capacity-one pool would deadlock on their nested checkout).
+    @[Deprecated("Use execute_batch with operations that accept Redis::PipelineApi")]
+    def batch_operations(operations : Array(Proc(Nil)), max_batch_size : Int32 = 10) : Nil
+      raise ArgumentError.new("batch size must be positive") unless max_batch_size > 0
+      operations.each(&.call)
+    end
 
-      results = @redis.pipelined do |_|
-        operations.each do |operation|
-          # Note: This is a simplified approach - in practice, you'd need to adapt
-          # the operations to work with the pipeline interface
-          operation.call
-        end
-      end
-      track_pipeline_operation(operations.size, true)
-      results
-    rescue ex
-      track_pipeline_operation(operations.size, false)
-      Log.error &.emit("Error in read operations batch", error: ex.message)
-      [] of Redis::RedisValue
+    @[Deprecated("Use execute_batch with operations that accept Redis::PipelineApi")]
+    def execute_read_operations_batch(operations : Array(-> Redis::RedisValue)) : Array(Redis::RedisValue)
+      operations.map(&.call)
     end
 
     # Optimized method to clear multiple queues in a single pipeline
@@ -120,7 +114,7 @@ module JoobQ
       Log.error &.emit("Error getting queue sizes batch",
         queue_count: queue_names.size,
         error: ex.message)
-      {} of String => Int64
+      raise ex
     end
 
     # Optimized batch set sizes to reduce connection overhead
@@ -146,7 +140,7 @@ module JoobQ
       Log.error &.emit("Error getting set sizes batch",
         set_count: set_names.size,
         error: ex.message)
-      {} of String => Int64
+      raise ex
     end
 
     # Batch job cleanup for high performance
@@ -179,6 +173,7 @@ module JoobQ
         job_count: job_jsons.size,
         error: ex.message
       )
+      raise ex
     end
   end
 end

@@ -31,7 +31,9 @@ with tempfile.TemporaryDirectory(prefix='joobq-redis-build-') as temporary:
                 raise SystemExit('unsafe archive entry')
         source.extractall(root)
     directory = root / f'redis-{args.version}'
-    subprocess.run(['make', '-j2', 'BUILD_TLS=yes', 'MALLOC=libc', 'OPT=-O2', 'redis-server', 'redis-cli'], cwd=directory, check=True)
+    # One recursive make invocation: parallel top-level targets race while
+    # building Redis 8 dependencies and can delete one another's archives.
+    subprocess.run(['make', '-j2', 'BUILD_TLS=yes', 'MALLOC=libc', 'OPT=-O2'], cwd=directory, check=True)
     (prefix / 'bin').mkdir(parents=True, exist_ok=True)
     for name in ('redis-server', 'redis-cli'):
         destination = prefix / 'bin' / name

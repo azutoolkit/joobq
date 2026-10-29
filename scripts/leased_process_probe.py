@@ -10,6 +10,9 @@ import time
 import uuid
 
 root = Path(__file__).resolve().parents[1]
+batch_size = int(os.environ.get('PROBE_BATCH_SIZE', '1'))
+if not 1 <= batch_size <= 128:
+    raise ValueError('PROBE_BATCH_SIZE must be 1..128')
 with tempfile.TemporaryDirectory(prefix='joobq-leased-process-') as directory:
     temporary = Path(directory)
     binary = temporary / 'worker'
@@ -43,9 +46,10 @@ with tempfile.TemporaryDirectory(prefix='joobq-leased-process-') as directory:
     results = []
     try:
         for fault, count in [('SIGKILL', 20), ('SIGTERM', 1)]:
+            count = max(count, batch_size)
             started = temporary / fault
             env = dict(os.environ, PROBE_NAMESPACE=f'process-{uuid.uuid4()}', PROBE_COUNT=str(count),
-                       PROBE_STARTED=str(started), PROBE_WORK_MS='3000', PROBE_CAPACITY='1')
+                       PROBE_STARTED=str(started), PROBE_WORK_MS='3000', PROBE_CAPACITY=str(batch_size))
             invoke('seed', env)
             first = worker(env)
             eventually(started.exists)
@@ -55,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='joobq-leased-process-') as directory:
             elapsed = time.monotonic() - before
             assert status == (-signal.SIGKILL if fault == 'SIGKILL' else 3), (fault, status)
             assert elapsed < 1.0, elapsed
-            replacement_env = dict(env, PROBE_WORK_MS='0', PROBE_CAPACITY='4')
+            replacement_env = dict(env, PROBE_WORK_MS='0', PROBE_CAPACITY=str(max(4, batch_size)))
             replacement = worker(replacement_env)
             eventually(lambda: inspect(env)['completed'] == count)
             final = inspect(env)
@@ -66,7 +70,7 @@ with tempfile.TemporaryDirectory(prefix='joobq-leased-process-') as directory:
             results.append(dict(fault=fault, accepted=count, completed=final['completed'],
                                 distinct_effects=final['effects'], attempts=final['attempts'],
                                 shutdown_seconds=elapsed))
-        print(json.dumps(dict(process_faults=results)))
+        print(json.dumps(dict(batch_size=batch_size, process_faults=results)))
     finally:
         for child, log in children:
             if child.poll() is None:

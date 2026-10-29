@@ -9,6 +9,16 @@ module JoobQ::Delivery
     Scheduled
     Completed
     Dead
+
+    def wire_name : String
+      case self
+      in Ready     then "ready"
+      in Leased    then "leased"
+      in Scheduled then "scheduled"
+      in Completed then "completed"
+      in Dead      then "dead"
+      end
+    end
   end
 
   enum AdmissionCode
@@ -45,6 +55,16 @@ module JoobQ::Delivery
     def initialize(@id, @payload, @digest)
     end
 
+    # A capacity hint avoids repeated builder growth for ordinary envelopes.
+    # The standard serializer still handles escaping and grows for larger output.
+    def encoded : String
+      capacity = payload.bytesize + id.bytesize + digest.bytesize + 256
+      capacity += token.try(&.bytesize) || 0
+      capacity += owner.try(&.bytesize) || 0
+      capacity += traceparent.try(&.bytesize) || 0
+      String.build(capacity) { |io| to_json(io) }
+    end
+
     def validate! : self
       raise CorruptRecord.new("unsupported delivery schema") unless schema == 1
       begin
@@ -52,7 +72,7 @@ module JoobQ::Delivery
       rescue ArgumentError
         raise CorruptRecord.new("invalid delivery trace context")
       end
-      raise CorruptRecord.new("invalid delivery record") if attempt < 0 || id.empty? || digest != Digest::SHA256.hexdigest(payload)
+      raise CorruptRecord.new("invalid delivery record") if attempt < 0 || id.empty? || !Checksum.matches?(payload, digest)
       if state.leased? && (token.nil? || owner.nil? || lease_until <= 0)
         raise CorruptRecord.new("leased delivery has no valid owner/token/deadline")
       end
@@ -129,11 +149,16 @@ module JoobQ::Delivery
         return Admission.new(AdmissionCode::Rejected, id, reason: "payload size is outside the configured limit")
       end
       if @optimized
-        entry = Record.new(id, payload, Digest::SHA256.hexdigest(payload))
+        entry = Record.new(id, payload, Checksum.hex(payload))
         entry.traceparent = traceparent
         entry.state = State::Scheduled if delay > Time::Span.zero
-        result = Scripts::ADMIT.call(@redis, keys, [id, entry.to_json, delay.total_milliseconds.to_i64.to_s, @record_limit]).as(Array)
+        result = Scripts::ADMIT.call(@redis, keys, [id, entry.encoded, delay.total_milliseconds.to_i64.to_s, @record_limit]).as(Array)
         case result[0].as(Int64)
+        when 3
+          # The script wrote this submitted envelope and returns only its
+          # server-assigned due time. Existing IDs still return checked raw data.
+          entry.due_at = result[1].as(Int64)
+          return Admission.new(AdmissionCode::Accepted, id, entry)
         when -1
           return Admission.new(AdmissionCode::Rejected, id, reason: "retained record capacity reached")
         when 1
@@ -143,7 +168,7 @@ module JoobQ::Delivery
       if existing = load(id)
         return admission_for(existing[0], id, payload)
       end
-      entry = Record.new(id, payload, Digest::SHA256.hexdigest(payload))
+      entry = Record.new(id, payload, Checksum.hex(payload))
       entry.traceparent = traceparent
       entry.state = State::Scheduled if delay > Time::Span.zero
       entry.due_at = now_ms + delay.total_milliseconds.to_i64
@@ -214,6 +239,7 @@ module JoobQ::Delivery
         return result
       end
       entry, raw = load(claim.id) || return Settlement::Stale
+      raise CorruptRecord.new("claimed payload changed") unless entry.payload == claim.payload && entry.digest == (claim.digest || Checksum.hex(claim.payload))
       return Settlement::Stale unless owns?(entry, claim) && entry.lease_until > now_ms
       previous_deadline = entry.lease_until
       entry.lease_until = now_ms + duration
@@ -231,6 +257,7 @@ module JoobQ::Delivery
         return result
       end
       entry, raw = load(claim.id) || return Settlement::Stale
+      raise CorruptRecord.new("claimed payload changed") unless entry.payload == claim.payload && entry.digest == (claim.digest || Checksum.hex(claim.payload))
       same_claim = entry.token == claim.token && entry.owner == claim.owner && entry.attempt == claim.attempt
       return Settlement::AlreadyApplied if same_claim && entry.state == state
       return Settlement::Stale unless owns?(entry, claim) && entry.lease_until > now_ms
@@ -287,7 +314,7 @@ module JoobQ::Delivery
         return Admission.new(AdmissionCode::Accepted, id, entry)
       end
       raise ArgumentError.new("invalid imported payload size") unless 1 <= payload.bytesize <= @max_payload_bytes
-      entry = Record.new(id, payload, Digest::SHA256.hexdigest(payload))
+      entry = Record.new(id, payload, Checksum.hex(payload))
       entry.state = state
       entry.due_at = due_at
       code = write_code(entry, "")
@@ -323,7 +350,7 @@ module JoobQ::Delivery
 
     private def transition(claim : Claim, state : State, duration : Int64) : Settlement?
       result = Scripts::TRANSITION.call(@redis, keys, [claim.id, claim.token, claim.owner, claim.attempt.to_s,
-                                                       state.to_s.downcase, duration.to_s, claim.payload, claim.digest || Digest::SHA256.hexdigest(claim.payload)]).as(Array)
+                                                       state.wire_name, duration.to_s, claim.payload, claim.digest || Checksum.hex(claim.payload)]).as(Array)
       case result[0].as(Int64)
       when 0 then Settlement::Stale
       when 1 then Settlement::Applied
@@ -343,7 +370,7 @@ module JoobQ::Delivery
 
     private def write_code(entry : Record, expected : String, before : Int64? = nil, after : Int64? = nil) : Int64
       ready, leased = scores(entry)
-      @redis.eval(WRITE, keys, [entry.id, expected, entry.to_json, ready, leased, before.to_s, after.to_s, @max_records.to_s]).as(Int64)
+      @redis.eval(WRITE, keys, [entry.id, expected, entry.encoded, ready, leased, before.to_s, after.to_s, @max_records.to_s]).as(Int64)
     end
 
     private def load(id : String) : {Record, String}?
@@ -361,7 +388,7 @@ module JoobQ::Delivery
 
     private def identity(request : String) : String
       raise ArgumentError.new("request ID must be 1..1024 bytes") unless 1 <= request.bytesize <= 1024
-      Digest::SHA256.hexdigest(request)
+      Checksum.hex(request)
     end
 
     private def admission_for(entry : Record, id : String, payload : String) : Admission

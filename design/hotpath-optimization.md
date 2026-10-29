@@ -47,6 +47,37 @@ measurements supersede their performance numbers, not their fault evidence.
 
 ## Scope and limitations
 
+### CPU-sized worker follow-up
+
+The same release executable from core `3768e28939177b0820a929468a07b42cf33e4f7f`
+was rerun with 1, 4, 5 and 6 execution threads. This container reports five logical
+CPUs and five affinity CPUs, but cgroup v2 `cpu.max=400000 100000` limits total
+CPU time to four cores. Redis shares that budget with the benchmark process.
+Each profile retained 16 producers/16 slots, 1 KiB payloads, verified TLS and AOF
+`always`. Three repetitions of 10,000 jobs per profile conserved all 120,000 IDs.
+
+| Execution threads | Median completed/s | Observed range/s | Median admission p99 |
+| ---: | ---: | ---: | ---: |
+| 1 | 3,690 | 3,610–4,192 | 3.60 ms |
+| 4 | 3,806 | 3,681–4,828 | 3.47 ms |
+| 5 | 3,477 | 3,471–4,731 | 3.32 ms |
+| 6 | 4,455 | 3,648–4,594 | 3.04 ms |
+
+Six threads had a 17% higher median than four in this sample. The overlapping
+ranges and improving later repetitions show substantial run variability; this is
+not evidence of an optimal thread count or linear CPU scaling. The original
+four-thread median of 4,051/s remains historical evidence from the preceding run.
+All profiles remain below the 35,000/s target and below the duration gates.
+
+The runner now honors `CRYSTAL_WORKERS` instead of silently replacing it with
+fixed profiles. A separate invocation with only `CRYSTAL_WORKERS=6` confirmed
+six threads and another 10,000/10,000 completions at 4,478/s (p99 2.62 ms).
+Raw [comparison](evidence/cpu-worker-comparison-2026-10-29.json) and
+[environment-variable check](evidence/cpu-workers-env-2026-10-29.json) preserve
+the individual runs and CPU metadata. See the benchmark README for reproduction.
+
+### Release limits
+
 This is an optimization of the existing schema-1 protocol, not a new data format.
 `Runtime.new(..., optimized_delivery: false)` selects the CAS path for diagnostics;
 atomic and CAS clients can coexist against the same canonical records. Set

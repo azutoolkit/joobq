@@ -76,41 +76,32 @@ module JoobQ
             else
               # Use batch processing for improved performance and minimal connection usage
               available = {JoobQ.config.worker_batch_size - @in_progress.get, 0}.max
-              jobs = available == 0 || @queue.paused? || keys_backoff? || JoobQ.shut_down? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: available)
+              if available == 0 || @queue.paused? || keys_backoff? || JoobQ.shut_down?
+                sleep WORKER_IDLE_DELAY
+                next
+              end
+              jobs = @queue.claim_jobs_batch(@worker_id, batch_size: available)
 
-              if !jobs.empty?
-                # Counted before any fiber exists, so `JoobQ.shutdown` cannot miss a claimed job
-                claims = jobs.zip(InFlight.claimed(@queue.name, jobs))
-                @in_progress.add(claims.size)
-                unspawned = claims.map(&.last)
+              unless jobs.empty?
+                # Register every claim before spawning, including jobs waiting for the next slice.
+                tokens = InFlight.claimed(@queue.name, jobs)
+                @in_progress.add(tokens.size)
+                spawned = 0
                 begin
-                  # Process jobs in smaller concurrent batches to reduce connection pressure
-                  claims.each_slice(WORKER_BATCH_SLICE_SIZE) do |job_batch|
-                    job_batch.each do |(job, token)|
-                      # Spawn with error containment to prevent fiber crashes from affecting worker
-                      unspawned.delete(token)
-                      spawn do
-                        begin
-                          handle_job_async(job, token)
-                        rescue ex : Exception
-                          Log.error &.emit("Unhandled error in job fiber",
-                            queue: @queue.name,
-                            worker_id: @worker_id,
-                            error: ex.message,
-                            error_class: ex.class.name)
-                        ensure
-                          @in_progress.sub(1)
-                        end
-                      end
+                  while spawned < jobs.size
+                    slice_end = {spawned + WORKER_BATCH_SLICE_SIZE, jobs.size}.min
+                    slice_size = slice_end - spawned
+                    while spawned < slice_end
+                      # The spawn macro captures arguments by value; no shared loop cursor in the fiber.
+                      spawn process_claim(jobs[spawned], tokens[spawned])
+                      spawned += 1
                     end
-                    # Small delay between batches to allow connection reuse
-                    sleep WORKER_BATCH_DELAY if job_batch.size > 1
+                    sleep WORKER_BATCH_DELAY if slice_size > 1
                   end
                 rescue ex
-                  # claims that never got a fiber would otherwise count as in flight for ever (the jobs stay in the
-                  # processing list, as after any crash)
-                  unspawned.each { |token| InFlight.finished(token) }
-                  @in_progress.sub(unspawned.size)
+                  # Unspawned claims stay in Redis processing, as after a crash, but cannot hold local drain open.
+                  spawned.upto(tokens.size - 1) { |index| InFlight.finished(tokens[index]) }
+                  @in_progress.sub(tokens.size - spawned)
                   raise ex
                 end
               else
@@ -132,6 +123,18 @@ module JoobQ
             running.set(false)
           end
         end
+      end
+    end
+
+    private def process_claim(job : String, token : Int64) : Nil
+      begin
+        handle_job_async(job, token)
+      rescue ex : Exception
+        Log.error &.emit("Unhandled error in job fiber",
+          queue: @queue.name, worker_id: @worker_id,
+          error: ex.message, error_class: ex.class.name)
+      ensure
+        @in_progress.sub(1)
       end
     end
 

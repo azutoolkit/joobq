@@ -2,7 +2,9 @@ require "../src/joobq"
 
 # Only accepts the isolated harness's TLS fixture. This probe injects CLIENT
 # PAUSE; never point it at an application/shared Redis.
-Fiber::ExecutionContext.default.resize(ENV.fetch("CRYSTAL_WORKERS", "4").to_i)
+{% unless flag?(:preview_mt) && !flag?(:execution_context) %}
+  Fiber::ExecutionContext.default.resize(ENV.fetch("CRYSTAL_WORKERS", "4").to_i)
+{% end %}
 seconds = ENV.fetch("SOAK_SECONDS", "60").to_i
 rate = ENV.fetch("SOAK_RATE", "50").to_i
 limit = ENV.fetch("SOAK_MAX_RECORDS", "100000").to_i

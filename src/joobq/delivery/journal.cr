@@ -14,6 +14,9 @@ module JoobQ::Delivery
 
     QUARANTINE = "if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HSET', KEYS[2], ARGV[1], ARGV[2]) end return 0"
 
+    private WRITE_SCRIPT      = Script.new(CAS)
+    private QUARANTINE_SCRIPT = Script.new(QUARANTINE)
+
     getter key : String
     getter quarantine_key : String
 
@@ -25,6 +28,9 @@ module JoobQ::Delivery
       raise ArgumentError.new("journal limits must be positive") unless @capacity > 0 && @max_bytes > 0
       @key = "joobq:v1:#{namespace}:journal:#{collection}"
       @quarantine_key = "#{@key}:quarantine"
+      @keys = [@key]
+      @quarantine_keys = [@key, @quarantine_key]
+      @capacity_arg = @capacity.to_s
     end
 
     def read(id : String) : {T, String}?
@@ -33,9 +39,10 @@ module JoobQ::Delivery
     end
 
     def write(id : String, document : T, expected : String = "") : Bool
-      raw = document.to_json
+      # Updates usually retain the payload. Capacity is a hint, never a byte limit or a raw-JSON bypass.
+      raw = String.build(expected.empty? ? 256 : expected.bytesize) { |io| document.to_json(io) }
       raise ArgumentError.new("journal document exceeds byte limit") if raw.bytesize > @max_bytes
-      code = @redis.eval(CAS, [key], [identity(id), expected, raw, @capacity.to_s]).as(Int64)
+      code = WRITE_SCRIPT.call(@redis, @keys, [identity(id), expected, raw, @capacity_arg]).as(Int64)
       raise ArgumentError.new("retained journal capacity reached") if code == -1
       code == 1
     end
@@ -48,7 +55,7 @@ module JoobQ::Delivery
         rescue JSON::Error
           # Preserve the authoritative bytes for operator repair while letting
           # other valid intents in this page progress.
-          @redis.eval(QUARANTINE, [key, quarantine_key], [id, raw])
+          QUARANTINE_SCRIPT.call(@redis, @quarantine_keys, [id, raw])
           next
         end
         block.call(document)
@@ -58,7 +65,7 @@ module JoobQ::Delivery
 
     private def identity(id : String) : String
       raise ArgumentError.new("journal identity must be 1..1024 bytes") unless 1 <= id.bytesize <= 1024
-      Digest::SHA256.hexdigest(id)
+      Checksum.hex(id)
     end
   end
 end

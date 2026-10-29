@@ -596,7 +596,30 @@ docker run -p 8080:8080 -e SWAGGER_JSON=/docs/openapi.yaml -v $(pwd)/docs:/docs 
 
 The historical 35,000 jobs/second claim is not a v1 acceptance result. This audit did not reproduce a durable, end-to-end benchmark or the earlier cross-language comparison. Measure successful completions, queue growth, p95/p99 latency and memory with your payloads, Redis persistence and telemetry enabled.
 
-See the [production v1 audit and prioritized roadmap](design/production-v1-audit.md) and [validation evidence](design/validation.md). The enterprise v1 release remains blocked on distributed claim ownership, replay-safe settlement and the other documented gates.
+The opt-in leased runtime now supports bounded delivery batches. On the current
+test host, three independent Redis primaries with verified TLS and AOF `always`
+completed one million 1 KiB no-op jobs in 50.91 and 52.25 seconds, including
+fixture startup/cleanup and per-job receipt verification. See the
+[reproduction commands, raw evidence and limits](design/million-per-minute.md).
+These finite no-op runs do not establish sustained application throughput.
+
+Further [delivery allocation optimizations](design/delivery-allocation-optimization.md)
+reduced measured GC allocations by 26.7% for single jobs and 32.4% for batches.
+The optimized three-partition, 1 KiB run confirmed one million completions in
+43.98 seconds on the same host, with TLS and AOF `always` retained.
+
+The [Queue, Worker and Scheduler allocation pass](design/legacy-hotpath-optimization.md)
+reduced managed allocations by 32.6%, 32.9% and 35.4%, respectively, in separate
+1 KiB admission, execution/settlement and delayed-promotion benchmarks.
+These optimize the existing list-based API; they do not enable Delivery leases.
+
+The subsequent [core/Pro performance review](design/performance-review.md) adds
+journal allocation improvements and fixes failed Redis transaction connection
+reuse, with Pro reconciliation and metrics optimizations in the paired branch.
+
+See the [production v1 audit and prioritized roadmap](design/production-v1-audit.md)
+and [current implementation status](design/implementation-status.md). Safe receipt
+retention, sustained soak and operational acceptance remain release gates.
 
 ### Runtime limits and structured logs
 

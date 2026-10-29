@@ -1,3 +1,5 @@
+require "digest/sha1"
+
 module JoobQ
   class RedisStore < Store
     DELAYED_SET      = "joobq:delayed_jobs"
@@ -158,9 +160,13 @@ module JoobQ
       job.jid.to_s
     end
 
-    def enqueue_batch(jobs : Array(Job), batch_size : Int32 = 1000) : Nil
+    def enqueue_batch(jobs : Array(Job), batch_size : Int32 = 1000, *, json_sizes : Array(Int32)? = nil) : Nil
       raise "Batch size must be greater than 0" if batch_size <= 0
       raise "Batch size must be less than or equal to 1000" if batch_size > 1000
+
+      if sizes = json_sizes
+        raise ArgumentError.new("json_sizes must contain one nonnegative capacity per job") unless sizes.size == jobs.size && sizes.all? { |size| size >= 0 }
+      end
 
       return if jobs.empty?
 
@@ -170,8 +176,13 @@ module JoobQ
       begin
         jobs.each_slice(batch_size) do |batch_jobs|
           redis.pipelined do |pipe|
-            batch_jobs.each do |job|
-              pipe.rpush job.queue, job.to_json
+            batch_jobs.each_with_index do |job, index|
+              payload = if sizes = json_sizes
+                          String.build(sizes[total_enqueued + index]) { |io| job.to_json(io) }
+                        else
+                          job.to_json
+                        end
+              pipe.rpush job.queue, payload
             end
           end
           total_enqueued += batch_jobs.size
@@ -353,15 +364,6 @@ module JoobQ
     def cleanup_job(job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
 
-      # Extract job ID for logging
-      job_id = nil
-      begin
-        parsed = JSON.parse(job_json)
-        job_id = parsed["jid"]?.try(&.as_s)
-      rescue
-        # Continue without job_id if parsing fails
-      end
-
       redis.pipelined do |pipe|
         # Remove job from processing queue (all occurrences)
         pipe.lrem(processing_key, 0, job_json)
@@ -373,7 +375,7 @@ module JoobQ
 
       Log.debug &.emit("Job cleanup successful",
         queue: queue_name,
-        job_id: job_id || "unknown"
+        job_id: logging_job_id(job_json)
       )
     rescue ex
       Log.error &.emit("Error cleaning up job",
@@ -391,15 +393,6 @@ module JoobQ
     def mark_job_completed(job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
 
-      # Extract job ID for logging
-      job_id = nil
-      begin
-        parsed = JSON.parse(job_json)
-        job_id = parsed["jid"]?.try(&.as_s)
-      rescue
-        # Continue without job_id if parsing fails
-      end
-
       redis.pipelined do |pipe|
         # Remove job from processing queue
         pipe.lrem(processing_key, 0, job_json)
@@ -413,13 +406,20 @@ module JoobQ
 
       Log.debug &.emit("Job marked as completed",
         queue: queue_name,
-        job_id: job_id || "unknown"
+        job_id: logging_job_id(job_json)
       )
     rescue ex
       Log.error &.emit("Error marking job as completed",
         queue: queue_name,
         error: ex.message
       )
+    end
+
+    # Called only inside lazy debug log blocks; normal completion never parses a second JSON tree.
+    private def logging_job_id(job_json : String) : String
+      JSON.parse(job_json)["jid"]?.try(&.as_s) || "unknown"
+    rescue
+      "unknown"
     end
 
     def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
@@ -767,16 +767,14 @@ module JoobQ
 
     def promote_due_jobs(current_time : Time = Time.utc, delay_set : String = DELAYED_SET,
                          queue_name : String? = nil, limit : Int32 = 50, *, report_scanned : Bool = false) : Array(String)
-      moved = [] of String
       scanned = fetch_due_jobs(current_time, delay_set, limit, remove: false)
+      moved = Array(String).new(scanned.size)
+      now = current_time.to_unix_ms.to_s
       scanned.each do |raw|
         begin
-          job = JSON.parse(raw).as_h
-          destination = job["queue"].as_s
-          next if queue_name && destination != queue_name
-          job["status"] = JSON::Any.new("Enqueued")
-          payload = job.to_json
-          if redis.eval(PROMOTE_DUE, [delay_set, destination], [raw, payload, current_time.to_unix_ms.to_s]) == 1
+          next if queue_name && SerializedJob.queue_name(raw) != queue_name
+          destination, payload = SerializedJob.for_enqueue(raw)
+          if promote_due([delay_set, destination], [raw, payload, now]) == 1
             moved << raw
           end
         rescue ex
@@ -785,6 +783,16 @@ module JoobQ
         end
       end
       report_scanned ? scanned : moved
+    end
+
+    private PROMOTE_DUE_SHA = Digest::SHA1.hexdigest(PROMOTE_DUE)
+
+    private def promote_due(keys : Array(String), args : Array(String))
+      redis.evalsha(PROMOTE_DUE_SHA, keys, args)
+    rescue ex : Redis::Error
+      # A definite cache miss is safe to retry. Timeouts/ambiguous writes are not.
+      raise ex unless ex.message.try(&.starts_with?("NOSCRIPT"))
+      redis.eval(PROMOTE_DUE, keys, args)
     end
 
     # Preserve the legacy return contract: all scanned due jobs, including other queues.

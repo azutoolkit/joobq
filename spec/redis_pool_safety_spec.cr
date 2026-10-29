@@ -11,12 +11,14 @@ private class PoolSpecConn
 end
 
 private def hammer(pool : Pool(PoolSpecConn), fibers : Int32, iterations : Int32) : {Int32, Int32}
-  context = Fiber::ExecutionContext::Parallel.new("pool-spec", 8)
+  {% unless flag?(:preview_mt) && !flag?(:execution_context) %}
+    context = Fiber::ExecutionContext::Parallel.new("pool-spec", 8)
+  {% end %}
   overlaps = Atomic(Int32).new(0)
   timeouts = Atomic(Int32).new(0)
   done = Channel(Nil).new
   fibers.times do
-    context.spawn do
+    work = -> do
       iterations.times do
         conn = begin
           pool.checkout
@@ -30,9 +32,14 @@ private def hammer(pool : Pool(PoolSpecConn), fibers : Int32, iterations : Int32
         conn.busy.sub(1)
         pool.checkin(conn)
       end
-    ensure
-      done.send(nil)
+  ensure
+    done.send(nil)
     end
+    {% if flag?(:preview_mt) && !flag?(:execution_context) %}
+      spawn &work
+    {% else %}
+      context.spawn &work
+    {% end %}
   end
   fibers.times do
     select

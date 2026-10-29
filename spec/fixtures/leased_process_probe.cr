@@ -1,12 +1,15 @@
 require "../../src/joobq"
 
-Fiber::ExecutionContext.default.resize(ENV.fetch("CRYSTAL_WORKERS", "4").to_i)
+{% unless flag?(:preview_mt) && !flag?(:execution_context) %}
+  Fiber::ExecutionContext.default.resize(ENV.fetch("CRYSTAL_WORKERS", "4").to_i)
+{% end %}
 store = JoobQ::RedisStore.new(url: ENV.fetch("JOOBQ_SPEC_TLS_REDIS_URL"), ca_file: ENV.fetch("JOOBQ_SPEC_TLS_CA_FILE"),
   pool_size: 8, operation_timeout: 1.second)
 namespace = ENV.fetch("PROBE_NAMESPACE")
 count = ENV.fetch("PROBE_COUNT", "20").to_i
 runtime = JoobQ::Delivery::Runtime.new(store, namespace, capacity: ENV.fetch("PROBE_CAPACITY", "4").to_i,
-  lease: 600.milliseconds, poll: 5.milliseconds, repair_every: 20.milliseconds)
+  lease: 600.milliseconds, poll: 5.milliseconds, repair_every: 20.milliseconds,
+  batch_size: ENV.fetch("PROBE_BATCH_SIZE", "1").to_i)
 ledger = runtime.register("work") do |payload, context|
   begin
     # An example external-effect receipt: replay is allowed, duplicate effects

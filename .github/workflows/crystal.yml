@@ -53,3 +53,9 @@ jobs:
           CRYSTAL_WORKERS: 4
           SOAK_SECONDS: 60
           SOAK_RATE: 50
+      - name: Batched leased worker SIGKILL and bounded signal drain
+        if: matrix.workers == 4 && matrix.connection == 'url'
+        run: python3 scripts/run_integration.py --probe python3 scripts/leased_process_probe.py
+        env:
+          CRYSTAL_WORKERS: 4
+          PROBE_BATCH_SIZE: 8

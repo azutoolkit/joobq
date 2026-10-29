@@ -129,6 +129,9 @@ module JoobQ
         socket = DeadlineTCPSocket.new(address.family)
         begin
           socket.connect(address, timeout: RedisBudget.remaining(connect_timeout))
+          # RESP requests may span multiple TLS records. Do not let Nagle hold
+          # the final record while Redis waits for the rest of the command.
+          socket.tcp_nodelay = true
           return socket
         rescue ex
           socket.close

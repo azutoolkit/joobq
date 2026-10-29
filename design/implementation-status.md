@@ -8,6 +8,8 @@ pre-v1. Implementation and bounded test evidence do not certify the complete
 
 - Atomic Redis hot paths with cached scripts, exact-integer fallback and lazy
   renewal scheduling; [repeated concurrency results](hotpath-optimization.md).
+- Opt-in bounded delivery batches and TCP_NODELAY; same-host no-op throughput
+  validation against the requested [one million/minute target](million-per-minute.md).
 - Runtime-scoped queue registry, fixed execution capacity, renewable fenced
   leases, cooperative execution deadline, supervised worker/repair loops, local
   circuit breaker and bounded signal drain. Typed jobs and explicit raw handlers.
@@ -32,9 +34,10 @@ are still available and do not silently acquire the new delivery guarantees.
 
 ## Release blockers still open
 
-- Measured completion throughput is far below 35k/s; 30-minute reference workload
-  and four-hour fault soak have not passed. The optimized path improves the equal-concurrency median from 1,298 to 4,051/s
-  but does not meet the required rate/duration.
+- The latest requested one-million/minute no-op burst target is achieved with
+  64-byte payloads/two partitions and 1 KiB payloads/three partitions on this host. The
+  30-minute reference workload and four-hour fault soak have not passed; the
+  original plan's 35k/s, 1 KiB reference workload remains unproven.
 - Retained terminal receipts and journals have finite admission budgets but no
   safe archival/compaction policy. Size, retention horizon and sustained workload
   admission must be solved together before long-running production certification.

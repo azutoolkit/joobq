@@ -44,6 +44,19 @@ module JoobQ
       raise ex
     end
 
+    # A block can abort with MULTI still buffered, and an EXEC element error can
+    # interrupt reply draining after other mutations committed. Never flush or
+    # reuse that connection, and never replay a transaction with an unknown outcome.
+    def multi(&)
+      super { |transaction| yield transaction }
+    rescue ex : Redis::ConnectionError | Redis::CommandTimeoutError
+      close
+      raise RedisOutcomeUnknown.new("Redis transaction reply unavailable; outcome is unknown (#{ex.class})")
+    rescue ex
+      close
+      raise ex
+    end
+
     private def connect
       @connection = DeadlineConnection.new(@host, @port, @unixsocket, @ssl_context,
         @dns_timeout, @connect_timeout, @command_timeout)

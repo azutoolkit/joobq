@@ -1,5 +1,10 @@
 # Delivery validation workloads
 
+Allocation measurements and reproduction instructions are in the
+[delivery allocation report](../design/delivery-allocation-optimization.md).
+`crystal run benchmarks/allocations.cr --release` isolates JSON encoding and
+checksum-validation allocations; it does not run a Redis workload.
+
 Run only through `scripts/run_integration.py --probe`: it creates and cleans up
 its own plain/second/TLS Redis processes with AOF `always`. Probes require the
 fixture-specific TLS URL/CA and do not use the operator's Redis address.
@@ -56,3 +61,70 @@ remain the same. The report includes median rates, admission p99 and allocated
 bytes per job, plus every raw run. Both strategies use the current renewal
 scanner, so this comparison isolates the ledger optimization. Earlier evidence
 retains the pre-optimization runtime measurements.
+
+To size execution threads to the machine's visible CPUs on Linux:
+
+```sh
+CRYSTAL_WORKERS=$(nproc) python3 scripts/benchmark_delivery.py \
+  --binary /tmp/joobq-leased --jobs 10000 --repeats 3 \
+  --output /tmp/delivery-cpu-sized.json
+```
+
+The runner honors `CRYSTAL_WORKERS` and uses atomic delivery with 16 producers
+and 16 job slots. Explicit `--workers 1 4 5 6` overrides the environment variable
+and compares those thread counts at identical concurrency. Without either setting,
+the original five-profile CAS/atomic comparison runs. Execution threads and job
+slots are separate: asynchronous I/O permits more active jobs than CPU threads.
+The benchmark explicitly resizes Crystal's default execution context to the
+requested thread count. Each run gets an isolated Redis fixture; runs are sequential
+to avoid competing benchmarks.
+
+Check the container CPU quota as well as `nproc`: visible CPUs may exceed its
+allowed CPU time. The JSON report records CPU visibility, affinity, and Linux
+cgroup v2 `cpu.max` when available. Redis shares this host's CPU budget, so compare
+measured rates before choosing a production worker count.
+
+## One million no-op jobs
+
+`leased.cr` also supports `BENCH_BATCH_SIZE=1..128` (default 1) and
+`BENCH_PAYLOAD_BYTES=1..16384` (default 1024). Batched latency is the time to
+confirm the entire admission batch, assigned to every member; it is not divided
+by batch size. The no-op handler counts actual executions, and every final
+receipt must have attempt 1. Batch size must not exceed `BENCH_CAPACITY`.
+
+For the same-host, two-partition, one-million-job acceptance run:
+
+```sh
+crystal build benchmarks/leased.cr --release -o /tmp/joobq-leased
+CRYSTAL_WORKERS=2 python3 scripts/benchmark_million.py \
+  --binary /tmp/joobq-leased --partitions 2 --payload-bytes 64 \
+  --output /tmp/million.json --require-target
+```
+
+This uses two independent Redis primaries and runtime processes on the current
+host. Both retain verified TLS, AOF `always`, and all completion receipts.
+Aggregate elapsed time includes fixture startup/cleanup. See the
+[implementation, topology and limits](../design/million-per-minute.md).
+The 1 KiB configuration uses `--partitions 3 --payload-bytes 1024`;
+two partitions narrowly missed the strict 60-second gate at that payload size.
+
+## Existing Queue, Worker and Scheduler
+
+`legacy.cr` measures three separate operations through the list-based API:
+`BENCH_MODE=queue` admits typed JSON batches, `worker` executes and settles jobs,
+and `scheduler` promotes due jobs. `BENCH_JOBS` defaults to 10,000 (maximum 100,000).
+The 1 KiB payload is fixed; worker and admission batch sizes are 128 and 100.
+Each run verifies all job indexes and payloads; worker mode counts actual handler
+executions and waits for processing/tracking to drain.
+
+```sh
+crystal build benchmarks/legacy.cr --release -o /tmp/joobq-legacy
+CRYSTAL_WORKERS=4 BENCH_JOBS=30000 BENCH_MODE=worker \
+  python3 scripts/run_integration.py --probe /tmp/joobq-legacy
+```
+
+Use an owned fixture for every run. Compare the same mode, logging settings and
+thread count across builds, with no competing tests or compilers. Reported bytes
+are cumulative GC allocations per operation, not peak RSS. Admission/promotion
+rates must not be presented as completed-job rates. See the
+[comparison, validation and limits](../design/legacy-hotpath-optimization.md).

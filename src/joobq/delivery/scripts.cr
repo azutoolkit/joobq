@@ -60,15 +60,21 @@ module JoobQ::Delivery
         local raw = cjson.encode(e)
         -- Canonical intent MUST precede derived indexes; Lua errors do not roll back.
         redis.call('HSET', KEYS[1], e.id, raw)
-        redis.call('ZREM', KEYS[2], e.id)
-        redis.call('ZREM', KEYS[3], e.id)
-        if e.state == 'ready' or e.state == 'scheduled' then redis.call('ZADD', KEYS[2], e.due_at, e.id) end
-        if e.state == 'leased' then redis.call('ZADD', KEYS[3], e.lease_until, e.id) end
+        if e.state == 'ready' or e.state == 'scheduled' then
+          redis.call('ZADD', KEYS[2], e.due_at, e.id)
+        else
+          redis.call('ZREM', KEYS[2], e.id)
+        end
+        if e.state == 'leased' then
+          redis.call('ZADD', KEYS[3], e.lease_until, e.id)
+        else
+          redis.call('ZREM', KEYS[3], e.id)
+        end
         return raw
       end
     LUA
 
-    ADMIT = Script.new(COMMON + <<-LUA)
+    ADMIT_BODY = <<-LUA
       local old = redis.call('HGET', KEYS[1], ARGV[1])
       if old then return {1, old} end
       if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[4]) then return {-1} end
@@ -76,7 +82,50 @@ module JoobQ::Delivery
       if not e then return {-2} end
       e.due_at = clock() + tonumber(ARGV[3])
       if not integer(e.due_at) then return {-2} end
-      return {1, write(e)}
+      write(e)
+      return {3, e.due_at}
+    LUA
+
+    ADMIT = Script.new(COMMON + ADMIT_BODY)
+
+    ADMIT_MANY = Script.new(COMMON + "\nlocal function one(ARGV)\n" + ADMIT_BODY + "\nend\n" + <<-LUA)
+      local results = {}
+      for i = 3, #ARGV, 2 do
+        results[#results + 1] = one({ARGV[i], ARGV[i+1], ARGV[1], ARGV[2]})
+      end
+      return results
+    LUA
+
+    CLAIM_MANY = Script.new(COMMON + <<-LUA)
+      if redis.call('EXISTS', KEYS[4]) == 1 then return {} end
+      local now = clock()
+      local results = {}
+      local bytes = 0
+      local ids = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now, 'LIMIT', 0, tonumber(ARGV[4]))
+      for _, id in ipairs(ids) do
+        local raw = redis.call('HGET', KEYS[1], id)
+        if raw then
+          local e = envelope(raw, id)
+          if not e or not integer(e.attempt + 1) or not integer(now + tonumber(ARGV[3])) then
+            results[#results + 1] = {-2}
+          elseif (e.state == 'ready' or e.state == 'scheduled') and e.due_at <= now then
+            if bytes + #e.payload > tonumber(ARGV[5]) then break end
+            bytes = bytes + #e.payload
+            e.state = 'leased'
+            e.attempt = e.attempt + 1
+            e.owner = ARGV[1]
+            e.token = ARGV[2] .. ':' .. tostring(#results + 1)
+            e.lease_until = now + tonumber(ARGV[3])
+            write(e)
+            results[#results + 1] = {1, id, raw, e.attempt, e.token}
+          else
+            redis.call('ZREM', KEYS[2], id)
+          end
+        else
+          redis.call('ZREM', KEYS[2], id)
+        end
+      end
+      return results
     LUA
 
     CLAIM = Script.new(COMMON + <<-LUA)
@@ -122,7 +171,7 @@ module JoobQ::Delivery
       return 1
     LUA
 
-    TRANSITION = Script.new(COMMON + <<-LUA)
+    TRANSITION_BODY = <<-LUA
       local raw = redis.call('HGET', KEYS[1], ARGV[1])
       if not raw then return {0} end
       local e = envelope(raw, ARGV[1])
@@ -145,6 +194,16 @@ module JoobQ::Delivery
       if not integer(e.lease_until) or not integer(e.due_at) then return {-2} end
       write(e)
       return {1}
+    LUA
+    TRANSITION = Script.new(COMMON + TRANSITION_BODY)
+
+    SETTLE_MANY = Script.new(COMMON + "\nlocal function one(ARGV)\n" + TRANSITION_BODY + "\nend\n" + <<-LUA)
+      local results = {}
+      for i = 1, #ARGV, 8 do
+        results[#results + 1] = one({ARGV[i], ARGV[i+1], ARGV[i+2], ARGV[i+3],
+          ARGV[i+4], ARGV[i+5], ARGV[i+6], ARGV[i+7]})[1]
+      end
+      return results
     LUA
   end
 end

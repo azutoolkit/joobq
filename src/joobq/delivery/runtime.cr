@@ -62,6 +62,7 @@ module JoobQ::Delivery
     getter namespace : String
     getter capacity : Int32
     getter lease : Time::Span
+    getter batch_size : Int32
     getter metrics = Metrics.new
     @registrations = {} of String => Registration
     @maintenance = [] of Proc(Nil)
@@ -101,8 +102,9 @@ module JoobQ::Delivery
     def initialize(@store : RedisStore, @namespace : String, @capacity : Int32 = 8,
                    @lease : Time::Span = 30.seconds, @poll : Time::Span = 20.milliseconds,
                    @repair_every : Time::Span = 1.second, @max_records : Int32 = 100_000,
-                   @optimized_delivery : Bool = true, @telemetry : Telemetry? = nil, @execution_timeout : Time::Span = 5.minutes, production : Bool = true)
+                   @optimized_delivery : Bool = true, @telemetry : Telemetry? = nil, @execution_timeout : Time::Span = 5.minutes, production : Bool = true, @batch_size : Int32 = 1)
       raise ArgumentError.new("capacity must be 1..1024") unless 1 <= capacity <= 1024
+      raise ArgumentError.new("batch size must be 1..128 and at most capacity") unless 1 <= batch_size <= Math.min(capacity, Ledger::MAX_BATCH)
       raise ArgumentError.new("lease must be 100ms..24h") unless 100.milliseconds <= lease <= 24.hours
       raise ArgumentError.new("poll and repair intervals must be positive") unless @poll > Time::Span.zero && @repair_every > Time::Span.zero
       raise ArgumentError.new("execution timeout must be positive") unless @execution_timeout > Time::Span.zero
@@ -167,7 +169,7 @@ module JoobQ::Delivery
       span = Span.new(traceparent, queue, "publish", request_id) if @telemetry
       result = ledger(queue).admit(request_id, payload, delay: delay, traceparent: span.try(&.traceparent) || traceparent)
       @telemetry.try { |sink| sink.publish(span.not_nil!.finish(!result.code.accepted?)) }
-      metrics.increment("admission_#{result.code.to_s.downcase}")
+      metrics.admission(result.code)
       result
     end
 
@@ -191,9 +193,12 @@ module JoobQ::Delivery
         raise ArgumentError.new("a stopped runtime cannot restart; drain its active work before replacement") if @closed.get
         raise ArgumentError.new("register at least one queue") if @registrations.empty?
         return self if @running.swap(true)
-        capacity.times do
+        remaining = capacity
+        while remaining > 0
+          slots = Math.min(batch_size, remaining)
           @fibers.add(1)
-          spawn(name: "delivery-worker") { worker_loop }
+          spawn worker_loop(slots), name: "delivery-worker"
+          remaining -= slots
         end
         @fibers.add(1)
         spawn(name: "delivery-repair") { repair_loop }
@@ -264,7 +269,7 @@ module JoobQ::Delivery
       Signal::TERM.reset
     end
 
-    private def worker_loop : Nil
+    private def worker_loop(slots : Int32 = 1) : Nil
       registrations = @lock.synchronize { @registrations.values }
       while @running.get
         unless @breaker.allow?
@@ -275,7 +280,15 @@ module JoobQ::Delivery
           index = (@next_queue.add(1_u64) % registrations.size.to_u64).to_i
           registration = registrations[index]
           acquired = Time.instant
-          if claim = registration.ledger.claim(@owner, lease)
+          if slots > 1
+            claims = registration.ledger.claim_many(@owner, slots, lease)
+            @breaker.success
+            if claims.empty?
+              sleep @poll
+            else
+              execute_many(registration, claims, acquired)
+            end
+          elsif claim = registration.ledger.claim(@owner, lease)
             @breaker.success
             execute(registration, claim, acquired)
           else
@@ -293,6 +306,17 @@ module JoobQ::Delivery
       @fibers.sub(1)
     end
 
+    private def perform(registration : Registration, context : Context) : Outcome
+      context.cancel unless @running.get
+      context.check!
+      registration.handler.call(context.claim.payload, context)
+    rescue ex : LeaseLost
+      raise ex
+    rescue ex
+      metrics.increment("handler_errors")
+      Outcome.new(State::Dead)
+    end
+
     private def execute(registration : Registration, claim : Claim, acquired : Time::Instant) : Nil
       context = Context.new(claim, acquired, lease, @execution_timeout)
       active = ActiveLease.new(context, registration.ledger, acquired + lease / 3)
@@ -303,23 +327,14 @@ module JoobQ::Delivery
       Fiber.current.joobq_traceparent = span.try(&.traceparent) || claim.traceparent
       failed = true
       begin
-        context.cancel unless @running.get
-        context.check!
-        outcome = begin
-          registration.handler.call(claim.payload, context)
-        rescue ex : LeaseLost
-          raise ex
-        rescue ex
-          metrics.increment("handler_errors")
-          Outcome.new(State::Dead)
-        end
+        outcome = perform(registration, context)
         # Serialize renewal/settlement for this lease only. Never hold the
         # registry mutex over Redis I/O, nor release a slot while renewal uses it.
         active.lock.synchronize do
           active.finished.set(true)
           context.check!
           result = registration.ledger.settle(claim, outcome.state, outcome.delay)
-          metrics.increment("settlement_#{result.to_s.downcase}")
+          metrics.settlement(result)
           failed = !(result.applied? || result.already_applied?) || outcome.state.dead?
         end
       rescue ex : LeaseLost
@@ -336,8 +351,12 @@ module JoobQ::Delivery
     end
 
     private def renewal_loop : Nil
+      # Owned only by this scanner; entries themselves retain independent lease
+      # lifetimes when a renewal fiber captures one. Never recycle a Context.
+      entries = Array(ActiveLease).new(capacity)
       loop do
-        entries = @lock.synchronize { @active.values }
+        entries.clear
+        @lock.synchronize { @active.each_value { |entry| entries << entry } }
         break unless @running.get || entries.any? { |entry| !entry.context.cancelled? }
         now = Time.instant
         entries.each do |entry|
@@ -442,6 +461,23 @@ module JoobQ::Delivery
 
     def increment(name : String) : Nil
       @lock.synchronize { @counters[name] = @counters.fetch(name, 0_i64) + 1 }
+    end
+
+    def admission(code : AdmissionCode) : Nil
+      case code
+      in AdmissionCode::Accepted then increment("admission_accepted")
+      in AdmissionCode::Rejected then increment("admission_rejected")
+      in AdmissionCode::Unknown  then increment("admission_unknown")
+      end
+    end
+
+    def settlement(result : Settlement) : Nil
+      case result
+      in Settlement::Applied        then increment("settlement_applied")
+      in Settlement::AlreadyApplied then increment("settlement_alreadyapplied")
+      in Settlement::Stale          then increment("settlement_stale")
+      in Settlement::Unknown        then increment("settlement_unknown")
+      end
     end
 
     def observe(elapsed : Time::Span) : Nil

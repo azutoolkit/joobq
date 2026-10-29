@@ -130,7 +130,7 @@ module JoobQ
 
     # Batch add jobs with pipelining for improved performance
     def add_batch(jobs : Array(T))
-      add_batch_pipelined(jobs)
+      store.enqueue_batch(jobs, JoobQ.config.pipeline_batch_size)
     rescue ex : Encryption::Error
       raise ex
     rescue ex
@@ -146,27 +146,30 @@ module JoobQ
       Log.error &.emit("Error adding job batch strings", queue: name, job_count: jobs.size, error: ex.message)
     end
 
-    private def add_batch_pipelined(jobs : Array(T))
-      store.enqueue_batch(jobs, JoobQ.config.pipeline_batch_size)
-    end
-
     private def add_batch_strings_pipelined(jobs : Array(String))
       # Convert strings to Job objects for batch enqueuing
       # A string that cannot be loaded here (a sealed value this process cannot open, say) is not dropped, and does not
       # take the rest of the batch with it: it goes onto the queue as it is, for a worker to deal with.
-      job_objects = [] of T
-      unreadable = [] of String
+      job_objects = Array(T).new(jobs.size)
+      json_sizes = Array(Int32).new(jobs.size)
+      unreadable = nil
       jobs.each do |job_str|
         job_objects << T.from_json(job_str)
+        json_sizes << job_str.bytesize
       rescue ex : JSON::Error
         Log.warn &.emit("Job kept as stored; it could not be loaded here", queue: name, error: ex.message)
-        unreadable << job_str
+        (unreadable ||= [] of String) << job_str
       end
       # After the rest is stored, and in one transaction: if enqueue_batch raises, nothing was written for the
       # unreadable ones, so a caller that retries the whole batch cannot duplicate them.
-      store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
-      if !unreadable.empty? && (redis_store = store).is_a?(RedisStore)
-        redis_store.redis.multi { |multi| unreadable.each { |job_str| multi.rpush(name, job_str) } }
+      if redis_store = store.as?(RedisStore)
+        # Still serialize typed jobs (including encryption converters); size is only a buffer capacity hint.
+        redis_store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size, json_sizes: json_sizes)
+        if raw_jobs = unreadable
+          redis_store.redis.multi { |multi| raw_jobs.each { |job_str| multi.rpush(name, job_str) } }
+        end
+      else
+        store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
       end
     end
 
@@ -234,7 +237,7 @@ module JoobQ
     end
 
     def jobs(page_number : Int32 = 1, page_size : Int32 = 200)
-      store.list_jobs(name)
+      store.list_jobs(name, page_number, page_size)
     end
 
     def stop!

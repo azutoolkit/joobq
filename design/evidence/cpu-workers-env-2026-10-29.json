@@ -1,0 +1,46 @@
+{
+  "jobs_per_run": 10000,
+  "repeats": 1,
+  "host": {
+    "logical_cpus": 5,
+    "affinity_cpus": 5,
+    "cgroup_cpu_max": "400000 100000"
+  },
+  "summaries": [
+    {
+      "protocol": "atomic",
+      "workers": 6,
+      "producers": 16,
+      "capacity": 16,
+      "median_settled_per_second": 4478.183238175455,
+      "median_admission_p99_ms": 2.624466,
+      "median_allocated_bytes_per_job": 24675.1299
+    }
+  ],
+  "runs": [
+    {
+      "protocol": "atomic",
+      "compiler": "1.22.1",
+      "redis": "8.0.2",
+      "workers": "6",
+      "capacity": 16,
+      "producers": 16,
+      "tls": true,
+      "appendfsync": "always",
+      "payload_bytes": 1024,
+      "accepted": 10000,
+      "confirmed_completed": 10000,
+      "elapsed_seconds": 2.233048419,
+      "settled_per_second": 4478.183238175455,
+      "admission_p50_ms": 1.476772,
+      "admission_p99_ms": 2.624466,
+      "gc_heap_bytes": 5324800,
+      "gc_total_bytes": 247454355,
+      "allocated_bytes_per_job": 24675.1299,
+      "meets_35000_settled_per_second": false,
+      "duration_gate_met": false,
+      "metrics": "joobq_delivery_admission_accepted_total 10000\njoobq_delivery_settlement_applied_total 10000\njoobq_delivery_execution_seconds_sum 12.309900984000004\njoobq_delivery_execution_seconds_count 10000\n",
+      "repeat": 1
+    }
+  ]
+}

@@ -15,13 +15,29 @@ parser.add_argument('--binary', type=Path, required=True)
 parser.add_argument('--jobs', type=int, default=10000)
 parser.add_argument('--repeats', type=int, default=3)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--workers', type=int, nargs='+',
+                    help='compare atomic delivery at these thread counts (defaults to CRYSTAL_WORKERS when set)')
 args = parser.parse_args()
 if args.repeats < 1 or args.jobs < 1:
     parser.error('positive repeats/jobs required')
+workers = args.workers
+if workers is None and 'CRYSTAL_WORKERS' in os.environ:
+    try:
+        workers = [int(os.environ['CRYSTAL_WORKERS'])]
+    except ValueError:
+        parser.error('CRYSTAL_WORKERS must be a positive integer')
+if workers is not None and any(w < 1 for w in workers):
+    parser.error('worker counts must be positive')
 root = Path(__file__).resolve().parent.parent
 binary = args.binary.resolve(strict=True)
 profiles = [('cas', 4, 16, 16), ('atomic', 4, 16, 16),
             ('atomic', 1, 16, 16), ('atomic', 4, 32, 32), ('atomic', 8, 32, 32)]
+if workers is not None:
+    profiles = [('atomic', w, 16, 16) for w in dict.fromkeys(workers)]
+cpu_quota = Path('/sys/fs/cgroup/cpu.max')
+host = dict(logical_cpus=os.cpu_count(),
+            affinity_cpus=len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
+            cgroup_cpu_max=cpu_quota.read_text().strip() if cpu_quota.exists() else None)
 runs = []
 for repeat in range(args.repeats):
     for protocol, workers, producers, capacity in profiles:
@@ -51,5 +67,5 @@ for protocol, workers, producers, capacity in profiles:
                           median_allocated_bytes_per_job=statistics.median(r['allocated_bytes_per_job'] for r in group)))
 args.output.parent.mkdir(parents=True, exist_ok=True)
 args.output.write_text(json.dumps(dict(jobs_per_run=args.jobs, repeats=args.repeats,
-                                      summaries=summaries, runs=runs), indent=2) + '\n')
+                                      host=host, summaries=summaries, runs=runs), indent=2) + '\n')
 print(json.dumps(summaries, indent=2))

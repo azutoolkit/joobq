@@ -42,8 +42,9 @@ intervals until `max_retries` is exhausted. Custom handlers return
 `Outcome.retry(5.seconds)` for a deferred attempt or `Outcome.new(State::Dead)`
 for a permanent failure. Legacy retry/rate/uniqueness middleware is not invoked.
 
-Capacity is the number of actual execution fibers shared by the queues in one
-runtime. Each runtime has its own budget; aggregate process and deployment
+Capacity bounds leased job slots shared by the queues in one runtime. With the
+default `batch_size: 1`, each slot has its own execution fiber. Each runtime has
+its own budget; aggregate process and deployment
 budgets are the operator's responsibility. A timed-out handler retains its slot
 until its real fiber exits. The default five-minute execution deadline and lease
 loss cancel its context and stop renewal; they do not kill Crystal fibers or
@@ -52,6 +53,36 @@ side effects require stable idempotency keys or transactional application logic.
 An already in-flight settlement at shutdown can finish if its token still owns
 the lease; it cannot settle a successor's claim. An incomplete `Drain` must be
 reported as an unclean shutdown. Construct a new runtime after stopping one.
+
+## Batching short jobs
+
+Use `Runtime.new(store, "short-jobs", capacity: 512, batch_size: 128)` for bounded
+groups of short handlers. Each of four execution fibers reserves up to 128
+leased slots and executes its group sequentially before batch acknowledgment.
+The runtime renews all waiting and running claims. A slow handler delays the
+group; keep the default batch size for heterogeneous/I/O-heavy jobs.
+
+```crystal
+runtime = JoobQ::Delivery::Runtime.new(store, "short-jobs", capacity: 512, batch_size: 128)
+runtime.register("work") { |payload, context| JoobQ::Delivery::Outcome.new }
+results = runtime.admit_many("work", [{"request-1", "payload"}, {"request-2", "payload"}])
+# Inspect each admission code; resolve Unknown outcomes using the same IDs.
+records = runtime.ledger("work").resolve_many(["request-1", "request-2"])
+runtime.serve(15.seconds)
+```
+
+Each batch is limited to 128 items and admission/settlement to 2 MiB of payload.
+Batch claiming also limits aggregate payload to 2 MiB. These are independent
+per-job operations grouped for transport, not all-or-nothing transactions.
+Partial failures preserve canonical intent and require per-ID reconciliation.
+The lower-level ledger exposes `claim_many(owner, limit, lease)` and
+`settle_many([{claim, state, delay}, ...])`; custom consumers remain responsible
+for renewal and ownership. Per-job telemetry is preserved; enabling publish
+telemetry uses individual admission calls.
+
+The [million-per-minute benchmark](million-per-minute.md) documents the measured
+same-host partition topology, configuration and limits. Independent Redis stores
+do not supply cross-partition atomic operations or automatic request routing.
 
 ## Redis, capacity and secrets
 

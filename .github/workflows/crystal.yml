@@ -15,7 +15,7 @@ jobs:
 
     services:
       redis:
-        image: redis
+        image: redis:7.4
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: shards install
+        run: shards install --frozen
 
       - name: Format
         run: crystal tool format --check src spec
@@ -45,5 +45,15 @@ jobs:
 
       - name: Run tests (4 workers)
         run: crystal spec
+        env:
+          CRYSTAL_WORKERS: 4
+
+      - name: Install isolated Redis crash-test tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends redis-server redis-tools python3
+
+      - name: Verify acknowledged jobs survive Redis SIGKILL and AOF restart
+        run: python3 scripts/redis_restart_smoke.py
         env:
           CRYSTAL_WORKERS: 4

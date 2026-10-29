@@ -17,6 +17,13 @@ module JoobQ
     @terminate_channel : Channel(Nil)
     @queue : BaseQueue
     @worker_mutex = Sync::Mutex.new
+    # Bounds claimed + executing jobs, including settlement, per worker.
+    @in_progress = Atomic(Int32).new(0)
+
+    def in_progress : Int32
+      @in_progress.get
+    end
+
     # While set in the future, this worker claims nothing: the process has no usable payload keys (see
     # `Encryption::ConfigurationError`), so claiming would only bounce jobs.
     @claim_paused_until : Atomic(Int64) = Atomic(Int64).new(0_i64)
@@ -68,11 +75,13 @@ module JoobQ
               break
             else
               # Use batch processing for improved performance and minimal connection usage
-              jobs = @queue.paused? || keys_backoff? || JoobQ.shut_down? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: JoobQ.config.worker_batch_size)
+              available = {JoobQ.config.worker_batch_size - @in_progress.get, 0}.max
+              jobs = available == 0 || @queue.paused? || keys_backoff? || JoobQ.shut_down? ? [] of String : @queue.claim_jobs_batch(@worker_id, batch_size: available)
 
               if !jobs.empty?
                 # Counted before any fiber exists, so `JoobQ.shutdown` cannot miss a claimed job
                 claims = jobs.zip(InFlight.claimed(@queue.name, jobs))
+                @in_progress.add(claims.size)
                 unspawned = claims.map(&.last)
                 begin
                   # Process jobs in smaller concurrent batches to reduce connection pressure
@@ -89,6 +98,8 @@ module JoobQ
                             worker_id: @worker_id,
                             error: ex.message,
                             error_class: ex.class.name)
+                        ensure
+                          @in_progress.sub(1)
                         end
                       end
                     end
@@ -99,6 +110,7 @@ module JoobQ
                   # claims that never got a fiber would otherwise count as in flight for ever (the jobs stay in the
                   # processing list, as after any crash)
                   unspawned.each { |token| InFlight.finished(token) }
+                  @in_progress.sub(unspawned.size)
                   raise ex
                 end
               else
@@ -136,94 +148,97 @@ module JoobQ
 
     # Async job handling for batch processing
     private def handle_job_async(job : String, token : Int64)
-      spawn do
-        # The job was registered as claimed when the batch came back; shutdown may have given up on it since
-        next InFlight.finished(token) unless InFlight.begin_run(token)
+      # The job was registered as claimed when the batch came back; shutdown may have given up on it since
+      return InFlight.finished(token) unless InFlight.begin_run(token)
 
-        parsed_job = nil
-        job_completed_successfully = false
-        keys_missing = false
-        begin
-          parsed_job = Encryption.strict { T.from_json(job) }
-          parsed_job.running!
-          Events.emit("job.started") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }
+      parsed_job = nil
+      job_completed_successfully = false
+      outcome_stored = false
+      keys_missing = false
+      begin
+        parsed_job = Encryption.strict { T.from_json(job) }
+        parsed_job.running!
+        Events.emit("job.started") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} }
 
-          middleware_pipeline.call(parsed_job, @queue, @worker_id) do
-            perform_timed(parsed_job)
-            parsed_job.completed!
-            job_completed_successfully = true
-            # an abandoned execution announces nothing: the requeued copy owns the job now
-            Events.emit("job.completed") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} } unless InFlight.abandoned?
+        middleware_pipeline.call(parsed_job, @queue, @worker_id) do
+          perform_timed(parsed_job)
+          parsed_job.completed!
+          job_completed_successfully = true
+          # an abandoned execution announces nothing: the requeued copy owns the job now
+          Events.emit("job.completed") { {jid: parsed_job.jid.to_s, queue: @queue.name, worker_id: @worker_id} } unless InFlight.abandoned?
 
-            # Log successful completion
-            Log.info &.emit("Job completed successfully",
-              job_id: parsed_job.jid.to_s,
-              queue: @queue.name,
-              worker_id: @worker_id,
-              processing_time: (Time.instant - parsed_job.enqueue_time).total_seconds.to_s)
-          end
-        rescue ex : Encryption::ConfigurationError
-          # No usable key in this process: the job is fine, the configuration is not. Leave it in the queue.
-          keys_missing = true
-          pause_claiming
-          Log.error &.emit("Payload encryption keys are missing or malformed; leaving the job in the queue",
-            queue: @queue.name, worker_id: @worker_id, error: ex.message)
-        rescue ex : JSON::Error
-          # Handle unparseable jobs by moving them to dead letter queue
-          handle_unparseable_job(job, ex)
-          next
-        rescue ex : Exception
-          # Use the monitored error handling system with rich context
-          if parsed_job
-            error_context = MonitoredErrorHandler.handle_job_error(
-              parsed_job,
-              @queue,
-              ex,
-              worker_id: @worker_id,
-              additional_context: {
-                "worker_id"             => @worker_id,
-                "job_data_length"       => job.size.to_s,
-                "queue_workers"         => @queue.total_workers.to_s,
-                "queue_running_workers" => @queue.running_workers.to_s,
-                "processing_mode"       => "async_batch",
-              }
-            )
+          # Log successful completion
+          Log.info &.emit("Job completed successfully",
+            job_id: parsed_job.jid.to_s,
+            queue: @queue.name,
+            worker_id: @worker_id,
+            processing_time: (Time.instant - parsed_job.enqueue_time).total_seconds.to_s)
+        end
+        outcome_stored = true
+      rescue ex : Encryption::ConfigurationError
+        # No usable key in this process: the job is fine, the configuration is not. Leave it in the queue.
+        keys_missing = true
+        pause_claiming
+        Log.error &.emit("Payload encryption keys are missing or malformed; leaving the job in the queue",
+          queue: @queue.name, worker_id: @worker_id, error: ex.message)
+      rescue ex : JSON::Error
+        # Handle unparseable jobs by moving them to dead letter queue
+        handle_unparseable_job(job, ex)
+        outcome_stored = true
+        return
+      rescue ex : Exception
+        # Use the monitored error handling system with rich context
+        if parsed_job
+          error_context = MonitoredErrorHandler.handle_job_error(
+            parsed_job,
+            @queue,
+            ex,
+            worker_id: @worker_id,
+            additional_context: {
+              "worker_id"             => @worker_id,
+              "job_data_length"       => job.size.to_s,
+              "queue_workers"         => @queue.total_workers.to_s,
+              "queue_running_workers" => @queue.running_workers.to_s,
+              "processing_mode"       => "async_batch",
+            }
+          )
 
-            # Log worker-specific error
-            additional_context = {
-              worker_wid:          wid.to_s,
-              job_processing_time: (Time.instant - parsed_job.enqueue_time).total_seconds.to_s,
-            }.to_h
+          # Log worker-specific error
+          additional_context = {
+            worker_wid:          wid.to_s,
+            job_processing_time: (Time.instant - parsed_job.enqueue_time).total_seconds.to_s,
+          }.to_h
 
-            Log.error &.emit(
-              "Worker async job processing failed",
-              error_context.to_log_context.merge(additional_context)
-            )
+          Log.error &.emit(
+            "Worker async job processing failed",
+            error_context.to_log_context.merge(additional_context)
+          )
+        else
+          Log.error &.emit(
+            "Worker async job processing failed - could not parse job",
+            worker_id: @worker_id,
+            job_data_length: job.size.to_s,
+            error: ex.message || "Unknown error"
+          )
+        end
+      ensure
+        if InFlight.finished(token)
+          # Shutdown already put this job back on its queue; another process may hold it now, so the
+          # processing list is not touched
+          Log.warn &.emit("Job outlived the shutdown deadline; it was returned to its queue", queue: @queue.name, worker_id: @worker_id)
+        else
+          # Use appropriate cleanup method based on job completion status
+          # IMPORTANT: Pass the full job JSON string, not just the job ID
+          if keys_missing
+            requeue_for_missing_keys(job)
+          elsif outcome_stored && job_completed_successfully && parsed_job
+            # Use enhanced cleanup for successfully completed jobs
+            @queue.cleanup_completed_job_pipelined(@worker_id, job)
+          elsif outcome_stored
+            # Use standard cleanup for failed or unparseable jobs
+            @queue.cleanup_job_processing_pipelined(@worker_id, job)
           else
-            Log.error &.emit(
-              "Worker async job processing failed - could not parse job",
-              worker_id: @worker_id,
-              job_data_length: job.size.to_s,
-              error: ex.message || "Unknown error"
-            )
-          end
-        ensure
-          if InFlight.finished(token)
-            # Shutdown already put this job back on its queue; another process may hold it now, so the
-            # processing list is not touched
-            Log.warn &.emit("Job outlived the shutdown deadline; it was returned to its queue", queue: @queue.name, worker_id: @worker_id)
-          else
-            # Use appropriate cleanup method based on job completion status
-            # IMPORTANT: Pass the full job JSON string, not just the job ID
-            if keys_missing
-              requeue_for_missing_keys(job)
-            elsif job_completed_successfully && parsed_job
-              # Use enhanced cleanup for successfully completed jobs
-              @queue.cleanup_completed_job_pipelined(@worker_id, job)
-            else
-              # Use standard cleanup for failed or unparseable jobs
-              @queue.cleanup_job_processing_pipelined(@worker_id, job)
-            end
+            Log.error &.emit("Job outcome was not stored; retaining processing copy", queue: @queue.name, worker_id: @worker_id)
           end
         end
       end
@@ -398,6 +413,7 @@ module JoobQ
         worker_id: @worker_id,
         error: ex.message
       )
+      raise ex
     end
   end
 end

@@ -7,7 +7,7 @@
 [![Crystal CI](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml/badge.svg?branch=master)](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**A high-performance, production-ready asynchronous job queue system for Crystal**
+**A Redis-backed asynchronous job queue system for Crystal**
 
 [Features](#key-features) • [Installation](#installation) • [Quick Start](#getting-started) • [Documentation](#table-of-contents) • [API Reference](#rest-api--openapi-specification)
 
@@ -17,7 +17,7 @@
 
 ## Overview
 
-**JoobQ** is an enterprise-grade asynchronous job queue system built for the Crystal programming language. Designed for both simplicity and scalability, JoobQ provides a robust framework for managing background job processing in applications of any size—from startup MVPs to large-scale distributed systems.
+**JoobQ** is an asynchronous job queue system built for the Crystal programming language. Designed for both simplicity and scalability, JoobQ provides a robust framework for managing background job processing in applications of any size—from startup MVPs to large-scale distributed systems.
 
 ### Why Choose JoobQ?
 
@@ -25,7 +25,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 
 **Performance**
 
-- Processes up to 35,000 jobs per second on modern hardware
+- Batched Redis operations; measure sustained completion throughput for your workload
 - Built on Crystal's efficient concurrency model
 - Optimized Redis operations for minimal latency
 
@@ -34,7 +34,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 - Automatic retry mechanisms with exponential backoff
 - Dead letter queue for failed job analysis
 - Job expiration and timeout handling
-- Graceful shutdown preventing job loss
+- Graceful draining and best-effort requeue; jobs must tolerate redelivery
 
 **Developer Experience**
 
@@ -581,44 +581,22 @@ docker run -p 8080:8080 -e SWAGGER_JSON=/docs/openapi.yaml -v $(pwd)/docs:/docs 
 
 ## Performance
 
-JoobQ is designed for high performance and scalability. In our benchmarks, JoobQ has easily achieved processing rates of 35,000 jobs per second. This performance is made possible by leveraging Crystal's concurrency model and efficient job handling mechanisms.
+The historical 35,000 jobs/second claim is not a v1 acceptance result. This audit did not reproduce a durable, end-to-end benchmark or the earlier cross-language comparison. Measure successful completions, queue growth, p95/p99 latency and memory with your payloads, Redis persistence and telemetry enabled.
 
-### Performance Comparison
+See the [production v1 audit and prioritized roadmap](design/production-v1-audit.md) and [validation evidence](design/validation.md). The enterprise v1 release remains blocked on distributed claim ownership, replay-safe settlement and the other documented gates.
 
-To provide a clearer picture of JoobQ's performance, we have compared it with other popular job queue processing tools
-in various programming languages, including Sidekiq (Ruby), Celery (Python), Laravel Queue (PHP), and Quartz (Java).
-The results are summarized in the table below:
+### Runtime limits and structured logs
 
-| Job Queue Tool | Language | Jobs per Second |
-| -------------- | -------- | --------------- |
-| JoobQ          | Crystal  | 35,000          |
-| Sidekiq        | Ruby     | 23,500          |
-| Celery         | Python   | 15,000          |
-| Laravel Queue  | PHP      | 10,000          |
-| Quartz         | Java     | 25,000          |
+`worker_batch_size` caps claimed/executing jobs per worker. A queue's normal capacity is approximately `workers * worker_batch_size`; this is not yet a global cap across replacement workers or detached application fibers.
 
-JoobQ Hardware benchmarks performed
+`REDIS_CONNECT_TIMEOUT` and `REDIS_COMMAND_TIMEOUT` configure DNS/connect and socket command limits in seconds (default `5.0`, positive). They are distinct from `REDIS_POOL_TIMEOUT`, and do not constitute an end-to-end request deadline. The Redis client can retry after a connection error; a lost response can leave a write's outcome unknown.
 
-```info
-Hardware Overview:
-  Model Name:             MacBook Pro
-  Model Identifier:       Mac15,10
-  Model Number:           MRX53LL/A
-  Chip:                   Apple M3 Max
-  Total Number of Cores: 14 (10 performance and 4 efficiency)
-  Memory:                 36 GB
+```crystal
+store = JoobQ::RedisStore.new(connect_timeout: 2.seconds, command_timeout: 3.seconds)
+Log.setup(:info, Log::IOBackend.new(STDOUT, formatter: JoobQ::JSONLogFormatter))
 ```
 
-As shown in the table, JoobQ outperforms many of the popular job queue processing tools, making it an excellent
-choice for high-throughput job processing needs.
-
-#### Disclaimer
-
-JoobQ out of the box provides great performance, achieving processing rates of up to 35,000 jobs per second in our
-benchmarks. However, it's important to note that with the right environment and settings, any job scheduler can be
-performant. Factors such as hardware specifications, network conditions, and job complexity can significantly impact
-the performance of job queue processing tools. Therefore, it's essential to optimize your environment and configurations
-to achieve the best possible performance for your specific use case.
+The JSON formatter preserves structured identifiers in `data` and application correlation fields in `context`. Redact sensitive values before logging. Durability depends on Redis persistence, replication and recovery configuration; external side effects need idempotency keys.
 
 ## Contributing
 

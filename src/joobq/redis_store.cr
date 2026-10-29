@@ -20,13 +20,19 @@ module JoobQ
                    @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
                    @password : String? = ENV["REDIS_PASS"]?,
                    @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "500").to_i,
-                   @pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64)
+                   @pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64,
+                   connect_timeout : Time::Span = ENV.fetch("REDIS_CONNECT_TIMEOUT", "5.0").to_f64.seconds,
+                   command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds)
+      raise ArgumentError.new("Redis timeouts must be positive") if connect_timeout <= Time::Span.zero || command_timeout <= Time::Span.zero
       @redis = Redis::PooledClient.new(
         host: @host,
         port: @port,
         password: @password,
         pool_size: @pool_size,
-        pool_timeout: @pool_timeout
+        pool_timeout: @pool_timeout,
+        dns_timeout: connect_timeout,
+        connect_timeout: connect_timeout,
+        command_timeout: command_timeout
       )
 
       # Initialize specialized components
@@ -595,10 +601,10 @@ module JoobQ
       job_json = job.to_json
       retry_lock_key = "joobq:retry_lock:#{job.jid}"
 
-      # Remove job by ID from processing queue (more reliable than JSON match)
-      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
-
+      # Persist the destination before acknowledging the source. If either write fails,
+      # retain a recoverable copy; duplicates still require a fenced settlement protocol.
       DeadLetterQueue.add(redis, current_timestamp, [job_json])
+      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
 
       redis.pipelined do |pipe|
         # Clean up retry lock if it exists
@@ -685,78 +691,42 @@ module JoobQ
       # No-op: BRPOPLPUSH pattern doesn't require explicit claim release
     end
 
-    # Process due jobs from delayed queue and move them back to main queue
-    # Jobs are moved back with "enqueued" status so workers can pick them up
-    # Returns the array of job JSON strings that were processed (including those from other queues)
-    def process_due_delayed_jobs(queue_name : String) : Array(String)
-      current_time = Time.local.to_unix_ms
-      processed_jobs = [] of String
-      moved_count = 0
+    # Source membership is the claim: competing schedulers cannot promote the same
+    # member twice. Write the destination first: Lua does not roll back on errors.
+    # JSON is parsed/re-encoded in Crystal, preserving Int64 values (Lua cjson uses doubles).
+    PROMOTE_DUE = <<-LUA
+      local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+      if not score or tonumber(score) > tonumber(ARGV[3]) then return 0 end
+      redis.call('RPUSH', KEYS[2], ARGV[2])
+      redis.call('ZREM', KEYS[1], ARGV[1])
+      return 1
+    LUA
 
-      # Get jobs that are due for processing (score <= current_time)
-      # Use a small limit to reduce race condition window
-      jobs_result = redis.zrangebyscore(DELAYED_SET, "-inf", current_time.to_s, limit: [0, 50])
-
-      if !jobs_result.empty?
-        redis.pipelined do |pipe|
-          jobs_result.each do |job_data|
-            job_json = job_data.as(String)
-            processed_jobs << job_json
-
-            # Parse job to check if it belongs to this queue
-            begin
-              parsed_job = JSON.parse(job_json)
-              job_queue = parsed_job["queue"]?.try(&.as_s)
-
-              # Only process jobs for this queue
-              if job_queue == queue_name
-                # Update job status from "retrying" to "enqueued" so workers pick it up
-                # Build a mutable hash from the parsed JSON
-                job_data = Hash(String, JSON::Any).new
-                parsed_job.as_h.each do |key, value|
-                  job_data[key] = value
-                end
-
-                # Update status to "Enqueued" (capitalized to match Crystal enum serialization)
-                job_data["status"] = JSON::Any.new("Enqueued")
-                updated_job_json = job_data.to_json
-
-                # Remove from delayed queue (using original JSON)
-                pipe.zrem(DELAYED_SET, job_json)
-
-                # Add back to main queue with updated status
-                # Using rpush to maintain FIFO order (delayed jobs go to back of queue)
-                pipe.rpush(queue_name, updated_job_json)
-
-                moved_count += 1
-              end
-              # Note: We don't remove jobs from other queues here to avoid race conditions
-              # with the scheduler. Jobs from other queues will be processed by their respective
-              # queue processors.
-            rescue ex
-              Log.warn &.emit("Failed to parse delayed job",
-                queue: queue_name,
-                error: ex.message
-              )
-              # Remove malformed job from delayed set
-              pipe.zrem(DELAYED_SET, job_json)
-            end
+    def promote_due_jobs(current_time : Time = Time.utc, delay_set : String = DELAYED_SET,
+                         queue_name : String? = nil, limit : Int32 = 50, *, report_scanned : Bool = false) : Array(String)
+      moved = [] of String
+      scanned = fetch_due_jobs(current_time, delay_set, limit, remove: false)
+      scanned.each do |raw|
+        begin
+          job = JSON.parse(raw).as_h
+          destination = job["queue"].as_s
+          next if queue_name && destination != queue_name
+          job["status"] = JSON::Any.new("Enqueued")
+          payload = job.to_json
+          if redis.eval(PROMOTE_DUE, [delay_set, destination], [raw, payload, current_time.to_unix_ms.to_s]) == 1
+            moved << raw
           end
+        rescue ex
+          # Malformed and unavailable destinations remain inspectable and retryable.
+          Log.error &.emit("Delayed job promotion was not confirmed; inspect source and destination", delay_set: delay_set, error: ex.message)
         end
-
-        Log.debug &.emit("Processed due delayed jobs",
-          queue: queue_name,
-          count: moved_count
-        )
       end
+      report_scanned ? scanned : moved
+    end
 
-      processed_jobs
-    rescue ex
-      Log.error &.emit("Failed to process due delayed jobs",
-        queue: queue_name,
-        error: ex.message
-      )
-      [] of String
+    # Preserve the legacy return contract: all scanned due jobs, including other queues.
+    def process_due_delayed_jobs(queue_name : String) : Array(String)
+      promote_due_jobs(queue_name: queue_name, report_scanned: true)
     end
 
     # Verify that a job exists in only one location (for debugging/testing)

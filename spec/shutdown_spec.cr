@@ -476,11 +476,16 @@ module JoobQ
       end
 
       it "stop closes a listening server and start returns" do
-        port = 38_000 + Random.rand(2_000)
+        # Ask the OS for an unused port; a random fixed range can hit another service.
+        reservation = TCPServer.new("127.0.0.1", 0)
+        port = reservation.local_address.port
+        reservation.close
         returned = Channel(Nil).new(1)
+        errors = Channel(Exception).new(1)
         spawn do
           APIServer.start("127.0.0.1", port)
-        rescue
+        rescue ex
+          errors.send(ex)
         ensure
           returned.send(nil)
         end
@@ -492,6 +497,11 @@ module JoobQ
           false
         end
         begin
+          select
+          when error = errors.receive
+            raise error
+          else
+          end
           listening.should be_true
         ensure
           APIServer.stop

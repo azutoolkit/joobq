@@ -118,6 +118,10 @@ module JoobQ
     end
 
     def enqueue_due_jobs(current_time = Time.local)
+      if redis_store = store.as?(RedisStore)
+        redis_store.promote_due_jobs(current_time, @delay_set)
+        return
+      end
       results = store.fetch_due_jobs(current_time, @delay_set)
       enqueue_due_jobs_pipelined(results, current_time)
     end

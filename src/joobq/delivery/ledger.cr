@@ -40,12 +40,18 @@ module JoobQ::Delivery
     property owner : String? = nil
     property due_at : Int64 = 0_i64
     property lease_until : Int64 = 0_i64
+    property traceparent : String? = nil
 
     def initialize(@id, @payload, @digest)
     end
 
     def validate! : self
       raise CorruptRecord.new("unsupported delivery schema") unless schema == 1
+      begin
+        TraceParent.parse(traceparent)
+      rescue ArgumentError
+        raise CorruptRecord.new("invalid delivery trace context")
+      end
       raise CorruptRecord.new("invalid delivery record") if attempt < 0 || id.empty? || digest != Digest::SHA256.hexdigest(payload)
       if state.leased? && (token.nil? || owner.nil? || lease_until <= 0)
         raise CorruptRecord.new("leased delivery has no valid owner/token/deadline")
@@ -55,7 +61,7 @@ module JoobQ::Delivery
   end
 
   record Admission, code : AdmissionCode, id : String, entry : Record? = nil, reason : String? = nil
-  record Claim, id : String, token : String, owner : String, attempt : Int64, payload : String
+  record Claim, id : String, token : String, owner : String, attempt : Int64, payload : String, traceparent : String? = nil
 
   class Ledger
     # One authoritative write before derived indexes. If an index command fails,
@@ -64,6 +70,7 @@ module JoobQ::Delivery
       local old = redis.call('HGET', KEYS[1], ARGV[1])
       if ARGV[2] == '' then
         if old then return 0 end
+        if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[8]) then return -1 end
       elseif old ~= ARGV[2] then return 0 end
       local clock = redis.call('TIME')
       local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
@@ -71,6 +78,7 @@ module JoobQ::Delivery
       if ARGV[6] ~= '' and now >= tonumber(ARGV[6]) then return 0 end
       if ARGV[7] ~= '' and now < tonumber(ARGV[7]) then return 0 end
       if ARGV[5] ~= '' and now >= tonumber(ARGV[5]) then return 0 end
+      if ARGV[5] ~= '' and redis.call('EXISTS', KEYS[4]) == 1 then return 0 end
       redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
       redis.call('ZREM', KEYS[2], ARGV[1])
       redis.call('ZREM', KEYS[3], ARGV[1])
@@ -93,17 +101,24 @@ module JoobQ::Delivery
     getter records_key : String
     getter ready_key : String
     getter leases_key : String
+    getter gate_key : String
+    getter quarantine_key : String
 
-    def initialize(@redis : Redis::PooledClient, namespace : String, queue : String, @max_payload_bytes : Int32 = 1_048_576)
+    def initialize(@redis : Redis::PooledClient, namespace : String, queue : String, @max_payload_bytes : Int32 = 1_048_576, @max_records : Int32 = 100_000)
       [namespace, queue].each do |name|
         raise ArgumentError.new("namespace and queue must be 1..128 safe characters") unless name.matches?(/\A[a-zA-Z0-9_.~-]{1,128}\z/)
       end
+      raise ArgumentError.new("record limit must be positive") unless @max_records > 0
       raise ArgumentError.new("payload limit must be positive") unless @max_payload_bytes > 0
       prefix = "joobq:v1:#{namespace}:#{queue}"
+      @gate_key = "joobq:v1:#{namespace}:maintenance"
+      @quarantine_key = "#{prefix}:quarantine"
       @records_key, @ready_key, @leases_key = "#{prefix}:records", "#{prefix}:ready", "#{prefix}:leases"
     end
 
-    def admit(request_id : String, payload : String) : Admission
+    def admit(request_id : String, payload : String, delay : Time::Span = Time::Span.zero, traceparent : String? = nil) : Admission
+      TraceParent.parse(traceparent)
+      raise ArgumentError.new("admission delay must be 0..365 days") unless Time::Span.zero <= delay <= 365.days
       id = identity(request_id)
       if payload.empty? || payload.bytesize > @max_payload_bytes
         return Admission.new(AdmissionCode::Rejected, id, reason: "payload size is outside the configured limit")
@@ -112,7 +127,11 @@ module JoobQ::Delivery
         return admission_for(existing[0], id, payload)
       end
       entry = Record.new(id, payload, Digest::SHA256.hexdigest(payload))
-      write(entry, "")
+      entry.traceparent = traceparent
+      entry.state = State::Scheduled if delay > Time::Span.zero
+      entry.due_at = now_ms + delay.total_milliseconds.to_i64
+      written = write_code(entry, "")
+      return Admission.new(AdmissionCode::Rejected, id, reason: "retained record capacity reached") if written == -1
       # Also handles a competing producer that won the HSET admission.
       if current = load(id)
         admission_for(current[0], id, payload)
@@ -133,7 +152,12 @@ module JoobQ::Delivery
       now = now_ms
       @redis.zrangebyscore(ready_key, "-inf", now.to_s, limit: [0, 100]).each do |value|
         id = value.as(String)
-        entry, raw = load(id) || next
+        begin
+          entry, raw = load(id) || next
+        rescue CorruptRecord
+          quarantine(id)
+          next
+        end
         next unless (entry.state.ready? || entry.state.scheduled?) && entry.due_at <= now
         entry.state = State::Leased
         entry.attempt += 1
@@ -142,7 +166,7 @@ module JoobQ::Delivery
         entry.owner = owner
         entry.lease_until = now + duration
         if write(entry, raw)
-          return Claim.new(id, token, owner, entry.attempt, entry.payload)
+          return Claim.new(id, token, owner, entry.attempt, entry.payload, entry.traceparent)
         end
       end
       nil
@@ -185,7 +209,12 @@ module JoobQ::Delivery
       result = @redis.hscan(records_key, cursor, count: count)
       next_cursor = result[0].as(String)
       result[1].each do |id, raw|
-        entry = decode(id, raw)
+        begin
+          entry = decode(id, raw)
+        rescue CorruptRecord
+          quarantine(id)
+          next
+        end
         if entry.state.leased? && entry.lease_until <= now_ms
           expired_deadline = entry.lease_until
           entry.state = State::Ready
@@ -202,8 +231,52 @@ module JoobQ::Delivery
       next_cursor
     end
 
+    # Offline migration only. The operator-owned gate prevents claims while the
+    # imported set is verified. Existing identities must agree exactly.
+    def import(request_id : String, payload : String, state : State, due_at : Int64, owner : String) : Admission
+      raise ArgumentError.new("migration gate is not owned") unless @redis.get(gate_key) == owner
+      raise ArgumentError.new("cannot import a leased state") if state.leased?
+      id = identity(request_id)
+      if existing = load(id)
+        entry = existing[0]
+        unless entry.payload == payload && entry.state == state && entry.due_at == due_at
+          raise ArgumentError.new("migration identity conflict; originals retained")
+        end
+        return Admission.new(AdmissionCode::Accepted, id, entry)
+      end
+      raise ArgumentError.new("invalid imported payload size") unless 1 <= payload.bytesize <= @max_payload_bytes
+      entry = Record.new(id, payload, Digest::SHA256.hexdigest(payload))
+      entry.state = state
+      entry.due_at = due_at
+      code = write_code(entry, "")
+      return Admission.new(AdmissionCode::Rejected, id, reason: "retained record capacity reached") if code == -1
+      current = load(id) || return Admission.new(AdmissionCode::Unknown, id)
+      unless current[0].payload == payload && current[0].state == state && current[0].due_at == due_at
+        raise ArgumentError.new("migration identity conflict")
+      end
+      Admission.new(AdmissionCode::Accepted, id, current[0])
+    rescue Redis::Error
+      Admission.new(AdmissionCode::Unknown, identity(request_id))
+    end
+
+    QUARANTINE = <<-LUA
+      local raw = redis.call('HGET', KEYS[1], ARGV[1])
+      if raw ~= ARGV[2] then return 0 end
+      redis.call('HSET', KEYS[4], ARGV[1], raw)
+      redis.call('ZREM', KEYS[2], ARGV[1])
+      redis.call('ZREM', KEYS[3], ARGV[1])
+      return 1
+    LUA
+
+    private def quarantine(id : String) : Nil
+      raw = @redis.hget(records_key, id) || return
+      # Retain the authoritative raw bytes and a diagnostic index. Never erase
+      # unknown schemas merely to keep the healthy queue moving.
+      @redis.eval(QUARANTINE, [records_key, ready_key, leases_key, quarantine_key], [id, raw])
+    end
+
     private def keys : Array(String)
-      [records_key, ready_key, leases_key]
+      [records_key, ready_key, leases_key, gate_key]
     end
 
     private def scores(entry : Record) : {String, String}
@@ -212,8 +285,12 @@ module JoobQ::Delivery
     end
 
     private def write(entry : Record, expected : String, before : Int64? = nil, after : Int64? = nil) : Bool
+      write_code(entry, expected, before, after) == 1
+    end
+
+    private def write_code(entry : Record, expected : String, before : Int64? = nil, after : Int64? = nil) : Int64
       ready, leased = scores(entry)
-      @redis.eval(WRITE, keys, [entry.id, expected, entry.to_json, ready, leased, before.to_s, after.to_s]) == 1
+      @redis.eval(WRITE, keys, [entry.id, expected, entry.to_json, ready, leased, before.to_s, after.to_s, @max_records.to_s]).as(Int64)
     end
 
     private def load(id : String) : {Record, String}?

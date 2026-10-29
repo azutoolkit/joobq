@@ -3,14 +3,24 @@ require "json"
 require "./api_validation"
 
 module JoobQ
+  class ManagementHTTPServer < HTTP::Server
+    private def handle_client(io : IO)
+      if socket = io.as?(Socket)
+        socket.read_timeout = 5.seconds
+        socket.write_timeout = 5.seconds
+      end
+      super
+    end
+  end
+
   class APIServer
     Log = ::Log.for("API SERVER")
 
     @@server : HTTP::Server?
     @@server_lock = Sync::Mutex.new
 
-    def self.start(address : String = "0.0.0.0", port : Int32 = 8080)
-      new.start(address, port)
+    def self.start(address : String = "127.0.0.1", port : Int32 = 8080, *, policy : ManagementPolicy = ManagementPolicy.from_env)
+      new.start(address, port, policy: policy)
     end
 
     # Closes the listener started by `start` (which then returns). Does nothing when none is running.
@@ -25,8 +35,8 @@ module JoobQ
 
     # Serves until `APIServer.stop` (or `JoobQ.shutdown`). Returns at once, without listening, when the shutdown
     # has begun.
-    def start(address : String = "0.0.0.0", port : Int32 = 8080)
-      server = HTTP::Server.new([APIHandler.new])
+    def start(address : String = "127.0.0.1", port : Int32 = 8080, *, policy : ManagementPolicy = ManagementPolicy.from_env)
+      server = ManagementHTTPServer.new([APIHandler.new(policy)])
       Log.info &.emit("Listening on http://#{address}:#{port}")
       server.bind_tcp(address, port)
       # registered after the bind, and the shutdown checked after registering: a `stop` that ran in between
@@ -766,7 +776,12 @@ module JoobQ
       end
     end
 
+    def initialize(@policy : ManagementPolicy? = nil, *, unsafe_no_auth : Bool = false)
+      @policy = ManagementPolicy.from_env unless @policy || unsafe_no_auth
+    end
+
     def call(context : HTTP::Server::Context)
+      return if (policy = @policy) && !policy.authorize(context)
       method = context.request.method
       path = context.request.path
       if handler = ENDPOINTS[{method: method, path: path}]? || match_param_route(method, path)

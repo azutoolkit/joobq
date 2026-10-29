@@ -62,6 +62,11 @@ module JoobQ
     # still processing back onto the queue, and it would run twice.
     def start
       verify_encryption_keys
+      if redis_store = store.as?(RedisStore)
+        if redis_store.redis.exists("joobq:delivery-bridge:#{name}") > 0
+          raise ArgumentError.new("queue is bound to leased delivery; a legacy worker cannot start")
+        end
+      end
       return if @started.swap(true)
 
       reprocess_busy_jobs!

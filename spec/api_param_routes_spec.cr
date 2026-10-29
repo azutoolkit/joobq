@@ -6,7 +6,7 @@ module JoobQ
       io = IO::Memory.new
       context = HTTP::Server::Context.new(HTTP::Request.new(method, path), HTTP::Server::Response.new(io))
       fell_through = false
-      handler = APIHandler.new
+      handler = APIHandler.new(unsafe_no_auth: true)
       handler.next = ->(_ctx : HTTP::Server::Context) { fell_through = true }
       handler.call(context)
       context.response.flush
@@ -55,7 +55,7 @@ module JoobQ
       io = IO::Memory.new
       request = HTTP::Request.new("POST", "/joobq/jobs", HTTP::Headers{"Content-Type" => "application/json"}, body)
       context = HTTP::Server::Context.new(request, HTTP::Server::Response.new(io))
-      handler = APIHandler.new
+      handler = APIHandler.new(unsafe_no_auth: true)
       handler.next = ->(_ctx : HTTP::Server::Context) { }
       handler.call(context)
       context.response.flush

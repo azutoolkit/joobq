@@ -53,10 +53,11 @@ module JoobQ
                    @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "500").to_i,
                    @pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64,
                    connect_timeout : Time::Span = ENV.fetch("REDIS_CONNECT_TIMEOUT", "5.0").to_f64.seconds,
-                   command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds)
+                   command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds,
+                   operation_timeout : Time::Span = ENV.fetch("REDIS_OPERATION_TIMEOUT", "5.0").to_f64.seconds)
       raise ArgumentError.new("Redis timeouts must be positive") if connect_timeout <= Time::Span.zero || command_timeout <= Time::Span.zero
       @redis = RedisPool.new(RedisEndpoint.new(@host, @port, password: @password),
-        @pool_size, @pool_timeout, connect_timeout, command_timeout)
+        @pool_size, @pool_timeout, connect_timeout, command_timeout, operation_timeout)
 
       # Initialize specialized components
       @health = RedisHealth.new(@redis, @pool_size, @pool_timeout)
@@ -79,7 +80,8 @@ module JoobQ
                    pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64,
                    verify : Bool = true, ca_file : String? = nil,
                    connect_timeout : Time::Span = ENV.fetch("REDIS_CONNECT_TIMEOUT", "5.0").to_f64.seconds,
-                   command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds)
+                   command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds,
+                   operation_timeout : Time::Span = ENV.fetch("REDIS_OPERATION_TIMEOUT", "5.0").to_f64.seconds)
       endpoint = RedisEndpoint.parse(url, verify, ca_file)
       @endpoint = endpoint
       @host = endpoint.host
@@ -87,7 +89,7 @@ module JoobQ
       @password = nil # the endpoint's clients hold the credentials; the store keeps none
       @pool_size = pool_size
       @pool_timeout = pool_timeout
-      @redis = RedisPool.new(endpoint, pool_size, pool_timeout, connect_timeout, command_timeout)
+      @redis = RedisPool.new(endpoint, pool_size, pool_timeout, connect_timeout, command_timeout, operation_timeout)
 
       @health = RedisHealth.new(@redis, @pool_size, @pool_timeout)
       @pipeline = RedisPipeline.new(@redis)

@@ -45,7 +45,9 @@ module JoobQ
     end
 
     private def connect
-      super
+      @connection = DeadlineConnection.new(@host, @port, @unixsocket, @ssl_context,
+        @dns_timeout, @connect_timeout, @command_timeout)
+      @strategy = Redis::Strategy::SingleStatement.new(@connection.not_nil!)
       begin
         if user = @acl_user
           strategy.command(["AUTH", user, @acl_password.to_s])
@@ -76,8 +78,10 @@ module JoobQ
   # `Redis::PooledClient` whose connections are `RedisClient`s. The TLS context is built once and shared.
   class RedisPool < Redis::PooledClient
     def initialize(endpoint : RedisEndpoint, pool_size : Int32 = 5, pool_timeout : Float64 = 5.0,
-                   connect_timeout : Time::Span = 5.seconds, command_timeout : Time::Span = 5.seconds)
+                   connect_timeout : Time::Span = 5.seconds, command_timeout : Time::Span = 5.seconds,
+                   @operation_timeout : Time::Span = 5.seconds)
       raise ArgumentError.new("Redis pool size and timeouts must be positive and finite") unless pool_size > 0 && pool_timeout.finite? && pool_timeout > 0 && connect_timeout > Time::Span.zero && command_timeout > Time::Span.zero
+      raise ArgumentError.new("operation timeout must be positive") unless @operation_timeout > Time::Span.zero
       ssl_context = endpoint.ssl_context
       @clients = [] of RedisClient
       @clients_lock = Sync::Mutex.new
@@ -87,6 +91,23 @@ module JoobQ
         client.as(Redis)
       end
       @description = endpoint.to_s
+    end
+
+    private def with_pool_connection(&)
+      previous = Fiber.current.joobq_redis_deadline
+      deadline = Time.instant + @operation_timeout
+      Fiber.current.joobq_redis_deadline = previous ? Math.min(previous, deadline) : deadline
+      begin
+        connection = @pool.checkout
+        RedisBudget.remaining
+        yield connection
+      rescue ex : IO::TimeoutError
+        connection.try(&.close)
+        raise Redis::PoolTimeoutError.new("Redis total operation deadline exceeded")
+      ensure
+        @pool.checkin(connection) if connection
+        Fiber.current.joobq_redis_deadline = previous
+      end
     end
 
     # Closes every connection the pool has opened. A command issued afterwards reconnects, so this is for letting go of

@@ -483,7 +483,7 @@ module JoobQ
         returned = Channel(Nil).new(1)
         errors = Channel(Exception).new(1)
         spawn do
-          APIServer.start("127.0.0.1", port)
+          APIServer.start("127.0.0.1", port, policy: ManagementPolicy.new({"spec-token-" * 4 => ManagementPolicy::Role::Admin}))
         rescue ex
           errors.send(ex)
         ensure

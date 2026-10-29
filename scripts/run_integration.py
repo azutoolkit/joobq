@@ -14,6 +14,7 @@ import tempfile
 import time
 
 parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--probe', action='store_true', help='run a non-spec executable; preserve exit/runtime failure checks')
 parser.add_argument('--url', action='store_true', help='exercise REDIS_URL configuration')
 parser.add_argument('--timeout', type=int, default=600)
 parser.add_argument('command', nargs=argparse.REMAINDER)
@@ -84,14 +85,19 @@ with tempfile.TemporaryDirectory(prefix='joobq-integration-') as temporary:
         print(f'Integration: {command}; workers={env.get("CRYSTAL_WORKERS", "default")}; url={args.url}', flush=True)
         child = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  text=True, start_new_session=True)
-        output, _ = child.communicate(timeout=args.timeout)
+        try:
+            output, _ = child.communicate(timeout=args.timeout)
+        except subprocess.TimeoutExpired as error:
+            partial = error.output or b''
+            print(partial.decode(errors='replace') if isinstance(partial, bytes) else partial, flush=True)
+            raise
         print(output, end='')
         if child.returncode:
             raise SystemExit(child.returncode)
         if re.search(r'BUG:|Unhandled exception in spawn|Invalid memory access', output):
             raise SystemExit('FAIL: runtime/fiber crash in otherwise passing test output')
         summary = re.search(r'(\d+) examples?, (\d+) failures?, (\d+) errors?, (\d+) pending', output)
-        if not summary or int(summary[1]) == 0 or any(int(summary[i]) for i in (2, 3, 4)):
+        if not args.probe and (not summary or int(summary[1]) == 0 or any(int(summary[i]) for i in (2, 3, 4))):
             raise SystemExit('FAIL: missing/empty spec summary or failed/pending examples')
     finally:
         if child is not None:

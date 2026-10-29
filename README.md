@@ -17,6 +17,8 @@
 
 ## Overview
 
+> Enterprise v1 remains under review. The opt-in [leased runtime and migration guide](design/durable-runtime-guide.md) describes the new delivery API, management authentication and compatibility changes. See [validation and open release gates](design/implementation-validation.md) before deployment.
+
 **JoobQ** is an asynchronous job queue system built for the Crystal programming language. Designed for both simplicity and scalability, JoobQ provides a robust framework for managing background job processing in applications of any size—from startup MVPs to large-scale distributed systems.
 
 ### Why Choose JoobQ?
@@ -52,7 +54,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 
 ### Key Features
 
-- **🚀 High Performance**: Process tens of thousands of jobs per second with Crystal's native performance
+- **🚀 Measured Performance**: Benchmark completed work with your payloads, TLS and durability settings; see [current evidence and open release gates](design/implementation-validation.md)
 - **⚡ Priority Queues**: Configure worker allocation based on queue priority
 - **🔄 Retry Logic**: Built-in exponential backoff and customizable retry strategies
 - **⏰ Scheduling**: Cron-style recurring jobs and delayed execution

@@ -126,8 +126,8 @@ describe JoobQ::Delivery::Ledger do
       entry.lease_until = 0_i64
       sleep 80.milliseconds
       redis.eval(JoobQ::Delivery::Ledger::WRITE,
-        [ledger.records_key, ledger.ready_key, ledger.leases_key],
-        [claim.id, raw, entry.to_json, "", "", deadline.to_s, ""]).should eq(0)
+        [ledger.records_key, ledger.ready_key, ledger.leases_key, ledger.gate_key],
+        [claim.id, raw, entry.to_json, "", "", deadline.to_s, "", "100000"]).should eq(0)
       redis.hget(ledger.records_key, admission.id).should eq(raw)
     end
   end

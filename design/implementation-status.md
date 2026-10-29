@@ -1,22 +1,49 @@
 # Enterprise v1 implementation status
 
-This records implemented changes separately from the historical audit and acceptance criteria. The full enterprise-v1 plan remains open; version numbers remain pre-v1.
+The work builds on PR #19 and the foundation in `0e35f14`. Version numbers remain
+pre-v1. Implementation and bounded test evidence do not certify the complete
+[enterprise-v1 plan](enterprise-v1-plan.md).
 
-## Implemented foundation
+## Implemented for review
 
-- PR #19 (`498ac5f`) integrated with the audited master fixes in merge `8310229`; URL/TLS/ACL and strict enqueue behavior preserved.
-- Disposable integration harness creates plain, second-store and verified TLS fixtures; rejects pending tests and runtime/fiber crashes. Three formerly pending core cases now run.
-- Legacy and URL Redis constructors share the authenticated, credential-redacted client and finite connect/command timeouts. Lost responses raise `RedisOutcomeUnknown` without automatic mutation replay. These are per-phase timeouts, not a total operation deadline.
-- Real pipeline batching uses one connection, propagates errors and discards sockets with unread replies. Pipeline stats are synchronized. Legacy cleanup/read helpers no longer turn Redis failures into apparent success.
-- Explicit queue store/execution binding allows Pro activities to retain their worker's history store. DLQ calls use the queue's store; failed DLQ settlement propagates.
-- A dependency compatibility fix leaves garbage-collection resource release to stdlib socket/SSL finalizers. The Redis dependency previously invoked buffered socket close on Crystal's monitor thread, crashing it despite a green spec summary. A bare-thread regression and harness crash detection cover that failure.
-- Experimental delivery ledger: stable request identity, Accepted/Rejected/Unknown admission, opaque payloads, canonical CAS transitions, server-time leases, fencing, idempotent terminal outcomes and derived-index repair. See [prototype limits](delivery-prototype.md).
-- Pro: atomic Redis-time rate admission before execution, non-failure deferral, explicit workflow transport/history binding, and fiber-local nested batch scope. Full batches/uniqueness and workflow recovery remain open.
+- Runtime-scoped queue registry, fixed execution capacity, renewable fenced
+  leases, cooperative execution deadline, supervised worker/repair loops, local
+  circuit breaker and bounded signal drain. Typed jobs and explicit raw handlers.
+- Total Redis deadlines across checkout/connect/TLS/setup/command, verified TLS,
+  failure eviction and no automatic replay of ambiguous mutations. Foundation
+  pipeline/finalizer fixes remain covered.
+- Stable admission IDs, canonical CAS state, bounded retained-record admission,
+  index repair and poison preservation/quarantine. Generic durable CAS journals.
+- Pro sealed batch membership, replayable member/callback outboxes, counts from
+  terminal receipts, owner-fenced uniqueness and workflow dispatch-list bridging.
+- Bounded OTLP telemetry with linked producer/consumer spans, Prometheus text,
+  authenticated legacy management API, role/body limits and loopback binding.
+- Quiescent migration with verification and explicit activation; namespace
+  export/digest/restore with original-source preservation and resume checks.
+- Owned Redis/TLS harness, process-death and signal probes, completion-counting
+  load benchmark, pinned Redis 7.4/8.0 CI matrix.
 
-## Package status
+Read [API and operations instructions](durable-runtime-guide.md), particularly
+legacy compatibility, capacity and backup limitations. Pro's public batch and
+unique APIs now require explicit durable services. Legacy queues and middleware
+are still available and do not silently acquire the new delivery guarantees.
 
-P00–P03 are partially implemented. P01's protocol has executable fault regressions; this does not complete all architecture/SLO decisions. P04–P06 have a separate storage prototype, not production worker integration. P09/P11 have targeted concurrency fixes, not complete enterprise feature acceptance.
+## Release blockers still open
 
-Still required: independently scoped runtime registries; total transport deadlines, circuit breaking and close/drain; leased worker integration and reconciliation; admission/retention budgets; atomic Pro batches/callback outbox and uniqueness; observability/authentication; migration/restore; Redis 7.4/8.0 matrix; multi-process chaos; 35k settled jobs/s reference benchmark; four-hour soak; exact-SHA hosted CI and release review. Full acceptance criteria remain in [enterprise-v1-plan.md](enterprise-v1-plan.md).
+- Measured completion throughput is far below 35k/s; 30-minute reference workload
+  and four-hour fault soak have not passed. The current protocol repeatedly
+  reads/serializes canonical records and contends on candidate claim CAS.
+- Retained terminal receipts and journals have finite admission budgets but no
+  safe archival/compaction policy. Size, retention horizon and sustained workload
+  admission must be solved together before long-running production certification.
+- Broader workflow-history partial-write fault coverage, durable recurring
+  scheduling, multi-process batch/unique crash validation, deployment failover,
+  restore RPO/RTO and credential rotation need further acceptance evidence.
+- Full namespace-scoped management HTTP integration, latency histograms and
+  production alerts/dashboards remain open.
+- Hosted CI must pass the reviewed paired commit; neither PR may infer release
+  authorization or a version bump from local tests.
 
-Validation results for this implementation are recorded in [implementation-validation.md](implementation-validation.md). Passing examples are evidence for the named cases only, not a claim of HA or exactly-once external effects.
+[Validation](implementation-validation.md) distinguishes exact observed results
+from planned acceptance gates. No exactly-once external-effects or unconditional
+zero-loss claim is made.

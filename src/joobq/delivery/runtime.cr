@@ -68,21 +68,45 @@ module JoobQ::Delivery
     @lock = Sync::Mutex.new
     @running = Atomic(Bool).new(false)
     @closed = Atomic(Bool).new(false)
-    @active = {} of String => Context
+
+    # Only jobs which reach their renewal time spawn a renewal operation. A
+    # shared scanner avoids two channels and a fiber allocation per short job.
+    class ActiveLease
+      getter context : Context
+      getter ledger : Ledger
+      getter lock = Sync::Mutex.new
+      getter renewing = Atomic(Bool).new(false)
+      getter finished = Atomic(Bool).new(false)
+      @next_renewal = Atomic(Int64).new(0_i64)
+
+      def initialize(@context, @ledger, next_renewal : Time::Instant)
+        reschedule(next_renewal)
+      end
+
+      def reschedule(at : Time::Instant) : Nil
+        @next_renewal.set((at - Context::START).total_nanoseconds.to_i64)
+      end
+
+      def due?(now : Time::Instant) : Bool
+        !finished.get && (now - Context::START).total_nanoseconds.to_i64 >= @next_renewal.get
+      end
+    end
+
+    @active = {} of String => ActiveLease
     @fibers = Atomic(Int32).new(0)
     @owner = UUID.random.to_s
-    @next_queue = Atomic(Int32).new(0)
+    @next_queue = Atomic(UInt64).new(0_u64)
     @breaker = Circuit.new
 
     def initialize(@store : RedisStore, @namespace : String, @capacity : Int32 = 8,
                    @lease : Time::Span = 30.seconds, @poll : Time::Span = 20.milliseconds,
                    @repair_every : Time::Span = 1.second, @max_records : Int32 = 100_000,
-                   @telemetry : Telemetry? = nil, @execution_timeout : Time::Span = 5.minutes, production : Bool = true)
+                   @optimized_delivery : Bool = true, @telemetry : Telemetry? = nil, @execution_timeout : Time::Span = 5.minutes, production : Bool = true)
       raise ArgumentError.new("capacity must be 1..1024") unless 1 <= capacity <= 1024
       raise ArgumentError.new("lease must be 100ms..24h") unless 100.milliseconds <= lease <= 24.hours
       raise ArgumentError.new("poll and repair intervals must be positive") unless @poll > Time::Span.zero && @repair_every > Time::Span.zero
       raise ArgumentError.new("execution timeout must be positive") unless @execution_timeout > Time::Span.zero
-      Ledger.new(store.redis, namespace, "validation", max_records: @max_records)
+      Ledger.new(store.redis, namespace, "validation", max_records: @max_records, optimized: @optimized_delivery)
       verify_durability! if production
     end
 
@@ -99,7 +123,7 @@ module JoobQ::Delivery
       @lock.synchronize do
         raise ArgumentError.new("register queues before starting the runtime") if @running.get || @closed.get
         raise ArgumentError.new("queue is already registered") if @registrations.has_key?(queue)
-        ledger = Ledger.new(store.redis, namespace, queue, max_records: @max_records)
+        ledger = Ledger.new(store.redis, namespace, queue, max_records: @max_records, optimized: @optimized_delivery)
         @registrations[queue] = Registration.new(queue, ledger, handler)
         ledger
       end
@@ -173,6 +197,8 @@ module JoobQ::Delivery
         end
         @fibers.add(1)
         spawn(name: "delivery-repair") { repair_loop }
+        @fibers.add(1)
+        spawn(name: "delivery-renewals") { renewal_loop }
       end
       self
     end
@@ -215,7 +241,7 @@ module JoobQ::Delivery
       until @fibers.get == 0 || Time.instant >= deadline
         sleep Math.min(5.milliseconds, deadline - Time.instant).clamp(Time::Span.zero, 5.milliseconds)
       end
-      @lock.synchronize { @active.each_value(&.cancel) }
+      @lock.synchronize { @active.each_value { |entry| entry.context.cancel } }
       telemetry_stopped = @telemetry.try(&.stop(Math.max(deadline - Time.instant, Time::Span.zero))) != false
       Drain.new(@fibers.get == 0 && telemetry_stopped, active_count, Time.instant - started)
     end
@@ -246,7 +272,7 @@ module JoobQ::Delivery
           next
         end
         begin
-          index = @next_queue.add(1).to_u32 % registrations.size.to_u32
+          index = (@next_queue.add(1_u64) % registrations.size.to_u64).to_i
           registration = registrations[index]
           acquired = Time.instant
           if claim = registration.ledger.claim(@owner, lease)
@@ -269,39 +295,14 @@ module JoobQ::Delivery
 
     private def execute(registration : Registration, claim : Claim, acquired : Time::Instant) : Nil
       context = Context.new(claim, acquired, lease, @execution_timeout)
-      @lock.synchronize { @active[claim.token] = context }
-      finished = Channel(Nil).new(1)
-      renewal_done = Channel(Nil).new(1)
-      spawn do
-        loop do
-          select
-          when finished.receive
-            break
-          when timeout(lease / 3)
-            break if context.cancelled?
-            renewal_started = Time.instant
-            unless registration.ledger.renew(claim, lease).applied?
-              metrics.increment("lease_lost")
-              context.cancel
-              break
-            end
-            context.extend_lease(renewal_started, lease)
-          end
-        end
-      rescue
-        context.cancel
-        metrics.increment("renewal_errors")
-      ensure
-        renewal_done.send(nil)
-      end
+      active = ActiveLease.new(context, registration.ledger, acquired + lease / 3)
+      @lock.synchronize { @active[claim.token] = active }
       started = Time.instant
-      renewal_stopped = false
       parent = Fiber.current.joobq_traceparent
       span = Span.new(claim.traceparent, registration.name, "process", claim.id) if @telemetry
       Fiber.current.joobq_traceparent = span.try(&.traceparent) || claim.traceparent
       failed = true
       begin
-        # A claim arriving after drain began is not executed or renewed forever.
         context.cancel unless @running.get
         context.check!
         outcome = begin
@@ -312,27 +313,64 @@ module JoobQ::Delivery
           metrics.increment("handler_errors")
           Outcome.new(State::Dead)
         end
-        finished.send(nil)
-        renewal_done.receive
-        renewal_stopped = true
-        context.check!
-        result = registration.ledger.settle(claim, outcome.state, outcome.delay)
-        metrics.increment("settlement_#{result.to_s.downcase}")
-        failed = !(result.applied? || result.already_applied?) || outcome.state.dead?
+        # Serialize renewal/settlement for this lease only. Never hold the
+        # registry mutex over Redis I/O, nor release a slot while renewal uses it.
+        active.lock.synchronize do
+          active.finished.set(true)
+          context.check!
+          result = registration.ledger.settle(claim, outcome.state, outcome.delay)
+          metrics.increment("settlement_#{result.to_s.downcase}")
+          failed = !(result.applied? || result.already_applied?) || outcome.state.dead?
+        end
       rescue ex : LeaseLost
         metrics.increment("abandoned")
       rescue ex
-        # Infrastructure failures leave the claim recoverable. Do not turn an
-        # unknown completion into a different terminal outcome.
         metrics.increment("execution_errors")
       ensure
+        active.lock.synchronize { active.finished.set(true) }
         @telemetry.try { |sink| sink.publish(span.not_nil!.finish(failed)) }
         Fiber.current.joobq_traceparent = parent
         metrics.observe(Time.instant - started)
-        finished.send(nil) unless renewal_stopped
-        # Do not release the execution slot while renewal still uses its claim.
-        renewal_done.receive unless renewal_stopped
         @lock.synchronize { @active.delete(claim.token) }
+      end
+    end
+
+    private def renewal_loop : Nil
+      loop do
+        entries = @lock.synchronize { @active.values }
+        break unless @running.get || entries.any? { |entry| !entry.context.cancelled? }
+        now = Time.instant
+        entries.each do |entry|
+          next if entry.context.cancelled? || !entry.due?(now) || entry.renewing.swap(true)
+          @fibers.add(1)
+          spawn renew_entry(entry), name: "delivery-renew"
+        end
+        sleep Math.min(lease / 6, 20.milliseconds)
+      end
+    ensure
+      @fibers.sub(1)
+    end
+
+    private def renew_entry(entry : ActiveLease) : Nil
+      begin
+        entry.lock.synchronize do
+          unless entry.finished.get || entry.context.cancelled?
+            before = Time.instant
+            if entry.ledger.renew(entry.context.claim, lease).applied?
+              entry.context.extend_lease(before, lease)
+              entry.reschedule(before + lease / 3)
+            else
+              entry.context.cancel
+              metrics.increment("lease_lost")
+            end
+          end
+        end
+      rescue
+        entry.context.cancel
+        metrics.increment("renewal_errors")
+      ensure
+        entry.renewing.set(false)
+        @fibers.sub(1)
       end
     end
 

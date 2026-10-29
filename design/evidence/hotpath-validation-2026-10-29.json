@@ -1,0 +1,65 @@
+{
+  "scope": "Local optimized implementation; hosted results are separate.",
+  "core_full": {
+    "redis": "8.0.6",
+    "workers": 4,
+    "connection": "url",
+    "examples": 542,
+    "failures": 0,
+    "errors": 0,
+    "pending": 0
+  },
+  "pro_full": {
+    "redis": "8.0.2",
+    "workers": 4,
+    "connection": "url",
+    "examples": 414,
+    "failures": 0,
+    "errors": 0,
+    "pending": 0
+  },
+  "subsequent_dispatch_boundary_and_integrity_regressions": {
+    "examples": 12,
+    "failures": 0,
+    "errors": 0,
+    "pending": 0
+  },
+  "fault_soak": {
+    "kind": "bounded_soak",
+    "compiler": "1.22.1",
+    "redis": "8.0.2",
+    "tls": true,
+    "appendfsync": "always",
+    "requested_seconds": 60,
+    "elapsed_seconds": 60.1807297,
+    "offered_per_second": 50,
+    "accepted": 3000,
+    "completed": 3000,
+    "distinct_effects": 3000,
+    "attempts": 3001,
+    "injected_pauses": 5,
+    "gc_heap_bytes": 4014080,
+    "retained_records": 3000,
+    "four_hour_duration_met": false,
+    "metrics": "joobq_delivery_admission_accepted_total 3000\njoobq_delivery_admission_unknown_total 10\njoobq_delivery_repair_errors_total 8\njoobq_delivery_settlement_applied_total 3000\njoobq_delivery_settlement_unknown_total 1\njoobq_delivery_worker_errors_total 39\njoobq_delivery_execution_seconds_sum 1.399574958999999\njoobq_delivery_execution_seconds_count 3001\njoobq_delivery_active 0\njoobq_delivery_capacity 8\njoobq_delivery_pending{queue=\"work\"} 0\njoobq_delivery_leased{queue=\"work\"} 0\njoobq_delivery_quarantined{queue=\"work\"} 0\n"
+  },
+  "process_faults": [
+    {
+      "fault": "SIGKILL",
+      "accepted": 20,
+      "completed": 20,
+      "distinct_effects": 20,
+      "attempts": 21,
+      "shutdown_seconds": 0.0011970569994446123
+    },
+    {
+      "fault": "SIGTERM",
+      "accepted": 1,
+      "completed": 1,
+      "distinct_effects": 1,
+      "attempts": 2,
+      "shutdown_seconds": 0.11674902099912288
+    }
+  ],
+  "enterprise_v1_gate_passed": false
+}

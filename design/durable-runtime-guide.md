@@ -135,3 +135,26 @@ Namespace backups do not include legacy workflow history or external systems.
 Workflow deployments need a coordinated full-store and application-data backup,
 including bridge markers and Pro history. Measured RPO/RTO, replica promotion,
 secret rotation and disaster recovery remain deployment acceptance work.
+
+## Concurrent hot-path execution
+
+The default `optimized_delivery: true` uses one Redis script round trip for a
+normal admission, claim, renewal or settlement. Script-cache misses require an
+extra round trip; corruption and exact-Int64 compatibility paths deliberately
+perform additional checks. `optimized_delivery: false` selects the original CAS
+path for diagnostics. Both paths use the same schema-1 records and may coexist;
+no data migration or reduced durability setting is required.
+
+Producers can call `runtime.admit` concurrently from Crystal fibers. Consumers
+share the runtime's fixed `capacity` across registered queues. Crystal execution
+threads and job slots are separate budgets: more threads do not necessarily
+increase throughput against one Redis primary. The benchmark runner compares
+1/4/8 execution threads with 16/32 concurrent producers and job slots. Its runs
+are sequential to avoid one load generator contaminating another's measurement.
+
+Short jobs no longer spawn renewal fibers. A shared scanner starts a renewal
+operation only when due, and renewal/settlement serialize on that lease's mutex.
+The handler retains its real slot across any in-flight operation, including drain.
+See `benchmarks/README.md` and the committed hot-path comparison for measured
+throughput, allocation and admission latency. These tests do not establish the
+35k/s sustained or four-hour release gates.

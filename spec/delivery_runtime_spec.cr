@@ -8,19 +8,21 @@ end
 describe JoobQ::Delivery::Runtime do
   it "renews slow handlers while keeping the shared execution budget" do
     runtime = durable_runtime
-    entered = Channel(Nil).new(10)
+    entered = Channel(String).new(10)
     release = Channel(Nil).new(10)
     ledger = runtime.register("slow") do |raw, context|
-      entered.send(nil)
+      entered.send(raw)
       release.receive
       context.check!
       JoobQ::Delivery::Outcome.new
     end
-    6.times { |i| runtime.admit("slow", i.to_s, "payload") }
+    6.times { |i| runtime.admit("slow", i.to_s, i.to_s) }
     runtime.start
+    running_ids = [] of String
     2.times do
       select
-      when entered.receive
+      when id = entered.receive
+        running_ids << id
       when timeout(5.seconds)
         fail "workers did not execute"
       end
@@ -30,7 +32,7 @@ describe JoobQ::Delivery::Runtime do
     ledger.claim("competitor").should_not be_nil # unclaimed work remains available
     runtime.active_count.should eq(2)
     6.times { release.send(nil) }
-    eventually { ledger.resolve("0").try(&.state.completed?) }.should be_true
+    eventually { running_ids.all? { |id| ledger.resolve(id).try(&.state.completed?) } }.should be_true
     runtime.stop(2.seconds).clean.should be_true
     runtime.metrics.prometheus.should contain("joobq_delivery_execution_seconds_count")
   ensure
@@ -158,5 +160,18 @@ describe "typed durable execution and supervision" do
     breaker.allow?.should be_false
     breaker.success
     3.times { breaker.allow?.should be_true }
+  end
+end
+
+describe "long-lived runtime dispatch" do
+  it "continues consuming across the signed 32-bit polling boundary" do
+    runtime = durable_runtime
+    runtime.@next_queue.set(Int32::MAX.to_u64)
+    ledger = runtime.register("work") { |raw, context| JoobQ::Delivery::Outcome.new }
+    3.times { |i| runtime.admit("work", i.to_s, "payload") }
+    runtime.start
+    eventually { (0..2).all? { |i| ledger.resolve(i.to_s).try(&.state.completed?) } }.should be_true
+  ensure
+    runtime.try(&.stop(2.seconds))
   end
 end

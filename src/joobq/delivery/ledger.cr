@@ -61,7 +61,7 @@ module JoobQ::Delivery
   end
 
   record Admission, code : AdmissionCode, id : String, entry : Record? = nil, reason : String? = nil
-  record Claim, id : String, token : String, owner : String, attempt : Int64, payload : String, traceparent : String? = nil
+  record Claim, id : String, token : String, owner : String, attempt : Int64, payload : String, traceparent : String? = nil, digest : String? = nil
 
   class Ledger
     # One authoritative write before derived indexes. If an index command fails,
@@ -98,13 +98,16 @@ module JoobQ::Delivery
       return 1
     LUA
 
+    @keys : Array(String)
+    @record_limit : String
+
     getter records_key : String
     getter ready_key : String
     getter leases_key : String
     getter gate_key : String
     getter quarantine_key : String
 
-    def initialize(@redis : Redis::PooledClient, namespace : String, queue : String, @max_payload_bytes : Int32 = 1_048_576, @max_records : Int32 = 100_000)
+    def initialize(@redis : Redis::PooledClient, namespace : String, queue : String, @max_payload_bytes : Int32 = 1_048_576, @max_records : Int32 = 100_000, @optimized : Bool = true)
       [namespace, queue].each do |name|
         raise ArgumentError.new("namespace and queue must be 1..128 safe characters") unless name.matches?(/\A[a-zA-Z0-9_.~-]{1,128}\z/)
       end
@@ -114,6 +117,8 @@ module JoobQ::Delivery
       @gate_key = "joobq:v1:#{namespace}:maintenance"
       @quarantine_key = "#{prefix}:quarantine"
       @records_key, @ready_key, @leases_key = "#{prefix}:records", "#{prefix}:ready", "#{prefix}:leases"
+      @keys = [records_key, ready_key, leases_key, gate_key]
+      @record_limit = @max_records.to_s
     end
 
     def admit(request_id : String, payload : String, delay : Time::Span = Time::Span.zero, traceparent : String? = nil) : Admission
@@ -122,6 +127,18 @@ module JoobQ::Delivery
       id = identity(request_id)
       if payload.empty? || payload.bytesize > @max_payload_bytes
         return Admission.new(AdmissionCode::Rejected, id, reason: "payload size is outside the configured limit")
+      end
+      if @optimized
+        entry = Record.new(id, payload, Digest::SHA256.hexdigest(payload))
+        entry.traceparent = traceparent
+        entry.state = State::Scheduled if delay > Time::Span.zero
+        result = Scripts::ADMIT.call(@redis, keys, [id, entry.to_json, delay.total_milliseconds.to_i64.to_s, @record_limit]).as(Array)
+        case result[0].as(Int64)
+        when -1
+          return Admission.new(AdmissionCode::Rejected, id, reason: "retained record capacity reached")
+        when 1
+          return admission_for(decode(id, result[1].as(String)), id, payload)
+        end
       end
       if existing = load(id)
         return admission_for(existing[0], id, payload)
@@ -149,6 +166,25 @@ module JoobQ::Delivery
     def claim(owner : String, lease : Time::Span = 30.seconds) : Claim?
       raise ArgumentError.new("owner must not be empty") if owner.empty?
       duration = positive_ms(lease)
+      if @optimized
+        token = UUID.random.to_s
+        result = Scripts::CLAIM.call(@redis, keys, [owner, token, duration.to_s]).as(Array)
+        case result[0].as(Int64)
+        when 0
+          return nil
+        when 1
+          id = result[1].as(String)
+          original = result[2].as(String)
+          attempt = result[3].as(Int64)
+          begin
+            entry = decode(id, original)
+          rescue CorruptRecord
+            Scripts::QUARANTINE_CLAIM.call(@redis, keys + [quarantine_key], [id, token, owner, attempt.to_s, original])
+            return nil
+          end
+          return Claim.new(id, token, owner, attempt, entry.payload, entry.traceparent, entry.digest)
+        end
+      end
       now = now_ms
       @redis.zrangebyscore(ready_key, "-inf", now.to_s, limit: [0, 100]).each do |value|
         id = value.as(String)
@@ -166,7 +202,7 @@ module JoobQ::Delivery
         entry.owner = owner
         entry.lease_until = now + duration
         if write(entry, raw)
-          return Claim.new(id, token, owner, entry.attempt, entry.payload, entry.traceparent)
+          return Claim.new(id, token, owner, entry.attempt, entry.payload, entry.traceparent, entry.digest)
         end
       end
       nil
@@ -174,6 +210,9 @@ module JoobQ::Delivery
 
     def renew(claim : Claim, lease : Time::Span = 30.seconds) : Settlement
       duration = positive_ms(lease)
+      if @optimized && (result = transition(claim, State::Leased, duration))
+        return result
+      end
       entry, raw = load(claim.id) || return Settlement::Stale
       return Settlement::Stale unless owns?(entry, claim) && entry.lease_until > now_ms
       previous_deadline = entry.lease_until
@@ -187,7 +226,10 @@ module JoobQ::Delivery
       unless state.completed? || state.dead? || state.scheduled?
         raise ArgumentError.new("settlement must be Completed, Dead or Scheduled")
       end
-      raise ArgumentError.new("delay must not be negative") if delay < Time::Span.zero
+      raise ArgumentError.new("delay must be 0..365 days") unless Time::Span.zero <= delay <= 365.days
+      if @optimized && (result = transition(claim, state, delay.total_milliseconds.to_i64))
+        return result
+      end
       entry, raw = load(claim.id) || return Settlement::Stale
       same_claim = entry.token == claim.token && entry.owner == claim.owner && entry.attempt == claim.attempt
       return Settlement::AlreadyApplied if same_claim && entry.state == state
@@ -276,7 +318,18 @@ module JoobQ::Delivery
     end
 
     private def keys : Array(String)
-      [records_key, ready_key, leases_key, gate_key]
+      @keys
+    end
+
+    private def transition(claim : Claim, state : State, duration : Int64) : Settlement?
+      result = Scripts::TRANSITION.call(@redis, keys, [claim.id, claim.token, claim.owner, claim.attempt.to_s,
+                                                       state.to_s.downcase, duration.to_s, claim.payload, claim.digest || Digest::SHA256.hexdigest(claim.payload)]).as(Array)
+      case result[0].as(Int64)
+      when 0 then Settlement::Stale
+      when 1 then Settlement::Applied
+      when 2 then Settlement::AlreadyApplied
+      else        nil # Preserve exact Int64/legacy envelope handling in the CAS path.
+      end
     end
 
     private def scores(entry : Record) : {String, String}

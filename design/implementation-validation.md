@@ -31,7 +31,14 @@ all 3,000 receipts and ended with zero pending or leased entries. This is a
 restore compare receipts on an independent Redis; they do not measure an actual
 application's RPO/RTO or external data consistency.
 
-## Load evidence and failed acceptance gate
+## Latest hot-path measurements
+
+The subsequent optimization completed all 150,000 jobs across 15 comparison runs.
+At equal concurrency, median confirmed completion rate improved from 1,298 to
+4,051/s with 86.85% less allocation. See [the detailed comparison](hotpath-optimization.md)
+for raw data, concurrency settings and limitations. The 35k/s gate remains unmet.
+
+## Earlier load evidence and failed acceptance gate
 
 Two earlier diagnostic runs completed all IDs:
 
@@ -47,9 +54,10 @@ no configuration was weakened to obscure that result. Reconciliation is included
 in elapsed time. A final-code rerun and the smoke/process manifests are recorded
 in [machine-readable evidence](evidence/local-delivery-2026-10-29.json).
 
-The protocol currently performs multiple reads/CAS/JSON rewrites per job and
-retains terminal receipts. Profile server/client CPU, allocation and claim
-contention before choosing a bounded batch protocol. Preserve opaque payloads,
+The original protocol performed multiple reads/CAS/JSON rewrites per job. The
+new atomic path removes the client-side claim race and excess round trips, but
+retains terminal receipts. Further work should profile server/client CPU and
+allocation before choosing a bounded batch protocol. Preserve opaque payloads,
 large integers, ambiguous-result resolution and canonical-state-first recovery
 when optimizing; an enqueue-only benchmark is not an acceptable replacement.
 

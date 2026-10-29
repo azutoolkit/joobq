@@ -41,3 +41,18 @@ blocker for the full reference workload on this environment.
 
 Evidence is in `design/implementation-validation.md`. Do not weaken TLS, fsync,
 receipt conservation or the requested duration to report a passing v1 target.
+
+## Repeated concurrency comparison
+
+```sh
+crystal build benchmarks/leased.cr --release -o /tmp/joobq-leased
+python3 scripts/benchmark_delivery.py --binary /tmp/joobq-leased \
+  --jobs 10000 --repeats 3 --output /tmp/delivery-comparison.json
+```
+
+The same executable supports `BENCH_PROTOCOL=cas` or `atomic`; only ledger
+operation strategy changes. Capacity, payload, TLS, fsync and per-ID conservation
+remain the same. The report includes median rates, admission p99 and allocated
+bytes per job, plus every raw run. Both strategies use the current renewal
+scanner, so this comparison isolates the ledger optimization. Earlier evidence
+retains the pre-optimization runtime measurements.

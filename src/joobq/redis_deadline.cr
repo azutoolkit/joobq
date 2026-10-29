@@ -57,7 +57,33 @@ module JoobQ
     end
   end
 
+  # OpenSSL's BIO must receive an actual Socket for kernel-TLS controls. Keep
+  # the deadline on that socket instead of hiding it behind a generic IO.
+  module DeadlineSocket
+    property joobq_command_timeout : Time::Span?
+
+    private def unbuffered_read(slice : Bytes) : Int32
+      self.read_timeout = RedisBudget.remaining(joobq_command_timeout)
+      super
+    end
+
+    private def unbuffered_write(slice : Bytes) : Nil
+      # Recompute after partial progress; a slowly draining peer must not restart
+      # the total command budget on each successful write.
+      until slice.empty?
+        self.write_timeout = RedisBudget.remaining(joobq_command_timeout)
+        slice += @fd_lock.write { system_write(slice) }
+      end
+    end
+  end
+
+  class DeadlineTCPSocket < TCPSocket
+    include DeadlineSocket
+  end
+
   class DeadlineUNIXSocket < UNIXSocket
+    include DeadlineSocket
+
     def initialize(path : String, timeout : Time::Span?)
       super(Socket::Family::UNIX, Socket::Type::STREAM)
       connect(Socket::UNIXAddress.new(path), timeout: timeout)
@@ -74,19 +100,17 @@ module JoobQ
         if path = unixsocket
           # UNIXSocket construction has no DNS phase. The socket-level connect
           # still uses the remainder of the same operation budget.
-          wire = DeadlineUNIXSocket.new(path, RedisBudget.remaining(connect_timeout))
+          wire = DeadlineUNIXSocket.new(path, RedisBudget.remaining(connect_timeout)).tap { |socket| socket.joobq_command_timeout = command_timeout }
         else
-          wire = connect_tcp(host, port, dns_timeout, connect_timeout)
+          wire = connect_tcp(host, port, dns_timeout, connect_timeout).tap { |socket| socket.joobq_command_timeout = command_timeout }
         end
         wire.sync = true
-        budgeted = DeadlineIO.new(wire, wire, command_timeout)
         if context = ssl_context
-          budgeted.sync = true
-          ssl = OpenSSL::SSL::Socket::Client.new(budgeted, context, sync_close: true, hostname: host)
+          ssl = OpenSSL::SSL::Socket::Client.new(wire, context, sync_close: true, hostname: host)
           ssl.sync = true
           DeadlineIO.new(ssl, wire, command_timeout)
         else
-          budgeted
+          DeadlineIO.new(wire, wire, command_timeout)
         end
       rescue ex
         wire.try(&.close)
@@ -98,11 +122,11 @@ module JoobQ
       @socket.abort
     end
 
-    private def connect_tcp(host, port, dns_timeout, connect_timeout) : TCPSocket
+    private def connect_tcp(host, port, dns_timeout, connect_timeout) : DeadlineTCPSocket
       addresses = Socket::Addrinfo.tcp(host, port, timeout: RedisBudget.remaining(dns_timeout))
       last_error = nil.as(Exception?)
       addresses.each do |address|
-        socket = TCPSocket.new(address.family)
+        socket = DeadlineTCPSocket.new(address.family)
         begin
           socket.connect(address, timeout: RedisBudget.remaining(connect_timeout))
           return socket

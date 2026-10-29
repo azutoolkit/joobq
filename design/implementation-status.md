@@ -6,6 +6,8 @@ pre-v1. Implementation and bounded test evidence do not certify the complete
 
 ## Implemented for review
 
+- Atomic Redis hot paths with cached scripts, exact-integer fallback and lazy
+  renewal scheduling; [repeated concurrency results](hotpath-optimization.md).
 - Runtime-scoped queue registry, fixed execution capacity, renewable fenced
   leases, cooperative execution deadline, supervised worker/repair loops, local
   circuit breaker and bounded signal drain. Typed jobs and explicit raw handlers.
@@ -31,8 +33,8 @@ are still available and do not silently acquire the new delivery guarantees.
 ## Release blockers still open
 
 - Measured completion throughput is far below 35k/s; 30-minute reference workload
-  and four-hour fault soak have not passed. The current protocol repeatedly
-  reads/serializes canonical records and contends on candidate claim CAS.
+  and four-hour fault soak have not passed. The optimized path improves the equal-concurrency median from 1,298 to 4,051/s
+  but does not meet the required rate/duration.
 - Retained terminal receipts and journals have finite admission budgets but no
   safe archival/compaction policy. Size, retention horizon and sustained workload
   admission must be solved together before long-running production certification.

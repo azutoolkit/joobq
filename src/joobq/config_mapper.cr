@@ -209,6 +209,7 @@ module JoobQ
     end
 
     private def self.map_redis_config(config : Configure, redis_config : YAML::Any)
+      config.store_configured = true
       # Start with YAML values as defaults
       host = "localhost"
       port = 6379
@@ -258,8 +259,34 @@ module JoobQ
         pool_timeout = env_pool_timeout.to_f64
       end
 
+      # A URL (REDIS_URL, else `url` in the YAML file) carries host, port, ACL user, password, TLS and database
+      # together, so it is used as it is: host, port and password settings do not change it.
+      url = ENV["REDIS_URL"]?.presence || yaml_text(redis_config, "url", "redis.url")
+      if url
+        verify = RedisStore.verify_setting(ENV["REDIS_TLS_VERIFY"]?, "REDIS_TLS_VERIFY")
+        verify = yaml_flag(redis_config, "tls_verify", "redis.tls_verify") if verify.nil?
+        ca_file = ENV["REDIS_CA_FILE"]?.presence || yaml_text(redis_config, "ca_file", "redis.ca_file")
+        config.store = RedisStore.new(url: url, pool_size: pool_size, pool_timeout: pool_timeout,
+          verify: verify != false, ca_file: ca_file)
+        return
+      end
+
       # Create Redis store with proper parameters from YAML config and ENV overrides
       config.store = RedisStore.new(host, port, password, pool_size, pool_timeout)
+    end
+
+    private def self.yaml_text(redis_config : YAML::Any, key : String, name : String) : String?
+      value = redis_config[key]?
+      return unless value
+
+      value.as_s?.try(&.presence) || raise ConfigValidationError.new("#{name} must be a string")
+    end
+
+    private def self.yaml_flag(redis_config : YAML::Any, key : String, name : String) : Bool?
+      value = redis_config[key]?
+      return unless value
+
+      value.as_bool? || (value.raw == false ? false : raise ConfigValidationError.new("#{name} must be true or false"))
     end
 
     private def self.map_pipeline_config(config : Configure, pipeline_config : YAML::Any)

@@ -2,6 +2,8 @@ module JoobQ
   # BaseQueue remains as the abstract base class
   module BaseQueue
     abstract def add(job : String)
+    abstract def add!(job : String) : String
+    abstract def add_delayed(job : String, at : Time) : String
     abstract def start
     abstract def stop!
     abstract def pause!
@@ -70,6 +72,28 @@ module JoobQ
       raise ex # a key problem must reach the caller, not just the log
     rescue ex
       handle_enqueue_error(ex, job, "string_job")
+    end
+
+    # Strict variant of `add`: a payload that does not deserialize into this queue's job type raises
+    # (`JSON::ParseException`, `JSON::SerializableError`) instead of being logged, and the job id comes back.
+    # Store and connection errors raise as well. The job always lands on this queue: a `queue` in the payload is
+    # overridden, because the store pushes onto `job.queue`, which would otherwise let a payload pick any Redis key.
+    # `add`, `add_batch` and `add_batch_strings` still trust the `queue` in the payload, so do not feed them untrusted input.
+    def add!(job : String) : String
+      job_object = T.from_json(job)
+      job_object.queue = name
+      store.enqueue job_object
+    end
+
+    # Schedules a serialized job to move onto the queue at `at`, and returns its job id. Raises like `add!` when the
+    # payload does not fit this queue's job type, and, like `add!`, ignores a `queue` in the payload. The delayed-job
+    # scheduler moves it when it is due.
+    def add_delayed(job : String, at : Time) : String
+      job_object = T.from_json(job)
+      job_object.queue = name
+      job_object.scheduled!
+      store.schedule_job(job_object.to_json, at.to_unix_ms)
+      job_object.jid.to_s
     end
 
     def add(job : T)

@@ -7,7 +7,7 @@
 [![Crystal CI](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml/badge.svg?branch=master)](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**A high-performance, production-ready asynchronous job queue system for Crystal**
+**A Redis-backed asynchronous job queue system for Crystal**
 
 [Features](#key-features) • [Installation](#installation) • [Quick Start](#getting-started) • [Documentation](#table-of-contents) • [API Reference](#rest-api--openapi-specification)
 
@@ -17,7 +17,9 @@
 
 ## Overview
 
-**JoobQ** is an enterprise-grade asynchronous job queue system built for the Crystal programming language. Designed for both simplicity and scalability, JoobQ provides a robust framework for managing background job processing in applications of any size—from startup MVPs to large-scale distributed systems.
+> Enterprise v1 remains under review. The opt-in [leased runtime and migration guide](design/durable-runtime-guide.md) describes the new delivery API, management authentication and compatibility changes. See [validation and open release gates](design/implementation-validation.md) before deployment.
+
+**JoobQ** is an asynchronous job queue system built for the Crystal programming language. Designed for both simplicity and scalability, JoobQ provides a robust framework for managing background job processing in applications of any size—from startup MVPs to large-scale distributed systems.
 
 ### Why Choose JoobQ?
 
@@ -25,7 +27,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 
 **Performance**
 
-- Processes up to 35,000 jobs per second on modern hardware
+- Batched Redis operations; measure sustained completion throughput for your workload
 - Built on Crystal's efficient concurrency model
 - Optimized Redis operations for minimal latency
 
@@ -34,7 +36,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 - Automatic retry mechanisms with exponential backoff
 - Dead letter queue for failed job analysis
 - Job expiration and timeout handling
-- Graceful shutdown preventing job loss
+- Graceful draining and best-effort requeue; jobs must tolerate redelivery
 
 **Developer Experience**
 
@@ -52,7 +54,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 
 ### Key Features
 
-- **🚀 High Performance**: Process tens of thousands of jobs per second with Crystal's native performance
+- **🚀 Measured Performance**: Benchmark completed work with your payloads, TLS and durability settings; see [current evidence and open release gates](design/implementation-validation.md)
 - **⚡ Priority Queues**: Configure worker allocation based on queue priority
 - **🔄 Retry Logic**: Built-in exponential backoff and customizable retry strategies
 - **⏰ Scheduling**: Cron-style recurring jobs and delayed execution
@@ -169,12 +171,23 @@ REDIS_PORT=6379
 REDIS_POOL_SIZE=500
 REDIS_POOL_TIMEOUT=5.0
 REDIS_PASS=somepass
+REDIS_URL=rediss://user:password@redis.example.com:6380/0 # see "Connecting with a URL"
 REDIS_TIMEOUT=0.2
 JOOBQ_EVENTS_MAX_BYTES=67108864
 JOOBQ_PAYLOAD_KEYS=2026a:<64 hex digits>,2025:<64 hex digits> # see "Encrypting Job Arguments"
 ```
 
 `JOOBQ_EVENTS_MAX_BYTES` is the most memory the `joobq:events` stream may use (0 turns the limit off). The stream is also capped at about 50 000 entries. The byte limit is enforced from the worker heartbeat (every 10 s, at most one process checks per 10 s), so it is approximate: the stream can overshoot between beats, and it is trimmed to 90 % of the limit, never below 100 entries.
+
+### Connecting with a URL
+
+`REDIS_URL` (or `redis.url` in the YAML file) names the server in one value: `redis://[user:password@]host[:port][/database]`, `rediss://` for TLS, or `unix:///path/to/redis.sock[?db=N]`. A user name selects a Redis 6+ ACL user (`AUTH user password`; the `redis` shard alone only authenticates the default user), a password alone is the default user's, and the path is the database. Percent-encode `@ / : ? # %` inside the user name or password; a literal `+` stays a `+`. A query or fragment is refused (a credential put there would otherwise be ignored), except `db` on a unix URL.
+
+`REDIS_URL` is used as it is, by the YAML loader and by the default store alike: `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASS` do not change it, and it wins over `redis.url`. A URL that cannot be used stops start-up with a message that does not repeat it; JoobQ never falls back to a plain connection to `REDIS_HOST` because of a bad URL.
+
+For `rediss://` the server certificate must be signed by a certificate authority JoobQ trusts (the system's, plus the PEM file in `REDIS_CA_FILE` / `redis.ca_file` if given: the file adds to the system's authorities, it does not replace them) and must be issued for the host in the URL. A certificate any trusted authority issued for another host is refused. `REDIS_TLS_VERIFY=false` (`redis.tls_verify: false`) turns both checks off; any value other than true/false/1/0/yes/no/on/off is an error. SSLv3 and TLS 1.0/1.1 are refused. The `redis` shard sends no server name (SNI), so a server that chooses its certificate by name needs a default one. For a store made from a URL the password never appears in logs, error messages or `inspect`/`pp`, and a connection that fails to authenticate is closed, never used as the default user. The host/port constructor uses the same credential-safe client and timeout policy. When several YAML files are merged, the `redis` section of the last one that has one wins. A host written with a trailing dot or an IPv6 literal in brackets is accepted.
+
+In code: `JoobQ::RedisStore.new(url: "rediss://...", ca_file: "ca.pem")`; `store.close` ends current connections for either constructor; later requests reconnect.
 
 ### Configuration
 
@@ -581,44 +594,45 @@ docker run -p 8080:8080 -e SWAGGER_JSON=/docs/openapi.yaml -v $(pwd)/docs:/docs 
 
 ## Performance
 
-JoobQ is designed for high performance and scalability. In our benchmarks, JoobQ has easily achieved processing rates of 35,000 jobs per second. This performance is made possible by leveraging Crystal's concurrency model and efficient job handling mechanisms.
+The historical 35,000 jobs/second claim is not a v1 acceptance result. This audit did not reproduce a durable, end-to-end benchmark or the earlier cross-language comparison. Measure successful completions, queue growth, p95/p99 latency and memory with your payloads, Redis persistence and telemetry enabled.
 
-### Performance Comparison
+The opt-in leased runtime now supports bounded delivery batches. On the current
+test host, three independent Redis primaries with verified TLS and AOF `always`
+completed one million 1 KiB no-op jobs in 50.91 and 52.25 seconds, including
+fixture startup/cleanup and per-job receipt verification. See the
+[reproduction commands, raw evidence and limits](design/million-per-minute.md).
+These finite no-op runs do not establish sustained application throughput.
 
-To provide a clearer picture of JoobQ's performance, we have compared it with other popular job queue processing tools
-in various programming languages, including Sidekiq (Ruby), Celery (Python), Laravel Queue (PHP), and Quartz (Java).
-The results are summarized in the table below:
+Further [delivery allocation optimizations](design/delivery-allocation-optimization.md)
+reduced measured GC allocations by 26.7% for single jobs and 32.4% for batches.
+The optimized three-partition, 1 KiB run confirmed one million completions in
+43.98 seconds on the same host, with TLS and AOF `always` retained.
 
-| Job Queue Tool | Language | Jobs per Second |
-| -------------- | -------- | --------------- |
-| JoobQ          | Crystal  | 35,000          |
-| Sidekiq        | Ruby     | 23,500          |
-| Celery         | Python   | 15,000          |
-| Laravel Queue  | PHP      | 10,000          |
-| Quartz         | Java     | 25,000          |
+The [Queue, Worker and Scheduler allocation pass](design/legacy-hotpath-optimization.md)
+reduced managed allocations by 32.6%, 32.9% and 35.4%, respectively, in separate
+1 KiB admission, execution/settlement and delayed-promotion benchmarks.
+These optimize the existing list-based API; they do not enable Delivery leases.
 
-JoobQ Hardware benchmarks performed
+The subsequent [core/Pro performance review](design/performance-review.md) adds
+journal allocation improvements and fixes failed Redis transaction connection
+reuse, with Pro reconciliation and metrics optimizations in the paired branch.
 
-```info
-Hardware Overview:
-  Model Name:             MacBook Pro
-  Model Identifier:       Mac15,10
-  Model Number:           MRX53LL/A
-  Chip:                   Apple M3 Max
-  Total Number of Cores: 14 (10 performance and 4 efficiency)
-  Memory:                 36 GB
+See the [production v1 audit and prioritized roadmap](design/production-v1-audit.md)
+and [current implementation status](design/implementation-status.md). Safe receipt
+retention, sustained soak and operational acceptance remain release gates.
+
+### Runtime limits and structured logs
+
+`worker_batch_size` caps claimed/executing jobs per worker. A queue's normal capacity is approximately `workers * worker_batch_size`; this is not yet a global cap across replacement workers or detached application fibers.
+
+`REDIS_CONNECT_TIMEOUT` and `REDIS_COMMAND_TIMEOUT` configure DNS/connect and socket command limits in seconds (default `5.0`, positive). They are distinct from `REDIS_POOL_TIMEOUT`, and do not constitute an end-to-end request deadline. A command whose reply is lost raises `JoobQ::RedisOutcomeUnknown` instead of being replayed automatically. A later, explicit request reconnects. Resolve mutating requests by their application identity before retrying them.
+
+```crystal
+store = JoobQ::RedisStore.new(connect_timeout: 2.seconds, command_timeout: 3.seconds)
+Log.setup(:info, Log::IOBackend.new(STDOUT, formatter: JoobQ::JSONLogFormatter))
 ```
 
-As shown in the table, JoobQ outperforms many of the popular job queue processing tools, making it an excellent
-choice for high-throughput job processing needs.
-
-#### Disclaimer
-
-JoobQ out of the box provides great performance, achieving processing rates of up to 35,000 jobs per second in our
-benchmarks. However, it's important to note that with the right environment and settings, any job scheduler can be
-performant. Factors such as hardware specifications, network conditions, and job complexity can significantly impact
-the performance of job queue processing tools. Therefore, it's essential to optimize your environment and configurations
-to achieve the best possible performance for your specific use case.
+The JSON formatter preserves structured identifiers in `data` and application correlation fields in `context`. Redact sensitive values before logging. Durability depends on Redis persistence, replication and recovery configuration; external side effects need idempotency keys.
 
 ## Contributing
 
@@ -654,3 +668,21 @@ The MIT License (MIT). Please see License File for more information.
 [Elias J. Perez](https://github.com/eliasjpr/) - creator and maintainer
 [Crystal Language](https://crystal-lang.org/)
 [Redis](https://redis.io/)
+
+### Enterprise hardening branch
+
+The delivery/storage migration is tracked in [the implementation status](design/implementation-status.md).
+The experimental [delivery ledger](design/delivery-prototype.md) provides explicit admission outcomes,
+claim tokens and index repair in a separate versioned namespace. Existing queues still use the legacy
+protocol; this is not a production cutover or an enterprise-v1 release declaration.
+
+Run integration specs with `python3 scripts/run_integration.py` (or add `--url`). It starts isolated
+plain, second-store and verified TLS Redis fixtures and rejects skipped specs and runtime crashes.
+`python3 scripts/redis_restart_smoke.py` exercises an owned Redis SIGKILL/AOF restart. Both require
+Crystal, Redis with TLS support, OpenSSL and Python 3. They never use an inherited Redis endpoint.
+
+`RedisPipeline#execute_batch` takes `Proc(Redis::PipelineApi, Nil)` operations and returns the actual
+pipeline results. A batch uses one pooled connection; errors propagate and a failed pipeline's
+connection is discarded so unread replies cannot reach another borrower. Pipelines are not atomic:
+an error can follow partially applied commands. Resolve identities before retrying mutations.
+Legacy zero-argument batch closures are deprecated and execute independently.

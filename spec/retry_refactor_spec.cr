@@ -372,50 +372,17 @@ module JoobQ
         true.should be_true
       end
 
-      pending "processes due delayed jobs automatically" do
+      it "processes due delayed jobs automatically" do
         store = JoobQ.store.as(RedisStore)
-        queue_name = "example"
-
-        # Ensure scheduler is stopped before starting
-        JoobQ.config.delayed_job_scheduler.stop
-
-        # Clear any existing jobs in the queue and delayed set
-        store.clear_queue(queue_name)
-        store.redis.del(RedisStore::DELAYED_SET)
-        JoobQ.queues["example"].stop!
-
-        # Add a due job
         job = RetryTestJob.new(1)
-        job.retrying!
-        past_time = Time.local.to_unix_ms - 5000
-        store.redis.zadd(RedisStore::DELAYED_SET, past_time, job.to_json)
-
-        # Verify initial state
-        store.set_size(RedisStore::DELAYED_SET).should eq 1
-        store.queue_size(queue_name).should eq 0
-
-        # Start scheduler - use the configured one that has access to all queues
-        scheduler = JoobQ.config.delayed_job_scheduler
+        job.queue = "example"
+        store.schedule_job(job.to_json, 0_i64)
+        scheduler = DelayedJobScheduler.new(store)
         scheduler.start
-
-        # Wait for processing with retry logic for CI environment
-        max_attempts = 20
-        attempt = 0
-        while attempt < max_attempts
-          sleep 0.5.seconds
-          if store.queue_size(queue_name) == 1 && store.set_size(RedisStore::DELAYED_SET) == 0
-            break
-          end
-          attempt += 1
-        end
-
-        # Job should be moved to main queue
-        store.queue_size(queue_name).should eq 1
-        store.set_size(RedisStore::DELAYED_SET).should eq 0
-
-        scheduler.stop
-        # Give scheduler time to fully stop and prevent interference with other tests
-        sleep 0.5.seconds
+        eventually { store.queue_size("example") == 1 && store.set_size(RedisStore::DELAYED_SET) == 0 }.should be_true
+        JSON.parse(store.redis.lindex("example", 0).as(String))["jid"].as_s.should eq(job.jid.to_s)
+      ensure
+        scheduler.try(&.stop)
       end
     end
 

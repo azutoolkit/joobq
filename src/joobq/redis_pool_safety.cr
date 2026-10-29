@@ -118,7 +118,7 @@ class Pool(T)
     else
       select
       when @tokens.receive
-      when timeout(@timeout.seconds)
+      when timeout(JoobQ::RedisBudget.remaining(@timeout.seconds).not_nil!)
         raise IO::TimeoutError.new("Read timed out")
       end
     end

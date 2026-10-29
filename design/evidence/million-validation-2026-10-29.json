@@ -1,0 +1,42 @@
+{
+  "core": {
+    "examples": 554,
+    "failures": 0,
+    "errors": 0,
+    "pending": 0,
+    "workers": 6,
+    "redis": "8.0.2",
+    "configuration": "URL with required TLS/independent-store fixtures"
+  },
+  "process_faults": {
+    "batch_size": 8,
+    "process_faults": [
+      {
+        "fault": "SIGKILL",
+        "accepted": 20,
+        "completed": 20,
+        "distinct_effects": 20,
+        "attempts": 28,
+        "shutdown_seconds": 0.0012719619990093634
+      },
+      {
+        "fault": "SIGTERM",
+        "accepted": 8,
+        "completed": 8,
+        "distinct_effects": 8,
+        "attempts": 16,
+        "shutdown_seconds": 0.11387138899954152
+      }
+    ]
+  },
+  "hosted_ci": "Not run for these uncommitted changes; added batch process-fault coverage to CI.",
+  "pro": {
+    "examples": 414,
+    "failures": 0,
+    "errors": 0,
+    "pending": 0,
+    "workers": 6,
+    "redis": "8.0.2",
+    "configuration": "URL with owned core harness; Pro lib/joobq symlinks this modified core worktree; not a frozen remote install"
+  }
+}

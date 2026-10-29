@@ -7,7 +7,7 @@ module JoobQ
     end
 
     describe "concurrent job enqueue" do
-      pending "handles multiple concurrent enqueues" do
+      it "handles multiple concurrent enqueues" do
         JoobQ.store.reset
         queue = JoobQ["example"]
         store = JoobQ.store.as(RedisStore)
@@ -16,18 +16,28 @@ module JoobQ
         store.clear_queue("example")
 
         # Enqueue 100 jobs concurrently
-        channel = Channel(String).new
+        channel = Channel(String | Exception).new(100)
         100.times do |i|
           spawn do
             job = ExampleJob.new(i)
             jid = store.enqueue(job)
             channel.send(jid)
+          rescue ex
+            channel.send(ex)
           end
         end
 
         # Collect all JIDs
         jids = [] of String
-        100.times { jids << channel.receive }
+        100.times do
+          select
+          when result = channel.receive
+            raise result if result.is_a?(Exception)
+            jids << result
+          when timeout(5.seconds)
+            fail "concurrent enqueue timed out"
+          end
+        end
 
         # All JIDs should be unique
         jids.uniq.size.should eq(100)

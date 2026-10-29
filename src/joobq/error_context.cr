@@ -293,7 +293,7 @@ module JoobQ
       )
 
       begin
-        DeadLetterManager.add(job)
+        DeadLetterManager.add(job, queue.store)
       rescue ex
         Log.error &.emit(
           "Failed to send job to dead letter queue",
@@ -301,6 +301,7 @@ module JoobQ
           queue: queue.name,
           error: ex.message || "Unknown error"
         )
+        raise ex # The worker must retain its processing copy on failed settlement.
       end
 
       job

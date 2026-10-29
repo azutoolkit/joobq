@@ -6,7 +6,7 @@ module JoobQ
       io = IO::Memory.new
       context = HTTP::Server::Context.new(HTTP::Request.new(method, path), HTTP::Server::Response.new(io))
       fell_through = false
-      handler = APIHandler.new
+      handler = APIHandler.new(unsafe_no_auth: true)
       handler.next = ->(_ctx : HTTP::Server::Context) { fell_through = true }
       handler.call(context)
       context.response.flush
@@ -44,6 +44,37 @@ module JoobQ
 
     it "answers 404 for an unknown job" do
       dispatch.call("POST", "/joobq/jobs/#{UUID.random}/retry")[0].should eq(404)
+    end
+  end
+end
+
+module JoobQ
+  describe "POST /joobq/jobs deprecation" do
+    # This route enqueues without authentication; its replacement is JoobQ.enqueue behind an authenticated API.
+    post_jobs = ->(body : String) do
+      io = IO::Memory.new
+      request = HTTP::Request.new("POST", "/joobq/jobs", HTTP::Headers{"Content-Type" => "application/json"}, body)
+      context = HTTP::Server::Context.new(request, HTTP::Server::Response.new(io))
+      handler = APIHandler.new(unsafe_no_auth: true)
+      handler.next = ->(_ctx : HTTP::Server::Context) { }
+      handler.call(context)
+      context.response.flush
+      context.response
+    end
+
+    it "marks a successful response as deprecated" do
+      JoobQ["example"].clear
+
+      response = post_jobs.call(%({"queue":"example","job_type":"ExampleJob","data":{"x":1}}))
+
+      response.headers["Deprecation"]?.should eq("true")
+    end
+
+    it "marks a rejected request as deprecated too" do
+      response = post_jobs.call("not json")
+
+      response.status_code.should eq(400)
+      response.headers["Deprecation"]?.should eq("true")
     end
   end
 end

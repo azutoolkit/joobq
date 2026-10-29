@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-29",
+  "scope": "Local working-tree implementation following core 0e35f14; recorded in the same change as the tested code. Not hosted CI certification.",
+  "load_final_code": {
+    "compiler": "1.22.1",
+    "redis": "8.0.2",
+    "workers": "4",
+    "capacity": 16,
+    "producers": 16,
+    "tls": true,
+    "appendfsync": "always",
+    "payload_bytes": 1024,
+    "accepted": 10000,
+    "confirmed_completed": 10000,
+    "elapsed_seconds": 7.272282515,
+    "settled_per_second": 1375.0840921503998,
+    "admission_p50_ms": 2.239996,
+    "admission_p99_ms": 5.285326,
+    "gc_heap_bytes": 9654272,
+    "gc_total_bytes": 1875939955,
+    "meets_35000_settled_per_second": false,
+    "duration_gate_met": false,
+    "metrics": "joobq_delivery_admission_accepted_total 10000\njoobq_delivery_settlement_applied_total 10000\njoobq_delivery_execution_seconds_sum 15.668428425999968\njoobq_delivery_execution_seconds_count 10000\n"
+  },
+  "bounded_soak": {
+    "kind": "bounded_soak",
+    "compiler": "1.22.1",
+    "redis": "8.0.2",
+    "tls": true,
+    "appendfsync": "always",
+    "requested_seconds": 60,
+    "elapsed_seconds": 60.157655185,
+    "offered_per_second": 50,
+    "accepted": 3000,
+    "completed": 3000,
+    "distinct_effects": 3000,
+    "attempts": 3001,
+    "injected_pauses": 5,
+    "gc_heap_bytes": 4067328,
+    "retained_records": 3000,
+    "four_hour_duration_met": false,
+    "metrics": "joobq_delivery_admission_accepted_total 3000\njoobq_delivery_admission_unknown_total 10\njoobq_delivery_repair_errors_total 8\njoobq_delivery_settlement_applied_total 3000\njoobq_delivery_settlement_unknown_total 1\njoobq_delivery_worker_errors_total 40\njoobq_delivery_execution_seconds_sum 1.6130272879999987\njoobq_delivery_execution_seconds_count 3001\njoobq_delivery_active 0\njoobq_delivery_capacity 8\njoobq_delivery_pending{queue=\"work\"} 0\njoobq_delivery_leased{queue=\"work\"} 0\njoobq_delivery_quarantined{queue=\"work\"} 0\n"
+  },
+  "process_faults": [
+    {
+      "fault": "SIGKILL",
+      "accepted": 20,
+      "completed": 20,
+      "distinct_effects": 20,
+      "attempts": 21,
+      "shutdown_seconds": 0.0011976280002272688
+    },
+    {
+      "fault": "SIGTERM",
+      "accepted": 1,
+      "completed": 1,
+      "distinct_effects": 1,
+      "attempts": 2,
+      "shutdown_seconds": 0.11375033900003473
+    }
+  ],
+  "full_suites": [
+    {
+      "repository": "core",
+      "redis": "8.0.2",
+      "workers": 4,
+      "connection": "legacy",
+      "examples": 537
+    },
+    {
+      "repository": "core",
+      "redis": "7.4.12",
+      "workers": 1,
+      "connection": "url",
+      "examples": 537
+    },
+    {
+      "repository": "pro",
+      "redis": "8.0.2",
+      "workers": 4,
+      "connection": "legacy",
+      "examples": 414
+    },
+    {
+      "repository": "pro",
+      "redis": "7.4.12",
+      "workers": 1,
+      "connection": "url",
+      "examples": 414
+    }
+  ],
+  "enterprise_v1_gate_passed": false
+}

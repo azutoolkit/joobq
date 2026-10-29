@@ -1,0 +1,33 @@
+# Delivery ledger prototype
+
+`JoobQ::Delivery::Ledger` implements the storage contract in [ADR 001](adr/001-delivery-contract.md). It remains under enterprise review. `Delivery::Runtime` now supplies leased execution and repair, and Pro workflows can explicitly opt into a delivery bridge. Existing `Queue`/`Worker` and producer helpers retain the legacy protocol. Constructing a ledger alone does not upgrade a queue. See [runtime and migration instructions](durable-runtime-guide.md).
+
+```crystal
+store = JoobQ::RedisStore.new(url: ENV.fetch("REDIS_URL"))
+ledger = JoobQ::Delivery::Ledger.new(store.redis, "tenant_a", "invoices")
+result = ledger.admit("invoice-123:send:v1", %({"invoice_id":123}))
+case result.code
+when .accepted?
+  # The identity has an authoritative record (possibly already terminal).
+when .rejected?
+  # Payload is empty/oversized or this identity already has different bytes.
+when .unknown?
+  # Resolve this SAME request ID. Never invent a new ID for an ambiguous write.
+  record = ledger.resolve("invoice-123:send:v1")
+end
+
+if claim = ledger.claim("worker-unique-instance-id", lease: 30.seconds)
+  # Execute an idempotent effect here. Renew while running; handle Stale/Unknown.
+  outcome = ledger.settle(claim)
+end
+```
+
+Admission stores opaque payload bytes and a versioned typed envelope in an authoritative Redis hash. Application JSON is never decoded in Lua: payload is an opaque string, preserving large integers and decimal spellings. Atomic scripts decode only the envelope, with exact-range checks on metadata and a Crystal Int64 fallback. Compare-and-set transitions update the canonical envelope first; ready/lease sorted sets are repairable indexes. A Lua error after the authoritative write does not roll it back. Resolve the receipt and run repair; never interpret an error as proof the write did not occur.
+
+Claims carry a fresh token, owner, attempt and Redis-time lease deadline. Renewal and settlement check token, owner, attempt, payload integrity and the current deadline inside the atomic Lua operation. The compatibility fallback compares the complete previous envelope. Expired/stale claims cannot change a newer attempt. Repeating settlement for the same token and destination returns `AlreadyApplied`; the first applied delay wins. Claims whose responses are lost remain leased and become recoverable on expiry. Lease loss cannot cancel an already running external effect.
+
+Call `repair(cursor)` repeatedly until it returns `"0"`, and repeat complete passes continuously. It reconstructs indexes and releases expired claims using the observed canonical envelope as a compare-and-set guard. HSCAN `count` is a work hint, not a strict memory bound. Wrong-type keys or missing Redis privileges require operator repair; they are not silently deleted. Direct resolution of corrupt envelopes raises `CorruptRecord`. Claim/repair paths copy invalid bytes to quarantine, retain the authoritative original and skip its derived indexes so healthy work can progress.
+
+Limits: 1 MiB default payload, 1–1024 byte request ID, safe namespace/queue names, 1 ms–24 h leases. No automatic receipt retention or terminal deletion exists yet. Long-lived production workloads need bounded archival/tombstones before adoption. The runtime now supplies per-runtime execution budgets, supervised repair, finite retained-record admission and explicit migration tooling. Redis Cluster, clock rollback acceptance and a deployment-wide capacity policy remain open. No automatic compactor exists.
+
+The reference fault profile is one Redis primary, `maxmemory-policy noeviction`, AOF with `appendfsync always`, and intact storage. The tests prove specific contention, deadline, partial-index and process-restart cases. They do not establish zero loss under disk loss, asynchronous failover, or exactly-once business effects. See the remaining P04–P16 gates in [the implementation plan](enterprise-v1-plan.md).

@@ -1,7 +1,15 @@
 module JoobQ
   # BaseQueue remains as the abstract base class
   module BaseQueue
+    # Override for explicitly injected execution dependencies; serialized jobs do
+    # not carry process-local store handles.
+    def perform(job : Job) : Nil
+      job.perform
+    end
+
     abstract def add(job : String)
+    abstract def add!(job : String) : String
+    abstract def add_delayed(job : String, at : Time) : String
     abstract def start
     abstract def stop!
     abstract def pause!
@@ -21,7 +29,7 @@ module JoobQ
   # The Queue class now focuses solely on queue operations
   class Queue(T)
     include BaseQueue
-    getter store : Store = ::JoobQ.config.store
+    getter store : Store
     getter name : String
     getter job_type : String = T.name
     getter total_workers : Int32
@@ -33,14 +41,32 @@ module JoobQ
     @started = Atomic(Bool).new(false)
 
     def initialize(@name : String, @total_workers : Int32,
-                   @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil)
+                   @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil,
+                   *, @store : Store = ::JoobQ.config.store, @handler : Proc(T, Nil)? = nil)
       @pause = CachedFlag.new(PAUSE_CACHE_TTL) { store.paused?(name) }
+    end
+
+    def perform(job : Job) : Nil
+      if job.is_a?(T)
+        if handler = @handler
+          handler.call(job)
+        else
+          job.perform
+        end
+      else
+        raise ArgumentError.new("Job type does not belong to queue #{name}")
+      end
     end
 
     # Starting a running queue does nothing: `reprocess_busy_jobs!` would move a job that a worker is
     # still processing back onto the queue, and it would run twice.
     def start
       verify_encryption_keys
+      if redis_store = store.as?(RedisStore)
+        if redis_store.redis.exists("joobq:delivery-bridge:#{name}") > 0
+          raise ArgumentError.new("queue is bound to leased delivery; a legacy worker cannot start")
+        end
+      end
       return if @started.swap(true)
 
       reprocess_busy_jobs!
@@ -72,6 +98,28 @@ module JoobQ
       handle_enqueue_error(ex, job, "string_job")
     end
 
+    # Strict variant of `add`: a payload that does not deserialize into this queue's job type raises
+    # (`JSON::ParseException`, `JSON::SerializableError`) instead of being logged, and the job id comes back.
+    # Store and connection errors raise as well. The job always lands on this queue: a `queue` in the payload is
+    # overridden, because the store pushes onto `job.queue`, which would otherwise let a payload pick any Redis key.
+    # `add`, `add_batch` and `add_batch_strings` still trust the `queue` in the payload, so do not feed them untrusted input.
+    def add!(job : String) : String
+      job_object = T.from_json(job)
+      job_object.queue = name
+      store.enqueue job_object
+    end
+
+    # Schedules a serialized job to move onto the queue at `at`, and returns its job id. Raises like `add!` when the
+    # payload does not fit this queue's job type, and, like `add!`, ignores a `queue` in the payload. The delayed-job
+    # scheduler moves it when it is due.
+    def add_delayed(job : String, at : Time) : String
+      job_object = T.from_json(job)
+      job_object.queue = name
+      job_object.scheduled!
+      store.schedule_job(job_object.to_json, at.to_unix_ms)
+      job_object.jid.to_s
+    end
+
     def add(job : T)
       store.enqueue job
     rescue ex : Encryption::Error
@@ -82,7 +130,7 @@ module JoobQ
 
     # Batch add jobs with pipelining for improved performance
     def add_batch(jobs : Array(T))
-      add_batch_pipelined(jobs)
+      store.enqueue_batch(jobs, JoobQ.config.pipeline_batch_size)
     rescue ex : Encryption::Error
       raise ex
     rescue ex
@@ -98,27 +146,30 @@ module JoobQ
       Log.error &.emit("Error adding job batch strings", queue: name, job_count: jobs.size, error: ex.message)
     end
 
-    private def add_batch_pipelined(jobs : Array(T))
-      store.enqueue_batch(jobs, JoobQ.config.pipeline_batch_size)
-    end
-
     private def add_batch_strings_pipelined(jobs : Array(String))
       # Convert strings to Job objects for batch enqueuing
       # A string that cannot be loaded here (a sealed value this process cannot open, say) is not dropped, and does not
       # take the rest of the batch with it: it goes onto the queue as it is, for a worker to deal with.
-      job_objects = [] of T
-      unreadable = [] of String
+      job_objects = Array(T).new(jobs.size)
+      json_sizes = Array(Int32).new(jobs.size)
+      unreadable = nil
       jobs.each do |job_str|
         job_objects << T.from_json(job_str)
+        json_sizes << job_str.bytesize
       rescue ex : JSON::Error
         Log.warn &.emit("Job kept as stored; it could not be loaded here", queue: name, error: ex.message)
-        unreadable << job_str
+        (unreadable ||= [] of String) << job_str
       end
       # After the rest is stored, and in one transaction: if enqueue_batch raises, nothing was written for the
       # unreadable ones, so a caller that retries the whole batch cannot duplicate them.
-      store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
-      if !unreadable.empty? && (redis_store = store).is_a?(RedisStore)
-        redis_store.redis.multi { |multi| unreadable.each { |job_str| multi.rpush(name, job_str) } }
+      if redis_store = store.as?(RedisStore)
+        # Still serialize typed jobs (including encryption converters); size is only a buffer capacity hint.
+        redis_store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size, json_sizes: json_sizes)
+        if raw_jobs = unreadable
+          redis_store.redis.multi { |multi| raw_jobs.each { |job_str| multi.rpush(name, job_str) } }
+        end
+      else
+        store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
       end
     end
 
@@ -186,7 +237,7 @@ module JoobQ
     end
 
     def jobs(page_number : Int32 = 1, page_size : Int32 = 200)
-      store.list_jobs(name)
+      store.list_jobs(name, page_number, page_size)
     end
 
     def stop!

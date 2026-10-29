@@ -118,6 +118,10 @@ module JoobQ
     end
 
     def enqueue_due_jobs(current_time = Time.local)
+      if redis_store = store.as?(RedisStore)
+        redis_store.promote_due_jobs(current_time, @delay_set)
+        return
+      end
       results = store.fetch_due_jobs(current_time, @delay_set)
       enqueue_due_jobs_pipelined(results, current_time)
     end
@@ -130,10 +134,8 @@ module JoobQ
 
       results.each do |job_data|
         begin
-          job_json = JSON.parse(job_data)
-          queue_name = job_json["queue"].as_s
-          jobs_by_queue[queue_name] ||= [] of String
-          jobs_by_queue[queue_name] << job_data
+          queue_name = SerializedJob.queue_name(job_data)
+          (jobs_by_queue[queue_name] ||= [] of String) << job_data
         rescue ex : Exception
           handle_scheduler_error(ex, job_data, current_time)
         end
@@ -147,33 +149,21 @@ module JoobQ
             enqueue_jobs_batch_to_queue(queue, jobs)
           else
             Log.warn &.emit("Queue not found", queue: queue_name)
-            # Fallback to individual enqueuing via store
-            jobs.each do |job_data|
-              begin
-                # Parse job data to get queue name and enqueue directly
-                job_json = JSON.parse(job_data)
-                queue_name = job_json["queue"].as_s
-                JoobQ.store.redis.rpush(queue_name, job_data)
-              rescue ex : Exception
-                handle_scheduler_error(ex, job_data, current_time)
-              end
-            end
+            enqueue_raw_jobs(queue_name, jobs, current_time)
           end
         rescue ex : Exception
           Log.error &.emit("Error enqueuing batch to queue", queue: queue_name,
             job_count: jobs.size, error: ex.message)
-          # Fallback to individual enqueuing via store
-          jobs.each do |job_data|
-            begin
-              # Parse job data to get queue name and enqueue directly
-              job_json = JSON.parse(job_data)
-              queue_name = job_json["queue"].as_s
-              JoobQ.store.redis.rpush(queue_name, job_data)
-            rescue ex : Exception
-              handle_scheduler_error(ex, job_data, current_time)
-            end
-          end
+          enqueue_raw_jobs(queue_name, jobs, current_time)
         end
+      end
+    end
+
+    private def enqueue_raw_jobs(queue_name : String, jobs : Array(String), current_time : Time)
+      jobs.each do |job_data|
+        JoobQ.store.redis.rpush(queue_name, job_data)
+      rescue ex : Exception
+        handle_scheduler_error(ex, job_data, current_time)
       end
     end
 

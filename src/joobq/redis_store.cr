@@ -1,3 +1,5 @@
+require "digest/sha1"
+
 module JoobQ
   class RedisStore < Store
     DELAYED_SET      = "joobq:delayed_jobs"
@@ -5,11 +7,42 @@ module JoobQ
     private PROCESSING_QUEUE = "joobq:processing"
     private BLOCKING_TIMEOUT = 0.5
 
+    # The configured store when it is a RedisStore, so classes that default to it talk to the same Redis as the
+    # queues. Only before any configuration exists (or for another Store) is a store built from ENV.
+    @@instance : RedisStore? = nil
+
     def self.instance : RedisStore
-      @@instance ||= new
+      JoobQ.configured_store?.as?(RedisStore) || (@@instance ||= from_env)
     end
 
+    # The store the environment asks for: REDIS_URL (with REDIS_TLS_VERIFY and REDIS_CA_FILE) when it is set, otherwise
+    # REDIS_HOST, REDIS_PORT and REDIS_PASS. A REDIS_URL that cannot be used raises `RedisEndpoint::Invalid` rather
+    # than falling back to a plain connection to REDIS_HOST.
+    def self.from_env : RedisStore
+      url = ENV["REDIS_URL"]?.presence
+      return new unless url
+
+      new(url: url, verify: verify_setting(ENV["REDIS_TLS_VERIFY"]?, "REDIS_TLS_VERIFY") != false,
+        ca_file: ENV["REDIS_CA_FILE"]?.presence)
+    end
+
+    # `true`/`1`/`yes`/`on` and `false`/`0`/`no`/`off` (any case); nil when `value` is unset or empty. Anything else
+    # raises, because a misspelt "off" would otherwise be read as "on".
+    def self.verify_setting(value : String?, name : String) : Bool?
+      word = value.try(&.strip.downcase).presence
+      return unless word
+      return true if %w[true 1 yes on].includes?(word)
+      return false if %w[false 0 no off].includes?(word)
+
+      raise RedisEndpoint::Invalid.new("#{name} must be true or false")
+    end
+
+    # The parsed URL of a store made with `url:`; nil for one made with host and port.
+    getter endpoint : RedisEndpoint? = nil
+
     getter redis : Redis::PooledClient
+    getter host : String
+    getter port : Int32
     getter pool_size : Int32
     getter pool_timeout : Float64
     getter health : RedisHealth
@@ -20,14 +53,13 @@ module JoobQ
                    @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
                    @password : String? = ENV["REDIS_PASS"]?,
                    @pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "500").to_i,
-                   @pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64)
-      @redis = Redis::PooledClient.new(
-        host: @host,
-        port: @port,
-        password: @password,
-        pool_size: @pool_size,
-        pool_timeout: @pool_timeout
-      )
+                   @pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64,
+                   connect_timeout : Time::Span = ENV.fetch("REDIS_CONNECT_TIMEOUT", "5.0").to_f64.seconds,
+                   command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds,
+                   operation_timeout : Time::Span = ENV.fetch("REDIS_OPERATION_TIMEOUT", "5.0").to_f64.seconds)
+      raise ArgumentError.new("Redis timeouts must be positive") if connect_timeout <= Time::Span.zero || command_timeout <= Time::Span.zero
+      @redis = RedisPool.new(RedisEndpoint.new(@host, @port, password: @password),
+        @pool_size, @pool_timeout, connect_timeout, command_timeout, operation_timeout)
 
       # Initialize specialized components
       @health = RedisHealth.new(@redis, @pool_size, @pool_timeout)
@@ -41,6 +73,45 @@ module JoobQ
         pool_size: @pool_size,
         pool_timeout: @pool_timeout
       )
+    end
+
+    # Connects to the server a `redis://` or `rediss://` URL names (see `RedisEndpoint`): as an ACL user when the
+    # URL has a user name, over TLS for `rediss`, on the database in its path. `verify` and `ca_file` control how
+    # the server certificate is checked.
+    def initialize(*, url : String, pool_size : Int32 = ENV.fetch("REDIS_POOL_SIZE", "500").to_i,
+                   pool_timeout : Float64 = ENV.fetch("REDIS_POOL_TIMEOUT", "2.0").to_f64,
+                   verify : Bool = true, ca_file : String? = nil,
+                   connect_timeout : Time::Span = ENV.fetch("REDIS_CONNECT_TIMEOUT", "5.0").to_f64.seconds,
+                   command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds,
+                   operation_timeout : Time::Span = ENV.fetch("REDIS_OPERATION_TIMEOUT", "5.0").to_f64.seconds)
+      endpoint = RedisEndpoint.parse(url, verify, ca_file)
+      @endpoint = endpoint
+      @host = endpoint.host
+      @port = endpoint.port
+      @password = nil # the endpoint's clients hold the credentials; the store keeps none
+      @pool_size = pool_size
+      @pool_timeout = pool_timeout
+      @redis = RedisPool.new(endpoint, pool_size, pool_timeout, connect_timeout, command_timeout, operation_timeout)
+
+      @health = RedisHealth.new(@redis, @pool_size, @pool_timeout)
+      @pipeline = RedisPipeline.new(@redis)
+      @metrics = RedisMetrics.new(@redis)
+
+      Log.info &.emit("Redis store initialized",
+        endpoint: endpoint.to_s,
+        pool_size: @pool_size,
+        pool_timeout: @pool_timeout
+      )
+    end
+
+    # Closes current connections for either constructor. Later commands reconnect.
+    def close : Nil
+      @redis.as?(RedisPool).try(&.close)
+    end
+
+    # Host, port and pool only: the default `inspect` would print the password this store was given.
+    def inspect(io : IO) : Nil
+      io << "#<" << self.class.name << ' ' << host << ':' << port << '>'
     end
 
     # Connection pool health check with detailed metrics
@@ -89,9 +160,13 @@ module JoobQ
       job.jid.to_s
     end
 
-    def enqueue_batch(jobs : Array(Job), batch_size : Int32 = 1000) : Nil
+    def enqueue_batch(jobs : Array(Job), batch_size : Int32 = 1000, *, json_sizes : Array(Int32)? = nil) : Nil
       raise "Batch size must be greater than 0" if batch_size <= 0
       raise "Batch size must be less than or equal to 1000" if batch_size > 1000
+
+      if sizes = json_sizes
+        raise ArgumentError.new("json_sizes must contain one nonnegative capacity per job") unless sizes.size == jobs.size && sizes.all? { |size| size >= 0 }
+      end
 
       return if jobs.empty?
 
@@ -101,8 +176,13 @@ module JoobQ
       begin
         jobs.each_slice(batch_size) do |batch_jobs|
           redis.pipelined do |pipe|
-            batch_jobs.each do |job|
-              pipe.rpush job.queue, job.to_json
+            batch_jobs.each_with_index do |job, index|
+              payload = if sizes = json_sizes
+                          String.build(sizes[total_enqueued + index]) { |io| job.to_json(io) }
+                        else
+                          job.to_json
+                        end
+              pipe.rpush job.queue, payload
             end
           end
           total_enqueued += batch_jobs.size
@@ -284,15 +364,6 @@ module JoobQ
     def cleanup_job(job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
 
-      # Extract job ID for logging
-      job_id = nil
-      begin
-        parsed = JSON.parse(job_json)
-        job_id = parsed["jid"]?.try(&.as_s)
-      rescue
-        # Continue without job_id if parsing fails
-      end
-
       redis.pipelined do |pipe|
         # Remove job from processing queue (all occurrences)
         pipe.lrem(processing_key, 0, job_json)
@@ -304,7 +375,7 @@ module JoobQ
 
       Log.debug &.emit("Job cleanup successful",
         queue: queue_name,
-        job_id: job_id || "unknown"
+        job_id: logging_job_id(job_json)
       )
     rescue ex
       Log.error &.emit("Error cleaning up job",
@@ -322,15 +393,6 @@ module JoobQ
     def mark_job_completed(job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
 
-      # Extract job ID for logging
-      job_id = nil
-      begin
-        parsed = JSON.parse(job_json)
-        job_id = parsed["jid"]?.try(&.as_s)
-      rescue
-        # Continue without job_id if parsing fails
-      end
-
       redis.pipelined do |pipe|
         # Remove job from processing queue
         pipe.lrem(processing_key, 0, job_json)
@@ -344,13 +406,20 @@ module JoobQ
 
       Log.debug &.emit("Job marked as completed",
         queue: queue_name,
-        job_id: job_id || "unknown"
+        job_id: logging_job_id(job_json)
       )
     rescue ex
       Log.error &.emit("Error marking job as completed",
         queue: queue_name,
         error: ex.message
       )
+    end
+
+    # Called only inside lazy debug log blocks; normal completion never parses a second JSON tree.
+    private def logging_job_id(job_json : String) : String
+      JSON.parse(job_json)["jid"]?.try(&.as_s) || "unknown"
+    rescue
+      "unknown"
     end
 
     def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
@@ -595,10 +664,10 @@ module JoobQ
       job_json = job.to_json
       retry_lock_key = "joobq:retry_lock:#{job.jid}"
 
-      # Remove job by ID from processing queue (more reliable than JSON match)
-      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
-
+      # Persist the destination before acknowledging the source. If either write fails,
+      # retain a recoverable copy; duplicates still require a fenced settlement protocol.
       DeadLetterQueue.add(redis, current_timestamp, [job_json])
+      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
 
       redis.pipelined do |pipe|
         # Clean up retry lock if it exists
@@ -685,78 +754,50 @@ module JoobQ
       # No-op: BRPOPLPUSH pattern doesn't require explicit claim release
     end
 
-    # Process due jobs from delayed queue and move them back to main queue
-    # Jobs are moved back with "enqueued" status so workers can pick them up
-    # Returns the array of job JSON strings that were processed (including those from other queues)
-    def process_due_delayed_jobs(queue_name : String) : Array(String)
-      current_time = Time.local.to_unix_ms
-      processed_jobs = [] of String
-      moved_count = 0
+    # Source membership is the claim: competing schedulers cannot promote the same
+    # member twice. Write the destination first: Lua does not roll back on errors.
+    # JSON is parsed/re-encoded in Crystal, preserving Int64 values (Lua cjson uses doubles).
+    PROMOTE_DUE = <<-LUA
+      local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+      if not score or tonumber(score) > tonumber(ARGV[3]) then return 0 end
+      redis.call('RPUSH', KEYS[2], ARGV[2])
+      redis.call('ZREM', KEYS[1], ARGV[1])
+      return 1
+    LUA
 
-      # Get jobs that are due for processing (score <= current_time)
-      # Use a small limit to reduce race condition window
-      jobs_result = redis.zrangebyscore(DELAYED_SET, "-inf", current_time.to_s, limit: [0, 50])
-
-      if !jobs_result.empty?
-        redis.pipelined do |pipe|
-          jobs_result.each do |job_data|
-            job_json = job_data.as(String)
-            processed_jobs << job_json
-
-            # Parse job to check if it belongs to this queue
-            begin
-              parsed_job = JSON.parse(job_json)
-              job_queue = parsed_job["queue"]?.try(&.as_s)
-
-              # Only process jobs for this queue
-              if job_queue == queue_name
-                # Update job status from "retrying" to "enqueued" so workers pick it up
-                # Build a mutable hash from the parsed JSON
-                job_data = Hash(String, JSON::Any).new
-                parsed_job.as_h.each do |key, value|
-                  job_data[key] = value
-                end
-
-                # Update status to "Enqueued" (capitalized to match Crystal enum serialization)
-                job_data["status"] = JSON::Any.new("Enqueued")
-                updated_job_json = job_data.to_json
-
-                # Remove from delayed queue (using original JSON)
-                pipe.zrem(DELAYED_SET, job_json)
-
-                # Add back to main queue with updated status
-                # Using rpush to maintain FIFO order (delayed jobs go to back of queue)
-                pipe.rpush(queue_name, updated_job_json)
-
-                moved_count += 1
-              end
-              # Note: We don't remove jobs from other queues here to avoid race conditions
-              # with the scheduler. Jobs from other queues will be processed by their respective
-              # queue processors.
-            rescue ex
-              Log.warn &.emit("Failed to parse delayed job",
-                queue: queue_name,
-                error: ex.message
-              )
-              # Remove malformed job from delayed set
-              pipe.zrem(DELAYED_SET, job_json)
-            end
+    def promote_due_jobs(current_time : Time = Time.utc, delay_set : String = DELAYED_SET,
+                         queue_name : String? = nil, limit : Int32 = 50, *, report_scanned : Bool = false) : Array(String)
+      scanned = fetch_due_jobs(current_time, delay_set, limit, remove: false)
+      moved = Array(String).new(scanned.size)
+      now = current_time.to_unix_ms.to_s
+      scanned.each do |raw|
+        begin
+          next if queue_name && SerializedJob.queue_name(raw) != queue_name
+          destination, payload = SerializedJob.for_enqueue(raw)
+          if promote_due([delay_set, destination], [raw, payload, now]) == 1
+            moved << raw
           end
+        rescue ex
+          # Malformed and unavailable destinations remain inspectable and retryable.
+          Log.error &.emit("Delayed job promotion was not confirmed; inspect source and destination", delay_set: delay_set, error: ex.message)
         end
-
-        Log.debug &.emit("Processed due delayed jobs",
-          queue: queue_name,
-          count: moved_count
-        )
       end
+      report_scanned ? scanned : moved
+    end
 
-      processed_jobs
-    rescue ex
-      Log.error &.emit("Failed to process due delayed jobs",
-        queue: queue_name,
-        error: ex.message
-      )
-      [] of String
+    private PROMOTE_DUE_SHA = Digest::SHA1.hexdigest(PROMOTE_DUE)
+
+    private def promote_due(keys : Array(String), args : Array(String))
+      redis.evalsha(PROMOTE_DUE_SHA, keys, args)
+    rescue ex : Redis::Error
+      # A definite cache miss is safe to retry. Timeouts/ambiguous writes are not.
+      raise ex unless ex.message.try(&.starts_with?("NOSCRIPT"))
+      redis.eval(PROMOTE_DUE, keys, args)
+    end
+
+    # Preserve the legacy return contract: all scanned due jobs, including other queues.
+    def process_due_delayed_jobs(queue_name : String) : Array(String)
+      promote_due_jobs(queue_name: queue_name, report_scanned: true)
     end
 
     # Verify that a job exists in only one location (for debugging/testing)

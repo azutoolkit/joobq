@@ -27,7 +27,10 @@ module JoobQ
     getter queue_configs = {} of String => NamedTuple(job_class_name: String, workers: Int32, throttle: NamedTuple(limit: Int32, period: Time::Span)?)
     getter time_location : Time::Location = Time::Location.load("America/New_York")
 
-    property store : Store = RedisStore.new
+    property store : Store = RedisStore.from_env
+    # True once a configuration source (a YAML `redis` section) chose the store, as opposed to the default built from
+    # the environment. Merging sources keeps a chosen store whichever source comes last.
+    property? store_configured : Bool = false
     property? rest_api_enabled : Bool = false
     property? stats_enabled : Bool = true
     property default_queue : String = "default"

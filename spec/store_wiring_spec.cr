@@ -1,10 +1,10 @@
 require "./spec_helper"
 
 module JoobQ
-  # Split-brain: RedisStore.instance is built from ENV and is not JoobQ.store.
-  # Classes defaulting to RedisStore.instance.redis ignore a reconfigured store.
+  # RedisStore.instance follows the configured store, so classes that default to it
+  # (DeadLetterQueue, WorkerRegistry, schedulers, the event sink) use the same Redis as the queues.
   #
-  # The split-brain example needs a SECOND, throwaway Redis and is opt-in: set
+  # The cross-server example needs a SECOND, throwaway Redis and is opt-in: set
   # JOOBQ_SPEC_SECOND_REDIS_PORT to its port (host: REDIS_HOST or localhost). It must be a
   # different server from the REDIS_PORT one. Nothing is flushed; only the keys the example
   # writes are deleted.
@@ -13,7 +13,26 @@ module JoobQ
     env_port = ENV.fetch("REDIS_PORT", "6379").to_i
     second_port = ENV["JOOBQ_SPEC_SECOND_REDIS_PORT"]?.try(&.to_i?)
 
-    it "current behaviour: DeadLetterQueue.new and WorkerRegistry.new follow the ENV instance, not config.store" do
+    it "RedisStore.instance is the configured store" do
+      JoobQ.store.same?(RedisStore.instance).should be_true
+    end
+
+    it "classes that default to the instance use the configured store when it is replaced" do
+      original = JoobQ.config.store
+      replacement = RedisStore.new(host: env_host, port: env_port)
+      begin
+        JoobQ.config.store = replacement
+
+        RedisStore.instance.same?(replacement).should be_true
+        DeadLetterQueue.new.@redis.same?(replacement.redis).should be_true
+        WorkerRegistry.new.@store.same?(replacement).should be_true
+        DelayedJobScheduler.new.@store.same?(replacement).should be_true
+      ensure
+        JoobQ.config.store = original
+      end
+    end
+
+    it "writes land on the configured store's server, not on a separate ENV-built one" do
       other_port = second_port
       if other_port.nil?
         pending!("set JOOBQ_SPEC_SECOND_REDIS_PORT to a throwaway Redis to run this example")
@@ -35,27 +54,19 @@ module JoobQ
 
       begin
         JoobQ.config.store = other
-        JoobQ.store.same?(other).should be_true
-        RedisStore.instance.same?(other).should be_false
 
         job = ExampleJob.new(1)
         job.queue = "example"
         DeadLetterQueue.add(DeadLetterQueue.new.@redis, 1000_i64, [job.to_json])
 
-        RedisStore.instance.redis.zcard(DeadLetterQueue::KEY).should eq(1)
-        other.redis.zcard(DeadLetterQueue::KEY).should eq(0)
+        other.redis.zcard(DeadLetterQueue::KEY).should eq(1)
+        original.as(RedisStore).redis.zcard(DeadLetterQueue::KEY).should eq(0)
         DeadLetterQueue.new.count.should eq(1)
-
-        RedisStore.instance.redis.zadd(WorkerRegistry::INDEX, Time.utc.to_unix_ms, "wiring:1")
-        WorkerRegistry.new.@store.same?(RedisStore.instance).should be_true
-        other.redis.zcard(WorkerRegistry::INDEX).should eq(0)
       ensure
         JoobQ.config.store = original
-        redis = RedisStore.instance.redis
         [
-          -> { redis.del(DeadLetterQueue::KEY) },
-          -> { redis.del(DeadLetterQueue::COUNTS) },
-          -> { redis.zrem(WorkerRegistry::INDEX, "wiring:1") },
+          -> { other.redis.del(DeadLetterQueue::KEY) },
+          -> { other.redis.del(DeadLetterQueue::COUNTS) },
         ].each do |cleanup|
           begin
             cleanup.call
@@ -63,14 +74,6 @@ module JoobQ
           end
         end
       end
-    end
-
-    it "current behaviour: with the default store, JoobQ.store.redis and RedisStore.instance.redis reach the same server" do
-      JoobQ.store.as(RedisStore).redis.set("wiring:probe", "ok")
-
-      RedisStore.instance.redis.get("wiring:probe").should eq("ok")
-    ensure
-      RedisStore.instance.redis.del("wiring:probe")
     end
   end
 end

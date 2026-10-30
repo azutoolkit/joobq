@@ -85,6 +85,15 @@ end
 
 module JoobQ
   describe "orderly shutdown" do
+    it "compiles forge and signal shutdown without any concrete job or queue types" do
+      # Compile in a separate program: spec_helper registers concrete queues,
+      # masking inference errors in a freshly generated worker.
+      source = File.expand_path("fixtures/empty_worker_probe.cr", __DIR__)
+      output = IO::Memory.new
+      status = Process.run("crystal", ["build", source, "--no-codegen", "--error-trace"], output: output, error: output)
+      status.success?.should be_true, "empty worker did not compile:\n#{output}"
+    end
+
     describe InFlight do
       after_each { InFlight.clear }
 

@@ -1,5 +1,6 @@
 /docs/api/
 /lib/
+/examples/docs/*/lib/
 /bin/
 /.shards/
 *.dwarf

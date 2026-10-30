@@ -15,6 +15,25 @@ module JoobQ
       job.jid.to_s
     end
 
+    it "redrives only the exact reviewed member and refuses a changed digest" do
+      jid = seed.call(1, "example", 1000_i64)
+      member = dlq.find(jid).not_nil!.member
+      dlq.redrive_reviewed(jid, "stale").conflicted.should eq([jid])
+      dlq.find(jid).should_not be_nil
+      dlq.redrive_reviewed(jid, Digest::SHA256.hexdigest(member)).succeeded.should eq(1)
+      dlq.find(jid).should be_nil
+      dlq.redrive_reviewed(jid, Digest::SHA256.hexdigest(member)).missing.should eq([jid])
+    end
+
+    it "changes queue pause state only when it still matches the review" do
+      store = JoobQ.store.as(RedisStore)
+      store.set_paused("reviewed", false)
+      store.set_paused_reviewed("reviewed", false, true).should be_true
+      store.set_paused_reviewed("reviewed", false, false).should be_false
+      store.paused?("reviewed").should be_true
+      store.set_paused_reviewed("reviewed", true, false).should be_true
+    end
+
     it "pages newest first and counts" do
       old = seed.call(1, "example", 1000_i64)
       new = seed.call(2, "example", 2000_i64)

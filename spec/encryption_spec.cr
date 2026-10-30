@@ -477,6 +477,20 @@ module JoobQ
           Encryption.scrub("a leaf-value-5999 b", leaves).should eq "a [REDACTED] b"
           Encryption.scrub("bad \xff bytes secret1234", ["secret1234"]).should eq "bad \uFFFD bytes [REDACTED]"
         end
+
+        it "bounds literal replacement at the final match and preserves UTF-8 tails" do
+          ["S" * 1_000_000, "秘密" * 10_000].each do |secret|
+            {
+              secret                                => "[REDACTED]",
+              "#{secret}#{secret}"                  => "[REDACTED][REDACTED]",
+              "前#{secret}後"                         => "前[REDACTED]後",
+              "#{secret}#{secret.byte_slice(0, 9)}" => "[REDACTED]#{secret.byte_slice(0, 9)}",
+              "no match"                            => "no match",
+            }.each do |text, expected|
+              Encryption.scrub(text, [secret]).should eq expected
+            end
+          end
+        end
       end
 
       it "withholds the payload when it cannot be parsed in a job class with encrypted properties" do

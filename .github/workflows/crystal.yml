@@ -20,7 +20,7 @@ jobs:
         workers: [1, 4]
         connection: [legacy, url]
     container:
-      image: crystallang/crystal:1.22.0
+      image: crystallang/crystal:1.22.1
     steps:
       - uses: actions/checkout@v4
       - name: Install integration tools

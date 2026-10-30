@@ -358,8 +358,26 @@ module JoobQ
           # fall through to the plain way
         end
       end
-      usable.each { |secret| text = text.gsub(secret, REDACTED) }
+      usable.each { |secret| text = replace_literal(text, secret) }
       text
+    end
+
+    # Crystal 1.22.0's String#gsub advances beyond the input after a long final
+    # match. byte_index returns at the match; bounded offsets avoid that path.
+    private def self.replace_literal(text : String, secret : String) : String
+      index = text.byte_index(secret)
+      return text unless index
+
+      String.build do |io|
+        offset = 0
+        while index
+          io.write text.to_slice[offset, index - offset]
+          io << REDACTED
+          offset = index + secret.bytesize
+          index = text.byte_index(secret, offset)
+        end
+        io.write text.to_slice[offset, text.bytesize - offset]
+      end
     end
 
     # Like `scrub`, but it never raises: whatever goes wrong, the text is replaced by `NOT_SCRUBBABLE`, so the

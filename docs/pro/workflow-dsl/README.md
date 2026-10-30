@@ -17,7 +17,7 @@ For evaluation with authorized Pro repository access, pin the implementation com
 dependencies:
   joobq_pro:
     github: azutoolkit/joobq-pro
-    commit: 3be350a9d05f02a857768066193f2fd67edd9708
+    commit: 901b21f928560ac3483c15d8dbc8505e91060c7f
 ```
 {% endcode %}
 

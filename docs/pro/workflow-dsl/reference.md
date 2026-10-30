@@ -62,6 +62,6 @@ The DSL checks graph dependencies, not arbitrary JSON field shapes. Missing fiel
 - `timer :cooldown, for: 5.minutes`: creates a durable timer rather than sleeping during definition construction.
 - `child :shipping, workflow: :fulfillment, input: input`: starts a registered child workflow.
 
-These steps accept `after:`, `only_if:`, and `gate:`. Signal wait supports `timeout:`. Child declarations accept the underlying definition's retry, compensation, and timeout fields for serialization compatibility; the current engine retries activities only and does not turn a child timeout field into a new execution deadline. Use existing child/workflow lifecycle controls for those semantics.
+These steps accept `after:`, `only_if:`, `gate:`, and `compensate:`. Signal wait supports `timeout:`. Child declarations accept the underlying definition's retry, compensation, and timeout fields for serialization compatibility; the current engine retries activities only and does not turn a child timeout field into a new execution deadline. Use existing child/workflow lifecycle controls for those semantics.
 
 For queries, scopes, updates, version changes, and continuation, see [lifecycle controls](lifecycle.md).

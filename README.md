@@ -686,3 +686,11 @@ pipeline results. A batch uses one pooled connection; errors propagate and a fai
 connection is discarded so unread replies cannot reach another borrower. Pipelines are not atomic:
 an error can follow partially applied commands. Resolve identities before retrying mutations.
 Legacy zero-argument batch closures are deprecated and execute independently.
+
+## Automatic releases
+
+Successful pushes to `master` publish a GitHub release after the complete CI
+matrix passes. Versions follow Azu's `(MINOR)` / `(MAJOR)` commit conventions,
+with a patch bump by default. The tagged manifest and runtime `VERSION` stay in
+sync. See [release automation](docs/releasing.md) for first-release behavior,
+branch protection, retry recovery and validation.

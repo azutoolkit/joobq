@@ -6,6 +6,10 @@ on:
     branches: [master]
 permissions:
   contents: read
+# Serialize master releases without cancelling a run between its tag and release.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -59,3 +63,40 @@ jobs:
         env:
           CRYSTAL_WORKERS: 4
           PROBE_BATCH_SIZE: 8
+
+  release-tests:
+    name: Release lifecycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify versioning, atomic pushes and recovery with local Git remotes
+        run: python3 .github/scripts/test_release.py
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [build, release-tests]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master' &&
+      !startsWith(github.event.head_commit.message, 'chore: bump version')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Like Azu: use a bypass-capable token only when branch rules require it.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+      - name: Commit matching shard version and atomically push master and tag
+        id: prepare
+        run: python3 .github/scripts/release.py
+      - name: Publish GitHub release with generated notes
+        if: steps.prepare.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
+          RELEASE_LATEST: ${{ steps.prepare.outputs.latest }}
+        run: python3 .github/scripts/release.py --publish "$RELEASE_TAG" --latest "$RELEASE_LATEST"

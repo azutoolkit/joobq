@@ -38,6 +38,35 @@ weaken protection for every actor or place a token in source control. The checko
 uses this token for Git pushes; GitHub release publication uses the job's
 `GITHUB_TOKEN`. Actions must be enabled for push events on master.
 
+### Fix a rejected version-bump push
+
+Passing CI on the merged source does not satisfy checks on the new version-bump
+commit. In particular, a CodeQL ruleset can reject that commit because it has no
+scan results and intentionally uses `[skip ci]`. Giving `GITHUB_TOKEN`
+`contents: write` does not grant a ruleset bypass.
+
+For the current direct-push release flow:
+
+1. Create a fine-grained personal access token owned by a release account that
+   is explicitly allowed to bypass **every applicable branch and tag ruleset**.
+   An existing administrator bypass works only when the token owner actually
+   has that role. Token permissions alone do not grant it.
+2. Scope the token to this repository with **Contents: Read and write**. Complete
+   any required organization approval and set an expiration/rotation schedule.
+3. Add it under **Settings → Secrets and variables → Actions → New repository
+   secret**, named `RELEASE_TOKEN`. Never paste the value into an issue or log.
+4. Rerun the failed release job. If `master` has advanced, let the newer tested
+   run own the release instead. Confirm that the tag and `shard.yml` agree and
+   the GitHub release exists.
+
+An atomic rejection leaves neither the bump nor its tag on the remote. The job
+now includes bounded, credential-redacted Git rejection details so expired
+credentials, tag protection and required-check failures can be distinguished.
+Do not disable CodeQL or force-push around the failure. If bypass credentials
+are prohibited, this direct-push workflow needs a separate version-bump PR flow
+that completes checks before tagging; repeatedly rerunning it cannot fix that
+policy mismatch.
+
 ## Ordering and recovery
 
 Workflow runs serialize per branch without cancellation. If master has advanced

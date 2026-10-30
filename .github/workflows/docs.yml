@@ -1,0 +1,40 @@
+name: Documentation
+on:
+  push:
+    branches: [master]
+    paths: ['docs/**', 'examples/docs/**', 'scripts/*docs*', '.gitbook.yaml', '.github/workflows/docs.yml']
+  pull_request:
+    paths: ['docs/**', 'examples/docs/**', 'scripts/*docs*', '.gitbook.yaml', '.github/workflows/docs.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check_docs.py
+      - run: python3 -m unittest discover -s scripts -p 'test_check_docs.py'
+  core-examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: crystallang/crystal:1.22.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install example tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 curl build-essential ca-certificates libssl-dev
+      - name: Install released Core graph
+        working-directory: examples/docs/core
+        run: shards install --frozen
+      - name: Build pinned Redis
+        run: |
+          python3 scripts/install_test_redis.py 8.0.6 /tmp/test-redis
+          echo /tmp/test-redis/bin >> "$GITHUB_PATH"
+      - name: Check example formatting
+        run: crystal tool format --check examples/docs
+      - name: Run documentation examples against isolated Redis
+        run: python3 scripts/test_docs_examples.py --edition core

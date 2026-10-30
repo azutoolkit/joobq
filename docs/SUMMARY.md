@@ -1,0 +1,33 @@
+# Table of contents
+
+* [Introduction](README.md)
+  * [Compatibility and feature availability](introduction/compatibility.md)
+  * [Adding Pro](introduction/adding-pro.md)
+* [Quick Start](quick-start/README.md)
+  * [Use JoobQ in an Azu application](quick-start/azu-application.md)
+  * [Your first Pro workflow](quick-start/first-workflow.md)
+* [Core Concepts](core/README.md)
+  * [Queues and workers](core/queues-workers.md)
+  * [Retries and dead letters](core/retries-dlq.md)
+  * [Scheduling](core/scheduling.md)
+  * [Delivery — Preview](core/delivery.md)
+* [Pro Features](pro/README.md)
+  * [Workflows and activity execution](pro/workflows.md)
+  * [Distributed coordination](pro/coordination.md)
+  * [Metrics, percentiles, alerts, and logs](pro/observability.md)
+  * [CLI and terminal management](pro/management.md)
+* [Configuration](configuration/README.md)
+  * [Redis connections and resilience](configuration/redis.md)
+  * [Concurrency and shutdown](configuration/concurrency.md)
+  * [Management access and Pro credentials](configuration/access.md)
+* [Best Practices](best-practices/README.md)
+  * [Write idempotent jobs](best-practices/idempotency.md)
+  * [Application architecture](best-practices/architecture.md)
+  * [Recovery and migration](best-practices/recovery.md)
+  * [Performance testing](best-practices/performance.md)
+  * [Troubleshooting](best-practices/troubleshooting.md)
+
+## Maintainers
+
+* [Documentation validation](validation.md)
+* [Automatic releases](releasing.md)

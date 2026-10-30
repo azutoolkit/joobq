@@ -9,13 +9,15 @@
 
 **A Redis-backed asynchronous job queue system for Crystal**
 
-[Features](#key-features) • [Installation](#installation) • [Quick Start](#getting-started) • [Documentation](#table-of-contents) • [API Reference](#rest-api--openapi-specification)
+[Features](#key-features) • [Installation](#installation) • [Quick Start](#getting-started) • [Unified documentation](docs/README.md) • [API Reference](#rest-api--openapi-specification)
 
 </div>
 
 ---
 
 ## Overview
+
+Start with the **[unified JoobQ and JoobQ Pro documentation](docs/README.md)**: released-version quick starts, Core concepts, Pro workflows, configuration, and recovery guides. [Adding Pro](docs/introduction/adding-pro.md) explains repository access, the compatible dependency pair, and feature setup. The book source lives here; hosted GitBook sync must be configured separately.
 
 > Enterprise v1 remains under review. The opt-in [leased runtime and migration guide](design/durable-runtime-guide.md) describes the new delivery API, management authentication and compatibility changes. See [validation and open release gates](design/implementation-validation.md) before deployment.
 

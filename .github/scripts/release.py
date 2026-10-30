@@ -65,6 +65,18 @@ def bump_message(value):
     return f"chore: bump version to {value} [skip ci]"
 
 
+def failure_details(result):
+    """Keep GitHub's rejection reason without logging credentials or unlimited output."""
+    text = "\n".join(part.strip() for part in (result.stderr, result.stdout) if part.strip())
+    for name in ("RELEASE_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"):
+        if secret := os.environ.get(name):
+            text = text.replace(secret, "[REDACTED]")
+    text = re.sub(r"(https?://)[^\s/@]+@", r"\1[REDACTED]@", text)
+    text = re.sub(r"\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+", "[REDACTED]", text)
+    text = re.sub(r"(?i)(authorization:\s*(?:basic|bearer)\s+)\S+", r"\1[REDACTED]", text)
+    return text[-4096:] or "Git returned no rejection details."
+
+
 def prepare(source, dry_run=False):
     if os.environ.get("GITHUB_EVENT_NAME") != "push" or os.environ.get("GITHUB_REF") != "refs/heads/master":
         raise ValueError("Releases are only allowed for a push to master")
@@ -118,7 +130,13 @@ def prepare(source, dry_run=False):
     if pushed.returncode:
         if remote_head() != source:
             return {"tag": "", "reason": "master advanced during push; newer CI owns the release"}
-        raise RuntimeError("Atomic release push was refused. Check branch rules and RELEASE_TOKEN; no tag was published.")
+        raise RuntimeError(
+            "Atomic release push was refused; no tag was published.\n"
+            f"{failure_details(pushed)}\n"
+            "If required checks or CodeQL block the version-only commit, configure RELEASE_TOKEN "
+            "with Contents read/write for this repository and an owner allowed to bypass the applicable rules. "
+            "The default GITHUB_TOKEN cannot bypass those rules. See docs/releasing.md."
+        )
     return result
 
 

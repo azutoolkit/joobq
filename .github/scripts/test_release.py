@@ -97,10 +97,11 @@ class GitLifecycle(unittest.TestCase):
     def test_rejected_master_push_does_not_publish_tag(self):
         source = self.baseline()
         hook = self.remote / "hooks/pre-receive"
-        hook.write_text("#!/bin/sh\nexit 1\n")
+        hook.write_text("#!/bin/sh\necho 'GH013: Code scanning results are required' >&2\nexit 1\n")
         hook.chmod(0o755)
-        with self.assertRaisesRegex(RuntimeError, "Atomic release push was refused"):
+        with self.assertRaisesRegex(RuntimeError, "GH013: Code scanning results are required") as failure:
             release.prepare(source)
+        self.assertIn("RELEASE_TOKEN", str(failure.exception))
         self.assertEqual(release.remote_head(), source)
         self.assertEqual(release.git("ls-remote", "origin", "refs/tags/v0.2.1"), "")
 
@@ -148,6 +149,30 @@ class GitLifecycle(unittest.TestCase):
         release.git("push", "origin", "refs/tags/v9.0.0")
         with self.assertRaisesRegex(ValueError, "disagrees"):
             release.prepare(source)
+
+
+class Diagnostics(unittest.TestCase):
+    def test_push_diagnostics_redact_credentials(self):
+        result = subprocess.CompletedProcess([], 1, "", "\n".join([
+            "GH013: Code scanning results are required",
+            "https://bot:password@github.com/owner/repo.git",
+            "Authorization: basic encoded-credentials",
+            "Authorization: Bearer opaque-bearer",
+            "ghp_exampleToken github_pat_exampleToken opaque-secret",
+        ]))
+        with patch.dict(os.environ, {"RELEASE_TOKEN": "opaque-secret"}):
+            detail = release.failure_details(result)
+        self.assertIn("GH013: Code scanning results are required", detail)
+        for secret in ("password", "encoded-credentials", "opaque-bearer", "ghp_exampleToken", "github_pat_exampleToken", "opaque-secret"):
+            self.assertNotIn(secret, detail)
+
+    def test_push_diagnostics_bound_output_and_handle_missing_stderr(self):
+        result = subprocess.CompletedProcess([], 1, "x" * 5000 + "rejected", "")
+        detail = release.failure_details(result)
+        self.assertEqual(len(detail), 4096)
+        self.assertTrue(detail.endswith("rejected"))
+        self.assertEqual(release.failure_details(subprocess.CompletedProcess([], 1, "", "")),
+                         "Git returned no rejection details.")
 
 
 class Publication(unittest.TestCase):

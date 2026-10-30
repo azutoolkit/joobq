@@ -639,6 +639,17 @@ module JoobQ
       paused ? redis.set(pause_key(queue_name), "1") : redis.del(pause_key(queue_name))
     end
 
+    # Compare-and-set for a reviewed operator change. A concurrent operator's
+    # state is not overwritten after the preview was taken.
+    def set_paused_reviewed(queue_name : String, expected : Bool, paused : Bool) : Bool
+      script = <<-LUA
+        if redis.call('EXISTS', KEYS[1]) ~= tonumber(ARGV[1]) then return 0 end
+        if ARGV[2] == '1' then redis.call('SET', KEYS[1], '1') else redis.call('DEL', KEYS[1]) end
+        return 1
+      LUA
+      redis.eval(script, [pause_key(queue_name)], [expected ? "1" : "0", paused ? "1" : "0"]) == 1
+    end
+
     def desired_concurrency(queue_name : String) : {count: Int32, set_at: Int64}?
       count, set_at = redis.hmget(config_key(queue_name), "concurrency", "set_at")
       return unless count && set_at

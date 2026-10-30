@@ -12,7 +12,7 @@ require "./joobq/api_validation"
 require "./joobq/**"
 
 module JoobQ
-  VERSION = "0.4.2"
+  VERSION = {{ read_file("#{__DIR__}/../shard.yml").lines.find(&.starts_with?("version:")).split(":")[1].strip }}
 
   # Custom exception for configuration errors
   class ConfigNotInitializedError < Exception

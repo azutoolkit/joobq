@@ -708,3 +708,11 @@ A changed DLQ member returns `conflicted`; a removed member returns `missing`. S
 moves the exact reviewed member back to its queue. Replaying can repeat external effects, so handlers still need
 idempotency. Queue pause/resume returns `false` when the current pause flag differs from the reviewed flag;
 it does not stop jobs already running. These APIs enforce state preconditions, not operator authorization.
+
+## Automatic releases
+
+Successful pushes to `master` publish a GitHub release after the complete CI
+matrix passes. Versions follow Azu's `(MINOR)` / `(MAJOR)` commit conventions,
+with a patch bump by default. The tagged manifest and runtime `VERSION` stay in
+sync. See [release automation](docs/releasing.md) for first-release behavior,
+branch protection, retry recovery and validation.

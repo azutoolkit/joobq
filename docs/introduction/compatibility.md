@@ -39,6 +39,10 @@ The two quick starts use different dependency graphs. Keep their lockfiles; do n
 | Percentile collection and alerting | Pro | Must be configured; no automatic external telemetry export is implied |
 | Reviewed replay and queue compare-and-set APIs | Unreleased relative to these baselines | Added after Core `v0.5.1`; do not use them in release examples |
 
+## Workflow DSL preview
+
+The `codex/workflow-dsl` Pro feature adds sequential block definitions and typed activity bindings. It is not included in the documented released baselines or Pro v0.2.1. The [preview guide](../pro/workflow-dsl/README.md) and its executable fixture are intentionally separate from released-version examples. Record the first supporting release here after its tag and CI are verified.
+
 ## Upgrade deliberately
 
 Inspect `shard.lock` before and after an upgrade, compile your workers, and rehearse retry/replay behavior in staging. Do not move a legacy queue into Delivery by changing only a configuration flag. Follow the [Delivery guide](../core/delivery.md) and [recovery checklist](../best-practices/recovery.md).

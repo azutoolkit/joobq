@@ -1,0 +1,14 @@
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+version: 1
+
+site:
+  title: JoobQ & JoobQ Pro
+  structure:
+    - type: space
+      key: space-docs
+      title: JoobQ & JoobQ Pro
+      path: docs
+      default: true
+      content:
+        directory: ./docs
+        language: en

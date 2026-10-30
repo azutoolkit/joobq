@@ -19,12 +19,12 @@ flowchart TD
 This is an illustrative order design, not a bundled payment implementation. Use the [runnable first workflow](../quick-start/first-workflow.md) to learn the actual API.
 
 {% hint style="info" %}
-Prefer block-style authoring? See the [Workflow DSL preview](workflow-dsl/README.md). It requires the supporting feature source; released constructor examples remain valid.
+Use the [typed workflow DSL](workflow-dsl/README.md), available since **Pro v0.2.2**. Steps run sequentially by default; `parallel` creates concurrent branches and `sequence` orders steps within a branch. The authoring API remains a preview. Existing constructors remain supported; see the [migration guide](workflow-dsl/migration.md).
 {% endhint %}
 
 ## Activities and failure boundaries
 
-Register activity classes before starting workers. Use typed input and `ActivityContext`. `context.dedupe_key` identifies the external effect across attempts; `heartbeat` and `cancel_requested?` help long activities cooperate with the engine.
+Declare activities with `step :name, ActivityClass`, then call `worker.register(blueprint).start`. Registration installs the typed handlers and publishes the definition; constructing a blueprint does neither. Use typed input and `ActivityContext`. `context.dedupe_key` identifies the external effect across attempts; `heartbeat` and `cancel_requested?` help long activities cooperate with the engine.
 
 Definitions expose retry policies, timeouts, dependencies, conditions, compensation, and child workflows. A compensation is another operation that can fail or repeat. It is not a distributed database rollback.
 

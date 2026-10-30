@@ -21,6 +21,7 @@ CASES = {
     "core": [("first_job", "Processed order 42", True),
              ("lifecycle", "PASS delayed retry DLQ replay shutdown", False)],
     "pro": [("first_workflow", "Processed order 42", False),
+            ("workflow_dsl", "Receipt: Processed order 42", False),
             ("coordination", "PASS batch uniqueness concurrent rate limit", False),
             ("observability", "PASS completion metrics collection shutdown", False)],
 }
@@ -132,8 +133,8 @@ def main():
         if args.edition != "pro":
             parser.error("--pro-source requires --edition pro")
         commit = subprocess.check_output(["git", "-C", str(args.pro_source), "rev-parse", "HEAD"], text=True).strip()
-        if commit != "0c6655acb6c4372bac55992de2f0d7cd73261b24":
-            parser.error("--pro-source must be the documented v0.2.0 release")
+        if commit != "92879b94a3be2580e749f3a0acc829b9276040dc":
+            parser.error("--pro-source must be the documented v0.2.2 release")
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("REDIS_", "JOOBQ_")) and key not in ("RACK_ENV", "CRYSTAL_ENV")}
     with tempfile.TemporaryDirectory(prefix="joobq-docs-") as temporary:

@@ -44,7 +44,8 @@ This creates a temporary project, generates the JoobQ setup and a typed job, run
 | --- | --- |
 | `core/first_job.cr` | Documented job executes; SIGTERM exits cleanly |
 | `core/lifecycle.cr` | Delayed admission, one retry, DLQ inspection, selected replay after repair, clean shutdown |
-| `pro/first_workflow.cr` | Typed input, activity registration, workflow result, Pro then Core shutdown |
+| `pro/first_workflow.cr` | Typed DSL input, blueprint registration, checked workflow result, Pro then Core shutdown |
+| `pro/workflow_dsl.cr` | Explicit result chaining, parallel receipt/timer branches, retry policy, checked result |
 | `pro/coordination.cr` | Sealed batch completion, duplicate rejection, owner-checked release, concurrent rate reservations |
 | `pro/observability.cr` | Completion/busy counters, Redis metrics collection, collector shutdown |
 
@@ -52,7 +53,7 @@ Fragments marked as illustrative show an integration point; they are not standal
 
 ## Validation record
 
-Validated locally on **October 30, 2026**, Linux x86_64, Crystal **1.22.1**, Redis **8.0.2**, with the committed Core/Pro fixture dependency graphs:
+The original book baseline (Core v0.5.1 / Pro v0.2.0) was validated locally on **October 30, 2026**, Linux x86_64, Crystal **1.22.1**, Redis **8.0.2**:
 
 - Five executable fixtures passed, including SIGTERM, retry/DLQ/replay, workflow results, coordination, and metrics shutdown. The fixture runtimes were roughly 0.1–3.4 seconds after compilation; these are test timings, not throughput benchmarks.
 - GitBook navigation, internal links/anchors, code-block classification, exact quick-start source matching, and five checker regression tests passed.
@@ -63,11 +64,15 @@ CI repeats Core fixtures in the public repository using Redis 8.0.6. The coordin
 
 These checks do not establish a production throughput guarantee, complete chaos coverage, deployment-specific TLS/failover behavior, or GitBook publication. Screenshot markers are editorial requests, not captured images. Mermaid rendering and GitBook sync status are reported separately.
 
-## Workflow DSL preview checks
+## Workflow DSL release checks
 
-The [preview guide](pro/workflow-dsl/README.md) pins Pro implementation commit `901b21f928560ac3483c15d8dbc8505e91060c7f`. Its fixture, `examples/docs/preview/workflow_dsl.cr`, is checked against the book and the Pro example (apart from the local source require). The private Pro CI compiles and executes it against the feature source; the released Pro fixture job remains pinned to the released API.
+The [DSL guide](pro/workflow-dsl/README.md) and both workflow fixtures now target **Pro v0.2.2**, release commit `92879b94a3be2580e749f3a0acc829b9276040dc`. `examples/docs/pro/workflow_dsl.cr` is checked against the book and Pro's example (apart from the local source require). The private Pro documentation workflow pins this release, compiles all four Pro fixtures, and runs them against disposable Redis. The public Core job never needs private Pro access.
 
-Locally on October 30, 2026, Crystal 1.22.1 and Redis 8.0.2 passed the workflow example, 22 focused DSL specs with four workers and `-Dpreview_mt`, seven compile-failure contracts, and 15 offline builder/registration specs. The final full Pro regression suite passed 442 tests, with no failures, errors, or pending tests. Offline tests used an unreachable Redis port and did not open a connection. The new workflow Mermaid diagram rendered in Chromium with Mermaid 11.17.2. These checks cover graph/hash parity, nested groups, lifecycle operations, typed registration conflicts, recovery, and build pinning. They do not certify deployment durability or performance.
+Validated locally on **October 30, 2026** with Crystal **1.22.1** and Redis **8.0.2**: all **six** current fixtures passed (two Core, four Pro), including both DSL workflows, coordination, observability, retry/DLQ/replay, and shutdown. Dependencies were installed from the frozen Core v0.5.1 and Pro v0.2.2 fixture graphs. The GitBook checker and its five regression tests passed.
+
+Use `python3 scripts/test_docs_examples.py --edition pro` after installing the frozen Pro fixture graph to repeat the four Pro checks.
+
+The supporting DSL implementation was validated on October 30, 2026 with Crystal 1.22.1 and Redis 8.0.2: the workflow example, 22 focused DSL specs with four workers and `-Dpreview_mt`, seven compile-failure contracts, and 15 offline builder/registration specs. The final full Pro regression suite passed 442 tests, with no failures, errors, or pending tests. Offline tests used an unreachable Redis port and did not open a connection. The new workflow Mermaid diagram rendered in Chromium with Mermaid 11.17.2. These checks cover graph/hash parity, nested groups, lifecycle operations, typed registration conflicts, recovery, and build pinning. They do not certify deployment durability or performance.
 
 In the Pro source checkout:
 
@@ -85,4 +90,4 @@ Keep every page in `SUMMARY.md`, preserve existing URLs where practical, and upd
 
 Generate Crystal API reference output into ignored `docs/api/` (for example, `crystal docs --output docs/api`), rather than mixing generated HTML with authored GitBook pages.
 
-Before publishing, connect the JoobQ repository's `.gitbook.yaml` to the intended GitBook space, review its preview (including diagrams and relative links), and verify a repository sync. A merged Markdown change alone does not prove that the hosted book updated.
+For Site Git Sync, use the root `gitbook-docs.yaml`, which maps the unified book to `docs/`. The existing `.gitbook.yaml` and `docs/SUMMARY.md` retain the book navigation. Review the GitBook preview (including diagrams and relative links) and verify a repository sync before claiming publication. A merged Markdown change alone does not prove that the hosted book updated.

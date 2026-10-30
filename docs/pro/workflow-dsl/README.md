@@ -7,28 +7,28 @@ description: Build durable workflows with sequential steps and explicit parallel
 Write workflow orchestration like ordinary Crystal. Reusable activity classes perform the work; the DSL builds the same persisted definitions used by the existing engine.
 
 {% hint style="warning" %}
-This is a **source preview**, not an API available in released Pro v0.2.0 or v0.2.1. It is introduced by [Pro PR #19](https://github.com/azutoolkit/joobq-pro/pull/19), following the unified documentation in PR #18. The [released workflow quick start](../../quick-start/first-workflow.md) remains the supported starting point until a release includes the DSL.
+Available starting with **JoobQ Pro v0.2.2**. The authoring API remains a **Preview**, built on the existing workflow engine. Pro v0.2.0 and v0.2.1 do not include it. Existing constructors remain supported. Start with the [first workflow](../../quick-start/first-workflow.md) for the smallest runnable example, or follow this parallel workflow walkthrough.
 {% endhint %}
 
-For evaluation with authorized Pro repository access, pin the implementation commit rather than a moving branch:
+With authorized Pro repository access, install the documented release:
 
-{% code title="shard.yml — preview dependency" %}
+{% code title="shard.yml — Pro v0.2.2" %}
 ```yaml
 dependencies:
   joobq_pro:
     github: azutoolkit/joobq-pro
-    commit: 901b21f928560ac3483c15d8dbc8505e91060c7f
+    version: "= 0.2.2"
 ```
 {% endcode %}
 
-Run `shards install` and retain the resolved `shard.lock`. Use the Core revision required by that Pro manifest; do not independently upgrade it. This pin identifies the tested implementation, not a supporting release. Update this page with the exact release tag after publication.
+Run `shards install` and retain the resolved `shard.lock`. Use the Core revision required by that Pro manifest; do not independently upgrade it. The [compatibility guide](../../introduction/compatibility.md) records the exact release commit and dependency pair.
 
 ## Your first declarative workflow
 
 This complete program processes an order, passes its result to a receipt activity, and runs that receipt alongside a durable timer. It uses no real payment or email service.
 
-{% code title="src/workflow.cr — requires the DSL preview" %}
-<!-- example: preview/workflow_dsl.cr -->
+{% code title="src/workflow.cr — Pro v0.2.2" %}
+<!-- example: pro/workflow_dsl.cr -->
 ```crystal
 require "joobq_pro"
 include JoobQPro::Workflows::DSL

@@ -4,7 +4,7 @@ description: The complete preview authoring surface, with explicit ordering and 
 
 # Workflow DSL reference
 
-**Preview:** use the supporting Pro feature source; see [availability](README.md). Import `JoobQPro::Workflows::DSL` where you declare workflows.
+**Available since Pro v0.2.2; authoring API preview.** See [availability](README.md). Import `JoobQPro::Workflows::DSL` where you declare workflows.
 
 ## Workflows, catalogs, and activities
 
@@ -23,6 +23,30 @@ A catalog requires unique workflow names and consistent activity bindings. `Work
 Activity classes need one unambiguous `perform(input : InputType, context : JoobQPro::Workflows::ActivityContext)`, a constructor callable without arguments, JSON-deserializable input, and JSON-serializable output. Named input types resolve in the activity's namespace. Qualify generic input arguments when their types live in another namespace. Construction and execution happen only when the worker invokes the handler.
 
 There is no inline `task` body or new `task` alias. Keep business logic in testable Crystal activities.
+
+## Order and parallel branches
+
+In this fragment, the activity classes belong to your application:
+
+<!-- illustrative: application-defined activities with compatible input and output types -->
+```crystal
+Checkout = workflow "checkout", timeout: 15.minutes do
+  step :reserve, ReserveInventory
+
+  parallel do
+    step :receipt, SendReceipt, input: output(:reserve)
+
+    sequence do
+      step :pack, PackOrder
+      step :ship, ShipOrder, input: output(:pack)
+    end
+  end
+
+  step :complete, CompleteOrder
+end
+```
+
+`receipt` and `pack` wait for `reserve`. `ship` waits for `pack`; `complete` waits for both `receipt` and `ship`. No synthetic activities are inserted. `after:` adds dependencies without removing these ordering rules. A skipped conditional step follows the existing engine's completion rules; consumers must handle unavailable output.
 
 ## Step options
 

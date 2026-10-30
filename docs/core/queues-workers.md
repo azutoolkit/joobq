@@ -38,5 +38,5 @@ flowchart LR
 **Next:** [Retries and dead letters](retries-dlq.md).
 
 {% hint style="info" %}
-The typed queue DSL walkthrough targets standalone Core `v0.5.1`. Pro `v0.2.0` uses an earlier Core revision; register legacy job types with `QueueFactory` and `queue_configs` as shown in the [compatibility notes](../introduction/compatibility.md#release-specific-integration-notes).
+The typed queue DSL walkthrough targets standalone Core `v0.5.1`. Pro `v0.2.2` uses an earlier Core revision; register legacy job types with `QueueFactory` and `queue_configs` as shown in the [compatibility notes](../introduction/compatibility.md#release-specific-integration-notes).
 {% endhint %}

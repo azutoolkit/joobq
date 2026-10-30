@@ -1,4 +1,5 @@
 require "json"
+require "digest/sha256"
 
 module JoobQ
   # Operator view of the dead-letter set: paged reads, redrive and purge.
@@ -171,6 +172,21 @@ module JoobQ
           else         tally.conflicted << entry.jid
           end
         end
+      end
+    end
+
+    # Replay precisely the member an operator reviewed. The Lua transition
+    # consumes that member, so a replacement between lookup and EVAL conflicts.
+    def redrive_reviewed(jid : String, expected_digest : String) : Outcome
+      entry = find(jid)
+      return Outcome.new(0, missing: [jid]) unless entry
+      return Outcome.new(0, conflicted: [jid]) unless Digest::SHA256.hexdigest(entry.member) == expected_digest
+      return Outcome.new(0, unredrivable: [jid]) unless entry.redrivable?
+      result = @redis.eval(REDRIVE, [KEY, entry.queue, "joobq:retry_lock:#{entry.jid}", COUNTS], [entry.member, fresh_payload(entry), entry.queue])
+      case result
+      when  1 then Outcome.new(1)
+      when -1 then Outcome.new(0, unredrivable: [jid])
+      else         Outcome.new(0, conflicted: [jid])
       end
     end
 

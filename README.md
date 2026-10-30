@@ -686,3 +686,25 @@ pipeline results. A batch uses one pooled connection; errors propagate and a fai
 connection is discarded so unread replies cannot reach another borrower. Pipelines are not atomic:
 an error can follow partially applied commands. Resolve identities before retrying mutations.
 Legacy zero-argument batch closures are deprecated and execute independently.
+
+### Reviewed operator actions
+
+For a UI or MCP client that separates review from execution, use the conditional APIs:
+
+```crystal
+require "digest/sha256"
+store = JoobQ.store.as(JoobQ::RedisStore)
+dlq = JoobQ::DeadLetterQueue.new(store.redis)
+entry = dlq.find(job_id) || raise "Job no longer in the DLQ"
+reviewed_digest = Digest::SHA256.hexdigest(entry.member)
+# Persist this digest with the operator's review, then execute later:
+outcome = dlq.redrive_reviewed(job_id, reviewed_digest)
+
+# Pause only if the queue is still unpaused at the Redis atomic update:
+changed = store.set_paused_reviewed("default", expected: false, paused: true)
+```
+
+A changed DLQ member returns `conflicted`; a removed member returns `missing`. Successful replay atomically
+moves the exact reviewed member back to its queue. Replaying can repeat external effects, so handlers still need
+idempotency. Queue pause/resume returns `false` when the current pause flag differs from the reviewed flag;
+it does not stop jobs already running. These APIs enforce state preconditions, not operator authorization.

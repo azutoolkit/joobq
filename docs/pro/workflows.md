@@ -18,6 +18,10 @@ flowchart TD
 
 This is an illustrative order design, not a bundled payment implementation. Use the [runnable first workflow](../quick-start/first-workflow.md) to learn the actual API.
 
+{% hint style="info" %}
+Prefer block-style authoring? See the [Workflow DSL preview](workflow-dsl/README.md). It requires the supporting feature source; released constructor examples remain valid.
+{% endhint %}
+
 ## Activities and failure boundaries
 
 Register activity classes before starting workers. Use typed input and `ActivityContext`. `context.dedupe_key` identifies the external effect across attempts; `heartbeat` and `cancel_requested?` help long activities cooperate with the engine.

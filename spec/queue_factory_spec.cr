@@ -1,6 +1,24 @@
 require "./spec_helper"
 
 describe JoobQ::QueueFactory do
+  it "includes typed DSL queues in forge's registry and prefers them to same-name factory entries" do
+    config = JoobQ.config
+    JoobQ.configure do
+      queue "dsl_probe", 2, ExampleJob
+    end
+    # An obsolete YAML class must not create a duplicate or hide the typed queue.
+    config.queue_configs["dsl_probe"] = {job_class_name: "MissingJob", workers: 9, throttle: nil}
+    JoobQ::QueueFactory.clear_queues_cache
+    queue = JoobQ.queues["dsl_probe"]
+    queue.should be(config.queues["dsl_probe"])
+    queue.total_workers.should eq(2)
+    JoobQ.queues["dsl_probe"].should be(queue)
+  ensure
+    config.try(&.queues.delete("dsl_probe"))
+    config.try(&.queue_configs.delete("dsl_probe"))
+    JoobQ::QueueFactory.clear_queues_cache
+  end
+
   before_each do
     # Clear the registry before each test
     JoobQ::QueueFactory.clear_registry

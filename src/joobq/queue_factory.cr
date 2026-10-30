@@ -123,7 +123,10 @@ module JoobQ
       queue_configs = config.queue_configs
 
       # Create queues from configuration
-      created_queues = create_queues_from_config(queue_configs)
+      # The typed `config.queue` DSL already created these instances. Prefer
+      # them over same-name YAML entries and do not create duplicate workers.
+      created_queues = create_queues_from_config(queue_configs.reject { |name, _| config.queues.has_key?(name) })
+      created_queues.merge!(config.queues)
 
       # Cache the queues hash
       @@queues_cache = created_queues

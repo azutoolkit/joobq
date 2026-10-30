@@ -128,7 +128,9 @@ module JoobQ
   # Stops the workers of all queues at the same time, so the wait is that of the slowest queue, not their sum.
   private def self.stop_queues(deadline : Time::Instant) : Nil
     # two registries exist (the configuration's and the factory's); a queue may be in both
-    list = (config.queues.values + queues.values).uniq!(&.object_id)
+    # An app with no job types has no concrete BaseQueue implementors. Keep the
+    # lookup key explicit so Crystal can instantiate uniq! in that program too.
+    list = (config.queues.values + queues.values).uniq! { |queue| queue.object_id.as(UInt64) }
     done = Channel(Nil).new(list.size) # buffered: a queue that stops after the deadline must not block forever
     list.each do |queue|
       spawn do

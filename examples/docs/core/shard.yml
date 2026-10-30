@@ -1,0 +1,7 @@
+name: order_worker
+version: 0.1.0
+
+dependencies:
+  joobq:
+    github: azutoolkit/joobq
+    version: "= 0.5.1"

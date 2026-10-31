@@ -187,17 +187,19 @@ describe "bounded durable delivery batches" do
   end
 
   it "renews waiting batch leases and drains without exceeding its slot budget" do
+    # Leave room for CI scheduling/AOF stalls and prove renewal from Redis deadlines.
     runtime = JoobQ::Delivery::Runtime.new(JoobQ::RedisStore.instance, "batch-runtime-#{UUID.random}",
-      capacity: 4, batch_size: 2, lease: 300.milliseconds, poll: 1.millisecond, repair_every: 20.milliseconds)
+      capacity: 4, batch_size: 2, lease: 2.seconds, poll: 1.millisecond, repair_every: 20.milliseconds)
     entered = Channel(Nil).new(4)
-    release = Channel(Nil).new(4)
+    release = Channel(Nil).new
+    ids = (0...4).map(&.to_s)
     ledger = runtime.register("work") do |raw, context|
       entered.send(nil)
-      release.receive
+      release.receive?
       context.check!
       JoobQ::Delivery::Outcome.new
     end
-    runtime.admit_many("work", Array.new(4) { |i| {i.to_s, "payload"} })
+    runtime.admit_many("work", ids.map { |id| {id, "payload"} })
     runtime.start
     2.times do
       select
@@ -206,17 +208,32 @@ describe "bounded durable delivery batches" do
         fail "batch workers did not enter"
       end
     end
-    sleep 450.milliseconds
+    initial = ledger.resolve_many(ids).map(&.not_nil!)
+    initial.all? { |record| record.state.leased? && record.attempt == 1 }.should be_true
+    eventually do
+      ledger.resolve_many(ids).each_with_index.all? do |record, index|
+        record && record.state.leased? && record.attempt == 1 &&
+          record.token == initial[index].token && record.lease_until > initial[index].lease_until
+      end
+    end.should be_true
+
+    # Hold both executing and waiting claims past their original deadlines;
+    # merely increasing the lease cannot make a missing renewal pass this test.
+    hold_until = Time.unix_ms(initial.max_of(&.lease_until)) + runtime.lease / 2
+    sleep({hold_until - Time.utc, Time::Span.zero}.max)
     runtime.active_count.should eq(4)
-    ledger.resolve_many((0...4).map(&.to_s)).all? { |r| r.try(&.attempt) == 1 }.should be_true
-    4.times { release.send(nil) }
-    eventually { ledger.resolve_many((0...4).map(&.to_s)).all? { |r| r.try(&.state.completed?) } }.should be_true
+    ledger.claim_many("competitor", 4).should be_empty
+    ledger.resolve_many(ids).all? { |record| record.try(&.state.leased?) && record.try(&.attempt) == 1 }.should be_true
+    release.close
+    unless eventually { ledger.resolve_many(ids).all? { |record| record.try(&.state.completed?) && record.try(&.attempt) == 1 } }
+      states = ledger.resolve_many(ids).map { |record| record.try { |value| {value.state, value.attempt} } }
+      fail "Batch did not complete its original attempts: #{states}; #{runtime.metrics.prometheus}"
+    end
     runtime.stop(2.seconds).clean.should be_true
   ensure
-    release.try { |channel| 4.times { select
-    when channel.send(nil)
-    else
-    end } }
+    # Broadcast release also unblocks any unexpected redelivery during cleanup.
+    entered.try(&.close)
+    release.try(&.close)
     runtime.try(&.stop(1.second))
   end
 end

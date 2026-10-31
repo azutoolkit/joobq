@@ -14,17 +14,6 @@ spec.loader.exec_module(release)
 
 
 class Versions(unittest.TestCase):
-    def test_first_release_uses_declared_version(self):
-        self.assertEqual(release.next_version("0.2.0", None, "(MAJOR) historic work"), "0.2.0")
-
-    def test_one_bump_for_all_commits_since_tag(self):
-        self.assertEqual(release.next_version("0.4.2", "0.5.1", "fix\nfix\nfix"), "0.5.2")
-        self.assertEqual(release.next_version("0.5.1", "0.5.1", "(MINOR) one\n(MINOR) two"), "0.6.0")
-        self.assertEqual(release.next_version("0.5.1", "0.5.1", "body\n(MAJOR)\n(MINOR)"), "1.0.0")
-
-    def test_explicit_version_is_not_downgraded(self):
-        self.assertEqual(release.next_version("1.0.0", "0.5.1", "ordinary merge"), "1.0.0")
-
     def test_invalid_and_duplicate_manifest_versions_fail(self):
         for text in ("version: nope", "version: 01.2.3", "version: 1.2.3\nversion: 1.2.4"):
             with self.assertRaises(ValueError):
@@ -55,17 +44,20 @@ class GitLifecycle(unittest.TestCase):
         os.chdir(self.original)
         self.temporary.cleanup()
 
-    def change(self, message="Fix jobs"):
+    def change(self, message="Fix jobs", declared=None):
         Path("source.cr").write_text(message)
-        release.git("add", "source.cr")
+        if declared is not None:
+            text = Path("shard.yml").read_text()
+            Path("shard.yml").write_text(release.MANIFEST.sub(f"version: {declared}", text))
+        release.git("add", "source.cr", "shard.yml")
         release.git("commit", "-m", message)
         release.git("push", "origin", "HEAD:master")
         return release.git("rev-parse", "HEAD")
 
-    def baseline(self):
+    def baseline(self, declared="0.2.1"):
         release.git("tag", "v0.2.0")
         release.git("push", "origin", "refs/tags/v0.2.0")
-        return self.change()
+        return self.change(declared=declared)
 
     def test_first_release_tags_tested_source(self):
         source = release.git("rev-parse", "HEAD")
@@ -74,18 +66,31 @@ class GitLifecycle(unittest.TestCase):
         self.assertEqual(release.git("rev-parse", "v0.2.0"), source)
         self.assertTrue(release.prepare(source)["recovered"])
 
-    def test_bump_and_tag_are_consistent_and_retry_recovers(self):
+    def test_declared_version_tags_exact_tested_commit_and_retry_recovers(self):
         source = self.baseline()
         result = release.prepare(source)
         self.assertEqual(result["tag"], "v0.2.1")
         self.assertEqual(release.manifest(release.git("show", "v0.2.1:shard.yml")), "0.2.1")
-        self.assertEqual(release.git("diff", "--name-only", source, "v0.2.1"), "shard.yml")
-        self.assertEqual(release.remote_head(), release.git("rev-parse", "v0.2.1"))
-        self.assertIn("[skip ci]", release.git("log", "-1", "--format=%s"))
-        release.git("checkout", "--detach", source)
-        retry = release.prepare(source)
-        self.assertTrue(retry["recovered"])
-        self.assertEqual(retry["tag"], result["tag"])
+        self.assertEqual(release.git("rev-parse", "v0.2.1"), source)
+        self.assertEqual(release.remote_head(), source)
+        self.assertEqual(release.git("status", "--porcelain"), "")
+        self.assertTrue(release.prepare(source)["recovered"])
+
+    def test_unchanged_version_does_not_infer_a_bump_from_messages(self):
+        self.baseline("0.2.0")
+        source = self.change("(MAJOR) (MINOR) documentation")
+        self.assertEqual(release.prepare(source)["tag"], "")
+        self.assertEqual(release.tags(), ["v0.2.0"])
+
+    def test_manifest_downgrade_is_rejected(self):
+        source = self.baseline("0.1.9")
+        with self.assertRaisesRegex(ValueError, "older than the latest release"):
+            release.prepare(source)
+
+    def test_explicit_major_version_is_preserved(self):
+        source = self.baseline("1.0.0")
+        self.assertEqual(release.prepare(source)["tag"], "v1.0.0")
+        self.assertEqual(release.git("rev-parse", "v1.0.0"), source)
 
     def test_stale_source_cannot_release_newer_untested_code(self):
         source = self.baseline()
@@ -94,34 +99,70 @@ class GitLifecycle(unittest.TestCase):
         self.assertEqual(release.prepare(source)["tag"], "")
         self.assertEqual(release.tags(), ["v0.2.0"])
 
-    def test_rejected_master_push_does_not_publish_tag(self):
+    def test_protected_master_needs_no_bypass_for_release(self):
         source = self.baseline()
         hook = self.remote / "hooks/pre-receive"
-        hook.write_text("#!/bin/sh\necho 'GH013: Code scanning results are required' >&2\nexit 1\n")
+        hook.write_text("#!/bin/sh\nwhile read old new ref; do\n"
+                        "  if [ \"$ref\" = refs/heads/master ]; then\n"
+                        "    echo 'GH013: Code scanning results are required' >&2; exit 1\n"
+                        "  fi\ndone\n")
         hook.chmod(0o755)
-        with self.assertRaisesRegex(RuntimeError, "GH013: Code scanning results are required") as failure:
-            release.prepare(source)
-        self.assertIn("RELEASE_TOKEN", str(failure.exception))
+        self.assertEqual(release.prepare(source)["tag"], "v0.2.1")
         self.assertEqual(release.remote_head(), source)
-        self.assertEqual(release.git("ls-remote", "origin", "refs/tags/v0.2.1"), "")
+        self.assertEqual(release.remote_tag("v0.2.1"), source)
 
-    def test_race_between_check_and_push_does_not_publish_tag(self):
+    def test_rejected_tag_push_cleans_local_tag_and_can_retry(self):
+        source = self.baseline()
+        hook = self.remote / "hooks/pre-receive"
+        hook.write_text("#!/bin/sh\necho 'GH013: Tag creation refused' >&2\nexit 1\n")
+        hook.chmod(0o755)
+        with self.assertRaisesRegex(RuntimeError, "GH013: Tag creation refused"):
+            release.prepare(source)
+        self.assertEqual(release.remote_head(), source)
+        self.assertEqual(release.remote_tag("v0.2.1"), "")
+        self.assertNotIn("v0.2.1", release.tags())
+        hook.unlink()
+        self.assertFalse(release.prepare(source)["recovered"])
+        self.assertEqual(release.remote_tag("v0.2.1"), source)
+
+    def test_race_cannot_tag_newer_untested_code_or_overwrite_master(self):
         source = self.baseline()
         original_run = release.run
         def race(*args, **kwargs):
-            if args[:3] == ("git", "push", "--atomic"):
-                # Advance master with a sibling before the atomic transaction.
+            if args[:3] == ("git", "push", "origin"):
                 sibling = subprocess.run(["git", "commit-tree", f"{source}^{{tree}}", "-p", source, "-m", "Concurrent source"], check=True, text=True, capture_output=True).stdout.strip()
                 subprocess.run(["git", "push", "origin", f"{sibling}:master"], check=True, capture_output=True)
             return original_run(*args, **kwargs)
         with patch.object(release, "run", race):
-            self.assertEqual(release.prepare(source)["tag"], "")
-        self.assertEqual(release.git("ls-remote", "origin", "refs/tags/v0.2.1"), "")
+            self.assertEqual(release.prepare(source)["tag"], "v0.2.1")
+        self.assertEqual(release.remote_tag("v0.2.1"), source)
+        self.assertNotEqual(release.remote_head(), source)
+
+    def test_lost_push_acknowledgement_recovers_remote_tag(self):
+        source = self.baseline()
+        original_run = release.run
+        def ambiguous(*args, **kwargs):
+            result = original_run(*args, **kwargs)
+            if args[:3] == ("git", "push", "origin"):
+                return subprocess.CompletedProcess(args, 1, "", "Connection closed after acceptance")
+            return result
+        with patch.object(release, "run", ambiguous):
+            self.assertTrue(release.prepare(source)["recovered"])
+        self.assertEqual(release.remote_tag("v0.2.1"), source)
+
+    def test_existing_tag_on_other_history_is_not_overwritten(self):
+        source = self.baseline()
+        unrelated = release.git("commit-tree", f"{source}^{{tree}}", "-m", "Unrelated release")
+        release.git("tag", "v0.2.1", unrelated)
+        release.git("push", "origin", "refs/tags/v0.2.1")
+        with self.assertRaisesRegex(ValueError, "different commit"):
+            release.prepare(source)
+        self.assertEqual(release.remote_tag("v0.2.1"), unrelated)
 
     def test_old_retry_does_not_mark_itself_latest(self):
         source = self.baseline()
         release.prepare(source)
-        newer = self.change("(MINOR) next feature")
+        newer = self.change("Next feature", declared="0.3.0")
         release.prepare(newer)
         release.git("checkout", "--detach", source)
         recovered = release.prepare(source)
@@ -142,6 +183,20 @@ class GitLifecycle(unittest.TestCase):
                 release.prepare(source)
         with self.assertRaises(ValueError):
             release.prepare("0" * 40)
+
+    def test_annotated_remote_tag_recovers_its_tested_commit(self):
+        source = release.git("rev-parse", "HEAD")
+        release.git("tag", "-a", "v0.2.0", "-m", "Released source")
+        release.git("push", "origin", "refs/tags/v0.2.0")
+        self.assertEqual(release.remote_tag("v0.2.0"), source)
+        self.assertTrue(release.prepare(source)["recovered"])
+
+    def test_uncommitted_manifest_is_never_released(self):
+        source = self.baseline()
+        Path("shard.yml").write_text("name: fixture\nversion: 1.0.0\n")
+        with self.assertRaisesRegex(ValueError, "Tracked files must be clean"):
+            release.prepare(source)
+        self.assertEqual(release.remote_tag("v1.0.0"), "")
 
     def test_existing_tag_must_match_its_manifest(self):
         source = release.git("rev-parse", "HEAD")

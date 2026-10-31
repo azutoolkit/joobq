@@ -70,7 +70,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Verify versioning, atomic pushes and recovery with local Git remotes
+      - name: Verify manifest versions, protected branches and recovery with local Git remotes
         run: python3 .github/scripts/test_release.py
 
   release:
@@ -80,17 +80,14 @@ jobs:
     needs: [build, release-tests]
     if: >-
       github.event_name == 'push' &&
-      github.ref == 'refs/heads/master' &&
-      !startsWith(github.event.head_commit.message, 'chore: bump version')
+      github.ref == 'refs/heads/master'
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Like Azu: use a bypass-capable token only when branch rules require it.
-          token: ${{ secrets.RELEASE_TOKEN || github.token }}
-      - name: Commit matching shard version and atomically push master and tag
+      - name: Tag the exact tested manifest version
         id: prepare
         run: python3 .github/scripts/release.py
       - name: Publish GitHub release with generated notes

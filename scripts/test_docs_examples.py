@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = {
     "core": [("first_job", "Processed order 42", True),
              ("thin_job", "Order 42: 2500 cents", True),
+             ("scheduled_jobs", "Generated report 42", True),
              ("lifecycle", "PASS delayed retry DLQ replay shutdown", False)],
     "pro": [("first_workflow", "Processed order 42", False),
             ("workflow_dsl", "Receipt: Processed order 42", False),

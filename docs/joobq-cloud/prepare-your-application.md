@@ -23,6 +23,8 @@ export REDIS_POOL_SIZE=20
 CRYSTAL_WORKERS=4 ./bin/worker
 ```
 
+The `CRYSTAL_WORKERS` setting assumes the multithreaded build shown in [Deploy workers](../production-deployment/deploy-workers.md). It does not set JoobQ queue concurrency.
+
 For a publicly trusted certificate, use the system trust store and omit the custom CA setting. Preserve hostname verification. Confirm that network policy allows the worker to reach Redis and its actual application dependencies.
 
 Budget connections across all producers, worker replicas, and configured pools. `REDIS_POOL_SIZE=20` is a per-pool limit, not an account-wide total. Scaling replicas can exhaust a provider's connection quota before CPU becomes the bottleneck.

@@ -37,6 +37,27 @@ JoobQ.configure do |config|
   queue "docs-failure", 1, FailingOrderJob
 end
 
+# The management API accepts a reader-only policy; it does not require all roles.
+ENV["JOOBQ_API_READER_TOKEN"] = "docs-reader-only-token-32-bytes-long"
+policy = JoobQ::ManagementPolicy.from_env
+ENV.delete("JOOBQ_API_READER_TOKEN")
+headers = HTTP::Headers{"Authorization" => "Bearer docs-reader-only-token-32-bytes-long"}
+read = HTTP::Server::Context.new(HTTP::Request.new("GET", "/stats", headers), HTTP::Server::Response.new(IO::Memory.new))
+raise "Reader token denied inspection" unless policy.authorize(read)
+write = HTTP::Server::Context.new(HTTP::Request.new("POST", "/retry", headers), HTTP::Server::Response.new(IO::Memory.new))
+raise "Reader token authorized mutation" if policy.authorize(write)
+raise "Expected forbidden mutation" unless write.response.status_code == 403
+
+# The Redis DLQ writer accepts expiration_time but does not enforce retention.
+retained = FailingOrderJob.new
+retained.queue = "docs-retention"
+JoobQ::RedisStore.instance.mark_as_dead(retained, 1_i64)
+sleep 1100.milliseconds
+retention_dlq = JoobQ::DeadLetterQueue.new
+raise "Expected retained record after supplied expiry" unless retention_dlq.count("docs-retention") == 1
+raise "Unexpected Redis DLQ key expiry" unless JoobQ::RedisStore.instance.redis.ttl(JoobQ::DeadLetterQueue::KEY) == -1
+raise "Retention probe cleanup failed" unless retention_dlq.purge([retained.jid.to_s]).succeeded == 1
+
 finished = Channel(Nil).new(1)
 spawn do
   JoobQ.forge(trap_signals: false)

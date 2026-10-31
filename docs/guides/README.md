@@ -8,8 +8,13 @@ Pick the task you want to finish. Each guide names its dependency baseline, expl
 
 | I want to… | Start here |
 | --- | --- |
-| Run a background job | [Core quick start](../quick-start/README.md) |
-| Build a typed workflow | [Pro DSL quick start](../quick-start/first-workflow.md) |
+| Write and admit a typed job | [Jobs](jobs.md) |
+| Register job types and size capacity | [Queues](queues.md) |
+| Schedule delayed, recurring, or cron work | [Scheduling](scheduling.md) |
+| Share configuration across processes | [Configuration](configuration.md) |
+| Start, monitor, and stop processing | [Workers](workers.md) |
+| Enqueue work and inspect run results | [Clients and producers](clients.md) |
+| Build and evolve a typed workflow | [Workflows](workflows.md) |
 | Pause work for a human decision | [Wait for approval](wait-for-approval.md) |
 | Recover a failed job or workflow | [Handle failures](handle-failures.md) |
 | Check behavior before deployment | [Test workflows](test-workflows.md) |

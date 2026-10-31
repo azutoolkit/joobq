@@ -17,8 +17,10 @@ Do not infer workers from Redis connectivity. A producer can connect and enqueue
 | Setting | Controls | Does not prove |
 | --- | --- | --- |
 | Queue workers | Local worker loops for a queue | Cluster-wide concurrency |
-| `worker_batch_size` | Number of jobs a worker can claim/process in its batch | A global cap across processes or detached fibers |
+| `worker_batch_size` | Maximum in-flight claims per legacy worker loop | A global cap across queues, processes, or fibers spawned by your handler |
 | `CRYSTAL_WORKERS` | Crystal execution threads in a compatible multithreaded build | Number of JoobQ queue workers |
+
+Each legacy worker spawns a fiber per claimed job. Two workers with the default batch size of ten can therefore hold up to twenty jobs in flight in that queue process. Setting two workers does not cap execution at two jobs. Workflow activity queues use this same legacy transport unless you explicitly configure Delivery.
 
 Increase concurrency only while throughput improves without unacceptable latency, connection contention, or memory growth. Database and HTTP client pools must support the workload too. See [tuning](../configuration/concurrency.md).
 

@@ -59,13 +59,13 @@ exit(clean && JoobQ.abandoned_jobs == 0 ? 0 : 3)
 ```sh
 shards install --frozen
 mkdir -p bin
-crystal build src/worker.cr --release -o bin/worker
+crystal build src/worker.cr --release -Dpreview_mt -o bin/worker
 CRYSTAL_WORKERS=4 ./bin/worker
 ```
 
-Choose a thread count appropriate to your allocated CPUs and dependencies. Core-only applications can use `JoobQ.forge`'s built-in signal handling; this Pro entry point owns signal handling itself so Pro stops before Core.
+This build enables `-Dpreview_mt` on Crystal 1.22.1; `CRYSTAL_WORKERS` alone does not enable multithreading. Choose a thread count appropriate to your allocated CPUs and dependencies. Core-only applications can use `JoobQ.forge`'s built-in signal handling; this Pro entry point owns signal handling itself so Pro stops before Core.
 
-The configured budgets are 20 seconds for Pro, then 10 seconds for Core. Incomplete drain reports a nonzero exit; inspect shutdown logs and abandoned-work counts. A forced kill or Redis outage can prevent a final handoff. Idempotent activity effects remain necessary.
+The configured budgets are 20 seconds for Pro, then 10 seconds for Core. This entry point exits nonzero when Pro reports an incomplete stop or Core reports abandoned jobs. Core's Boolean return is not a clean-drain result, and some teardown failures are logged rather than reflected in the exit status; inspect shutdown logs as well. A forced kill or Redis outage can prevent a final handoff. Idempotent activity effects remain necessary.
 
 ## Check it from a separate producer
 
@@ -78,7 +78,12 @@ require "joobq_pro"
 
 # Run separately, after production_worker.cr is ready, against the same Redis.
 client = JoobQPro::Workflows::Client.new
-id = client.start("orders", 42_i64)
+# A fresh canary each invocation; retries within this invocation reuse its ID.
+request_id = UUID.random.to_s
+id, created = client.try_start("orders", 42_i64, id: request_id)
+raise "Expected a new run" unless created
+repeated_id, repeated = client.try_start("orders", 42_i64, id: id)
+raise "Repeated start created another run" if repeated || repeated_id != id
 result = client.result(id, timeout: 10.seconds)
 raise "Unexpected worker result" unless result["process"].as_s == "Processed order 42"
 puts result["process"].as_s

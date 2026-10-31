@@ -74,7 +74,7 @@ spec:
 ```
 {% endcode %}
 
-CPU and memory values are illustrative. Measure your workload and account for connection buffers, input sizes, and workflow history. The image must include its required shared libraries and CA trust, and allow UID 10001 to execute the binary. The example uses a read-only root filesystem; mount deliberate writable storage if your application needs scratch files or a local archive.
+Build the image with `-Dpreview_mt` for Crystal 1.22.1 if you intend `CRYSTAL_WORKERS=2` to select two runtime threads. CPU and memory values are illustrative. Measure your workload and account for connection buffers, input sizes, and workflow history. The image must include its required shared libraries and CA trust, and allow UID 10001 to execute the binary. The example uses a read-only root filesystem; mount deliberate writable storage if your application needs scratch files or a local archive.
 
 ## Roll out, then prove progress
 
@@ -88,7 +88,7 @@ kubectl -n orders logs deployment/orders-worker
 
 A running Pod confirms process scheduling, not successful order completion. Submit a representative canary through your application and inspect its result. Add health checks based on the signals your application actually exposes; this example has no HTTP health endpoint.
 
-The initial single replica and `Recreate` strategy avoid automatic overlapping worker processes during rollout and cause a processing pause. Before enabling rolling updates or more replicas, test the installed runtime's processing recovery, duplicate-safe effects, connection budget, and Pro build-pinning policy. Legacy queues, opt-in Delivery, and Pro workflows have different recovery paths.
+The initial single replica and `Recreate` strategy avoid automatic overlapping worker processes during rollout and cause a processing pause. Before enabling rolling updates or more replicas, test the installed runtime's processing recovery, duplicate-safe effects, connection budget, and Pro build-pinning policy. Legacy queues, opt-in Delivery, and Pro workflows have different recovery paths. In particular, [legacy startup recovery](../best-practices/recovery.md#know-the-legacy-startup-recovery-limit) can move another consumer's active job and only reclaims one processing entry per start.
 
 The 45-second grace period leaves margin around the example's 20-second Pro and 10-second Core shutdown budgets. Rehearse termination under load; Kubernetes can force a kill after the grace period.
 

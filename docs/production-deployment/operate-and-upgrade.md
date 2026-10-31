@@ -24,9 +24,9 @@ Use the [available metrics and logging interfaces](../pro/observability.md). Not
 
 1. Pin and build the dependency graph. Keep a copy of the previous binary and configuration.
 2. Test old serialized inputs against new handlers. Preserve activity aliases and compare definition hashes when translating constructors to the DSL.
-3. Start compatible workers before admitting work that needs their handlers. Use a small canary and observe completion.
-4. Keep workers needed by open runs until they drain. A stored definition does not preserve an old executable implementation by itself.
-5. Stop replaced workers with the tested grace period. Reconcile abandoned or uncertain work before removing old capacity.
+3. Account for open runs before replacement. Drain them or verify the replacement can execute their remaining steps, and retain the compatible binaries needed for recovery. A stored definition does not preserve an old executable implementation by itself.
+4. For the default legacy transport, quiesce and stop old consumers with the tested grace period before replacement: startup recovery can reclaim another process's active work. Use overlapping rollouts only after validating the chosen transport and recovery policy.
+5. Start compatible replacement workers, complete a canary, and reconcile abandoned or uncertain work before reopening admission.
 
 For applications already using Pro build pinning, these are the existing APIs—not a new deployment service:
 
@@ -46,6 +46,10 @@ After those workers pass your canary, promote from a separate operator process c
 client = JoobQPro::Workflows::Client.new
 client.promote_build("orders", "orders-2026-10-30")
 ```
+
+For a pre-promotion canary, pass `build: "orders-2026-10-30"` to `Client#start`; otherwise the run uses the currently promoted default and may test old workers instead. Use a safe canary input and check its result.
+
+Build isolation is not universal: workers with build IDs also consume the shared activity queue, and compensations are dispatched there. Keep compensation handlers compatible across those workers. See the [legacy recovery limit](../best-practices/recovery.md#know-the-legacy-startup-recovery-limit) before overlapping processes.
 
 Promotion controls new-run routing; it is not a rollback of external effects. Do not declare builds compatible unless old inputs and behavior actually remain compatible. Keep a rollback boundary for state written by new code.
 

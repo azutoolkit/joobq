@@ -16,7 +16,7 @@ Installing Pro does not grant an HTTP client administrator access. Setting a lic
 
 ## Enable the management API deliberately
 
-The API is disabled by default. When enabled, the baseline policy requires reader, operator, and administrator tokens of at least 32 bytes each. Generate independent random values and inject them as secrets:
+The API is disabled by default. When enabled, the baseline policy requires **at least one** configured token, and every configured token must be at least 32 bytes. Configure only the roles you need. The following example enables all three roles with independent values:
 
 ```sh
 export JOOBQ_API_READER_TOKEN="$(openssl rand -hex 32)"
@@ -31,6 +31,8 @@ These commands create temporary development credentials in your shell. Persist p
 | Reader | GET/HEAD inspection |
 | Operator | Operational mutations such as supported replay actions |
 | Administrator | Destructive/reset/configuration actions |
+
+Roles are hierarchical: an operator can also read, and an administrator can perform all three roles. Use distinct token values; reusing a value for several roles makes it resolve to the highest role loaded from the environment. A reader-only configuration is valid.
 
 Clients authenticate with an `Authorization: Bearer …` header. Keep the listener on loopback, its default, unless your deployment supplies a protected transport and network boundary. An unencrypted remote connection can expose the token. A reverse proxy must preserve authentication and restrict access.
 

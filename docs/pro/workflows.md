@@ -24,7 +24,9 @@ Use the [typed workflow DSL](workflow-dsl/README.md), available since **Pro v0.2
 
 ## Activities and failure boundaries
 
-Declare activities with `step :name, ActivityClass`, then call `worker.register(blueprint).start`. Registration installs the typed handlers and publishes the definition; constructing a blueprint does neither. Use typed input and `ActivityContext`. `context.dedupe_key` identifies the external effect across attempts; `heartbeat` and `cancel_requested?` help long activities cooperate with the engine.
+Declare activities with `step :name, ActivityClass`, then call `worker.register(blueprint).start`. Registration installs the typed handlers and publishes the definition; constructing a blueprint does neither. Use typed input and `ActivityContext`. `context.dedupe_key` is `workflow_id:step_id`, stable across attempts of that run and step; a new run (including continuation) gets a different key. Carry your own business key across runs when the effect must remain the same. `heartbeat` and `cancel_requested?` help long activities cooperate with the engine.
+
+Activity timeouts record workflow state; they cannot kill a Crystal fiber or reverse an external operation. A timed-out handler may overlap a later attempt. Use external-client deadlines and idempotency.
 
 Definitions expose retry policies, timeouts, dependencies, conditions, compensation, and child workflows. A compensation is another operation that can fail or repeat. It is not a distributed database rollback.
 

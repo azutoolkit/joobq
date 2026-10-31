@@ -59,10 +59,12 @@ end
 | `only_if:` | Reference or existing expression string, evaluated with engine truthiness |
 | `timeout:` | Optional activity start-to-close duration; omitted preserves engine defaults |
 | `heartbeat:` | Optional heartbeat duration; activity code calls `context.heartbeat` |
-| `schedule_to_start:` | Optional queue-wait deadline |
+| `schedule_to_start:` | Queue-wait redispatch interval; defaults to 5 minutes, not a terminal failure deadline |
 | `gate:` | `version_gate(:change, min: …, max: …)` |
 
 `retry_policy(attempts: 3, initial: 1.second, backoff: 2.0, maximum: 1.minute, non_retryable: ["FatalError"])` describes activity attempts, including the first. Delays must be positive; backoff must be finite and at least one.
+
+When `schedule_to_start:` elapses while the step is still scheduled, the reconciler redispatches the same attempt and rearms the deadline. If its pinned build has no live workers, it rearms without sending another copy. Use a workflow timeout to bound the overall run; unwinding and compensation can continue beyond that timeout. The default activity start-to-close timeout is ten minutes, and heartbeats are disabled unless configured.
 
 All duration helpers require positive whole milliseconds within `Int64` range. Sub-millisecond values are rejected rather than rounded into zero. Supplying a duration does not make an external side effect cancellable.
 

@@ -44,7 +44,8 @@ This creates a temporary project, generates the JoobQ setup and a typed job, run
 | --- | --- |
 | `core/first_job.cr` | Documented job executes; SIGTERM exits cleanly |
 | `core/thin_job.cr` | Business operation check, queued adapter execution, SIGTERM shutdown |
-| `core/lifecycle.cr` | Delayed admission, one retry, DLQ inspection, selected replay after repair, clean shutdown |
+| `core/scheduled_jobs.cr` | Immediate recurring callback admits a fresh queue job; worker executes it; SIGTERM stops the process |
+| `core/lifecycle.cr` | Reader-only management policy, unenforced DLQ TTL, delayed admission, one retry, selected replay after repair, clean shutdown |
 | `pro/first_workflow.cr` | Typed DSL input, blueprint registration, checked workflow result, Pro then Core shutdown |
 | `pro/workflow_dsl.cr` | Explicit result chaining, parallel receipt/timer branches, retry policy, checked result |
 | `pro/approval_workflow.cr` | Signal payload, typed consumer, query, checked final result |
@@ -72,7 +73,7 @@ These checks do not establish a production throughput guarantee, complete chaos 
 
 The [DSL guide](pro/workflow-dsl/README.md) and the workflow fixtures target **Pro v0.2.2**, release commit `92879b94a3be2580e749f3a0acc829b9276040dc`. `examples/docs/pro/workflow_dsl.cr` is checked against the book and Pro's example (apart from the local source require). The private Pro documentation workflow pins this release, compiles all eight Pro fixture programs, and runs them against disposable Redis. The public Core job never needs private Pro access.
 
-Validated locally on **October 30, 2026** with Crystal **1.22.1** and Redis **8.0.2**: all **eleven** current fixture programs passed (three Core, eight Pro), including approval/query, compensation, a separate producer/worker probe, coordination, observability, retry/DLQ/replay, and SIGTERM shutdown. Dependencies were installed from the frozen Core v0.5.1 and Pro v0.2.2 fixture graphs. The GitBook checker and its five regression tests passed. All 17 Mermaid diagrams rendered in Chromium with Mermaid 11.17.2. The Kubernetes manifest parsed successfully, with matching selectors, volume references, and shutdown budget checks; it was not applied to a cluster. The systemd unit and managed-cloud topology remain deployment recipes to validate in your own environment.
+Validated locally on **October 30, 2026** with Crystal **1.22.1** and Redis **8.0.2**: all **eleven** fixture programs present at that revision passed (three Core, eight Pro), including approval/query, compensation, a separate producer/worker probe, coordination, observability, retry/DLQ/replay, and SIGTERM shutdown. Dependencies were installed from the frozen Core v0.5.1 and Pro v0.2.2 fixture graphs. The GitBook checker and its five regression tests passed. All 17 Mermaid diagrams rendered in Chromium with Mermaid 11.17.2. The Kubernetes manifest parsed successfully, with matching selectors, volume references, and shutdown budget checks; it was not applied to a cluster. The systemd unit and managed-cloud topology remain deployment recipes to validate in your own environment.
 
 Use `python3 scripts/test_docs_examples.py --edition pro` after installing the frozen Pro fixture graph to repeat the Pro checks, including the producer probe before worker shutdown.
 
@@ -87,6 +88,29 @@ python3 lib/joobq/scripts/run_integration.py crystal spec spec/workflows/dsl
 crystal build examples/workflow_dsl.cr -o /tmp/workflow-dsl-example
 python3 lib/joobq/scripts/run_integration.py --probe /tmp/workflow-dsl-example
 ```
+
+## Source accuracy audit
+
+This audit uses the exact [documented releases](introduction/compatibility.md), not current `master`. The new task guides cover Jobs, Queues, Scheduling, Configuration, Workers, Clients, and Workflows. Source links below are pinned; Pro links require repository access.
+
+| Documented behavior | Implementation evidence |
+| --- | --- |
+| At least one management token; hierarchical roles; 32-byte minimum | [Core management policy](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/management_policy.cr#L16) |
+| Job admission, immediate execution, delay, and recurring registration are different APIs | [Core job methods](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/job.cr#L206) |
+| Recurring callbacks call the same instance directly and can overlap; stopping prevents future callbacks | [Core recurring scheduler](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/recurring_job_scheduler.cr#L17) |
+| YAML scheduler setup logs intent instead of dispatching the configured jobs | [Core YAML scheduler setup](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/configure.cr#L288) |
+| Per-worker in-flight capacity depends on batch size; jobs run in separate fibers | [Core worker loop](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/worker.cr) |
+| Startup reclaims at most one processing entry; the Redis DLQ writer does not apply the supplied expiration | [Core store operations](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/redis_store.cr#L248) |
+| Core shutdown's Boolean indicates invocation, not clean drain | [Core lifecycle](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/lifecycle.cr#L63) |
+| Schedule-to-start expiration redispatches/rearms instead of failing the step | [Pro reconciler](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/reconciler.cr#L60) |
+| Build workers also consume the shared queue; compensations use that shared path | [Pro worker](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/worker.cr), [reconciler](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/reconciler.cr#L125) |
+| Activity deduplication keys are stable per run/step, not across new runs | [Pro activity context](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/activities.cr#L29) |
+| Stable-ID starts, paged history, and client wait timeouts | [Pro client](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/client.cr) |
+| Sequential/parallel construction, references, and checked durations | [Pro DSL builder](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/dsl/builder.cr), [values](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/dsl/values.cr) |
+
+The accuracy-and-guides update passed **twelve** executable programs (four Core, eight Pro) on Crystal 1.22.1 and Redis 8.0.2, plus the book checker, its five regression tests, and Crystal formatting. The production worker and its separate producer also compiled with `--release -Dpreview_mt` and passed admission, repeated-ID checks, completion, and SIGTERM with `CRYSTAL_WORKERS=4`. Twenty reviewed source files matched the exact release commits byte-for-byte. This is a functional smoke test, not a throughput or deployment certification.
+
+The lifecycle fixture now checks reader-only authorization and rejects reader mutation; it also demonstrates that a supplied one-second DLQ expiration is not enforced. The separate workflow producer checks repeated admission of the same run ID. These are release behavior checks, not fixes to those implementations. Illustrative fragments still require the application definitions and configuration named beside them; only marked executable examples are run by the fixture runner.
 
 ## Maintaining the book
 

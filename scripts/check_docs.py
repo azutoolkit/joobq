@@ -97,7 +97,7 @@ def check(root):
             seen_examples.add(name)
             if not source.is_file() or source.read_text() != code:
                 errors.append(f"{relative}: example differs from examples/docs/{name}")
-    for required in ("core/first_job.cr", "pro/first_workflow.cr", "pro/workflow_dsl.cr", "core/thin_job.cr",
+    for required in ("core/first_job.cr", "core/scheduled_jobs.cr", "pro/first_workflow.cr", "pro/workflow_dsl.cr", "core/thin_job.cr",
                      "pro/approval_workflow.cr", "pro/compensation_workflow.cr", "pro/production_worker.cr", "pro/worker_probe.cr"):
         if required not in seen_examples:
             errors.append(f"missing executable quick-start example: {required}")

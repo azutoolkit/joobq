@@ -22,6 +22,15 @@ Start with the [compatibility guide](introduction/compatibility.md). These docs 
 <tr><td><strong>Best Practices</strong></td><td>Design repeatable work and rehearse recovery.</td><td><a href="best-practices/README.md">Best Practices</a></td></tr>
 </tbody></table>
 
+## Build, choose a pattern, deploy
+
+| Your next step | Start here |
+| --- | --- |
+| Build and test real background work | [Guides](guides/README.md) |
+| Structure concurrency, compensation, and admission | [Design Patterns](design-patterns/README.md) |
+| Run workers and protect Redis state | [Production Deployment](production-deployment/README.md) |
+| Host on cloud VMs, containers, or Kubernetes | [JoobQ Cloud](joobq-cloud/README.md) |
+
 ## How the pieces fit
 
 ```mermaid

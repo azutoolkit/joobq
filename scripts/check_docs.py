@@ -97,10 +97,12 @@ def check(root):
             seen_examples.add(name)
             if not source.is_file() or source.read_text() != code:
                 errors.append(f"{relative}: example differs from examples/docs/{name}")
-    for required in ("core/first_job.cr", "pro/first_workflow.cr", "pro/workflow_dsl.cr"):
+    for required in ("core/first_job.cr", "pro/first_workflow.cr", "pro/workflow_dsl.cr", "core/thin_job.cr",
+                     "pro/approval_workflow.cr", "pro/compensation_workflow.cr", "pro/production_worker.cr", "pro/worker_probe.cr"):
         if required not in seen_examples:
             errors.append(f"missing executable quick-start example: {required}")
-    for section in ("introduction", "quick-start", "core", "pro", "configuration", "best-practices"):
+    for section in ("introduction", "quick-start", "core", "pro", "configuration", "best-practices",
+                    "guides", "design-patterns", "production-deployment", "joobq-cloud"):
         if not (docs / section).is_dir():
             errors.append(f"missing required section: {section}")
     return errors

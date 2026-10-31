@@ -27,7 +27,7 @@ Create `bin/` first if needed. Choose thread count from the CPUs actually alloca
 
 ## Give shutdown time to finish
 
-`JoobQ.forge` installs signal handling by default. SIGTERM, SIGINT, and SIGHUP initiate shutdown. The worker stops admission, drains active work within its budget, and attempts to return unfinished work. A forced kill, unavailable Redis, or expired supervisor grace period can prevent that final handoff.
+`JoobQ.forge` installs signal handling by default. SIGTERM, SIGINT, and SIGHUP initiate shutdown. The worker stops claiming new work, drains active work within its budget, and attempts to return unfinished work. A forced kill, unavailable Redis, or expired supervisor grace period can prevent that final handoff.
 
 The Core baseline exits with status `3` when shutdown reports abandoned work. Alert on that outcome and investigate retained queue/processing state. A second termination signal can force exit; do not use repeated signals as a normal drain procedure.
 

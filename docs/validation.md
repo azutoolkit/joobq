@@ -43,9 +43,13 @@ This creates a temporary project, generates the JoobQ setup and a typed job, run
 | Fixture | Checks |
 | --- | --- |
 | `core/first_job.cr` | Documented job executes; SIGTERM exits cleanly |
+| `core/thin_job.cr` | Business operation check, queued adapter execution, SIGTERM shutdown |
 | `core/lifecycle.cr` | Delayed admission, one retry, DLQ inspection, selected replay after repair, clean shutdown |
 | `pro/first_workflow.cr` | Typed DSL input, blueprint registration, checked workflow result, Pro then Core shutdown |
 | `pro/workflow_dsl.cr` | Explicit result chaining, parallel receipt/timer branches, retry policy, checked result |
+| `pro/approval_workflow.cr` | Signal payload, typed consumer, query, checked final result |
+| `pro/compensation_workflow.cr` | Permanent payment failure and completed-step compensation |
+| `pro/production_worker.cr` + `pro/worker_probe.cr` | Separate producer completes work, then worker exits on SIGTERM |
 | `pro/coordination.cr` | Sealed batch completion, duplicate rejection, owner-checked release, concurrent rate reservations |
 | `pro/observability.cr` | Completion/busy counters, Redis metrics collection, collector shutdown |
 
@@ -66,11 +70,11 @@ These checks do not establish a production throughput guarantee, complete chaos 
 
 ## Workflow DSL release checks
 
-The [DSL guide](pro/workflow-dsl/README.md) and both workflow fixtures now target **Pro v0.2.2**, release commit `92879b94a3be2580e749f3a0acc829b9276040dc`. `examples/docs/pro/workflow_dsl.cr` is checked against the book and Pro's example (apart from the local source require). The private Pro documentation workflow pins this release, compiles all four Pro fixtures, and runs them against disposable Redis. The public Core job never needs private Pro access.
+The [DSL guide](pro/workflow-dsl/README.md) and the workflow fixtures target **Pro v0.2.2**, release commit `92879b94a3be2580e749f3a0acc829b9276040dc`. `examples/docs/pro/workflow_dsl.cr` is checked against the book and Pro's example (apart from the local source require). The private Pro documentation workflow pins this release, compiles all eight Pro fixture programs, and runs them against disposable Redis. The public Core job never needs private Pro access.
 
-Validated locally on **October 30, 2026** with Crystal **1.22.1** and Redis **8.0.2**: all **six** current fixtures passed (two Core, four Pro), including both DSL workflows, coordination, observability, retry/DLQ/replay, and shutdown. Dependencies were installed from the frozen Core v0.5.1 and Pro v0.2.2 fixture graphs. The GitBook checker and its five regression tests passed.
+Validated locally on **October 30, 2026** with Crystal **1.22.1** and Redis **8.0.2**: all **eleven** current fixture programs passed (three Core, eight Pro), including approval/query, compensation, a separate producer/worker probe, coordination, observability, retry/DLQ/replay, and SIGTERM shutdown. Dependencies were installed from the frozen Core v0.5.1 and Pro v0.2.2 fixture graphs. The GitBook checker and its five regression tests passed. All 17 Mermaid diagrams rendered in Chromium with Mermaid 11.17.2. The Kubernetes manifest parsed successfully, with matching selectors, volume references, and shutdown budget checks; it was not applied to a cluster. The systemd unit and managed-cloud topology remain deployment recipes to validate in your own environment.
 
-Use `python3 scripts/test_docs_examples.py --edition pro` after installing the frozen Pro fixture graph to repeat the four Pro checks.
+Use `python3 scripts/test_docs_examples.py --edition pro` after installing the frozen Pro fixture graph to repeat the Pro checks, including the producer probe before worker shutdown.
 
 The supporting DSL implementation was validated on October 30, 2026 with Crystal 1.22.1 and Redis 8.0.2: the workflow example, 22 focused DSL specs with four workers and `-Dpreview_mt`, seven compile-failure contracts, and 15 offline builder/registration specs. The final full Pro regression suite passed 442 tests, with no failures, errors, or pending tests. Offline tests used an unreachable Redis port and did not open a connection. The new workflow Mermaid diagram rendered in Chromium with Mermaid 11.17.2. These checks cover graph/hash parity, nested groups, lifecycle operations, typed registration conflicts, recovery, and build pinning. They do not certify deployment durability or performance.
 

@@ -19,13 +19,20 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 CASES = {
     "core": [("first_job", "Processed order 42", True),
+             ("thin_job", "Order 42: 2500 cents", True),
              ("lifecycle", "PASS delayed retry DLQ replay shutdown", False)],
     "pro": [("first_workflow", "Processed order 42", False),
             ("workflow_dsl", "Receipt: Processed order 42", False),
+            ("approval_workflow", "Approved order 42", False),
+            ("compensation_workflow", "PASS failed payment released its reservation", False),
+            ("production_worker", "Worker ready", True),
             ("coordination", "PASS batch uniqueness concurrent rate limit", False),
             ("observability", "PASS completion metrics collection shutdown", False)],
 }
 
+
+# Readiness alone is not worker health: exercise a separate producer before SIGTERM.
+PROBES = {"production_worker": ("worker_probe", "Processed order 42")}
 
 def stop(process, grace=5):
     if process.poll() is None:
@@ -109,6 +116,8 @@ def run_example(name, expected, signal_after_output, workspace, env):
                 if time.monotonic() > deadline:
                     raise RuntimeError(f"Example timed out: {name}\n{tail(log_path)}")
                 if signal_after_output and not signaled and expected in tail(log_path):
+                    if probe := PROBES.get(name):
+                        run_example(probe[0], probe[1], False, workspace, env)
                     process.send_signal(signal.SIGTERM)
                     signaled = True
                 time.sleep(0.05)
@@ -145,7 +154,9 @@ def main():
             (lib / dependency.name).symlink_to(dependency.resolve())
         if args.pro_source:
             (lib / "joobq_pro").symlink_to(args.pro_source.resolve())
-        for name, _, _ in CASES[args.edition]:
+        names = [name for name, _, _ in CASES[args.edition]]
+        names += [PROBES[name][0] for name in names if name in PROBES]
+        for name in names:
             shutil.copy2(fixture / f"{name}.cr", workspace)
             compile_example(name, workspace, env)
         with redis_server(workspace, env) as connected_env:

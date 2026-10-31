@@ -6,7 +6,7 @@ description: Recover transient failures without turning replay into duplicate si
 
 A raised exception enters the retry middleware. Core's default budget is **three retries**, allowing the initial attempt plus three further attempts. Backoff starts at one second, doubles by retry attempt, and is capped at one hour in the baseline implementation. It is not a promise that a job starts at exactly that time.
 
-The remaining budget is carried with the serialized job. Exhausted jobs move to the DLQ with failure context. Retention is finite; the default dead-letter TTL is seven days. Treat the DLQ as a recovery queue, not a permanent audit archive.
+The remaining budget is carried with the serialized job. Exhausted jobs move to the DLQ with failure context. `dead_letter_ttl` defaults to seven days, but the documented Redis implementation stores entries in a sorted set without applying that TTL or automatically pruning by age. Do not assume records disappear after seven days. Monitor growth and implement a reviewed retention/export policy using the DLQ APIs; the DLQ is not a backup or a permanent audit guarantee.
 
 ## Inspect before replaying
 

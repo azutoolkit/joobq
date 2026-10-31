@@ -10,7 +10,7 @@ shards:
 
   joobq_pro:
     git: https://github.com/azutoolkit/joobq-pro.git
-    version: 0.2.0
+    version: 0.2.2
 
   pool:
     git: https://github.com/ysbaddaden/pool.git

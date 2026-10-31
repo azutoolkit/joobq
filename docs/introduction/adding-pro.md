@@ -18,7 +18,7 @@ version: 0.1.0
 dependencies:
   joobq_pro:
     github: azutoolkit/joobq-pro
-    version: "= 0.2.0"
+    version: "= 0.2.2"
 ```
 {% endcode %}
 

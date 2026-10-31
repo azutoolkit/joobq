@@ -4,7 +4,7 @@ description: Adopt the DSL without silently changing persisted identities or dep
 
 # Migrate a constructor-based definition
 
-Keep existing `Definition.new`, `Step.*`, and `register_activity` code working while you evaluate the preview. No constructor API is deprecated by this feature.
+Upgrade to **JoobQ Pro v0.2.2** before adopting the DSL. Keep existing `Definition.new`, `Step.*`, and `register_activity` code working while you migrate; none of those constructor APIs is deprecated. The DSL authoring API remains a preview.
 
 ## Preserve identity first
 

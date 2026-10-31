@@ -14,9 +14,9 @@ Configure producers and workers from the same initializer. Both must agree on Re
 | `retries` | `3` | Retry budget after the initial attempt |
 | `expires` | `3.days` | Job age limit |
 | `timeout` | `2.seconds` | Configuration value; **not** a universal cancellation deadline for arbitrary handler code |
-| `worker_batch_size` | `10` | Work fetched per batch; not worker concurrency |
-| `failed_ttl` | `7.days` | Failed-record retention |
-| `dead_letter_ttl` | `7.days` | Dead-letter retention |
+| `worker_batch_size` | `10` | Maximum in-flight claims per legacy worker loop, also limiting each fetch |
+| `failed_ttl` | `7.days` | Configuration value; no failed-record expiry enforcement in these baselines |
+| `dead_letter_ttl` | `7.days` | Configuration value; the Redis DLQ writer does not enforce this TTL |
 | `rest_api_enabled` | `false` | Management listener |
 | `stats_enabled` | `true` | Core statistics tracking |
 

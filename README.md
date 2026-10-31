@@ -19,6 +19,10 @@
 
 Start with the **[unified JoobQ and JoobQ Pro documentation](docs/README.md)**: released-version quick starts, Core concepts, Pro workflows, configuration, and recovery guides. [Adding Pro](docs/introduction/adding-pro.md) explains repository access, the compatible dependency pair, and feature setup. The book source lives here; hosted GitBook sync must be configured separately.
 
+For workflows, follow the [typed DSL quick start](docs/quick-start/first-workflow.md), available since **JoobQ Pro v0.2.2**, then explore [sequential and parallel flows](docs/pro/workflow-dsl/README.md). The authoring API remains a preview; existing constructors remain supported.
+
+Explore task-based [Guides](docs/guides/README.md), reusable [Design Patterns](docs/design-patterns/README.md), [Production Deployment](docs/production-deployment/README.md), and [JoobQ Cloud](docs/joobq-cloud/README.md) for hosting on your cloud infrastructure.
+
 > Enterprise v1 remains under review. The opt-in [leased runtime and migration guide](design/durable-runtime-guide.md) describes the new delivery API, management authentication and compatibility changes. See [validation and open release gates](design/implementation-validation.md) before deployment.
 
 **JoobQ** is an asynchronous job queue system built for the Crystal programming language. Designed for both simplicity and scalability, JoobQ provides a robust framework for managing background job processing in applications of any size—from startup MVPs to large-scale distributed systems.

@@ -8,7 +8,7 @@ JoobQ Pro builds on the Core runtime. The upgrade adds workflow orchestration, m
 
 | Capability | Guide | Important boundary |
 | --- | --- | --- |
-| Activities, dependencies, signals, timers, child workflows, compensation | [Workflows](workflows.md) | Histories are Redis-backed; effects can repeat |
+| Typed workflows, dependencies, signals, timers, children, compensation | [Workflow DSL](workflow-dsl/README.md) | Available since Pro v0.2.2; authoring preview; effects can repeat |
 | Durable batches, uniqueness, and distributed rate limits | [Coordination](coordination.md) | Durable services require an explicit Delivery runtime |
 | Metrics, percentiles, alerts, and structured logs | [Observability](observability.md) | Configure collection and external export deliberately |
 | Queue, workflow, and DLQ inspection | [CLI management](management.md) | CLI inspection is shared with Core; Pro adds workflow data |

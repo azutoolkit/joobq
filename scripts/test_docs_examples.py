@@ -19,12 +19,21 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 CASES = {
     "core": [("first_job", "Processed order 42", True),
+             ("thin_job", "Order 42: 2500 cents", True),
+             ("scheduled_jobs", "Generated report 42", True),
              ("lifecycle", "PASS delayed retry DLQ replay shutdown", False)],
     "pro": [("first_workflow", "Processed order 42", False),
+            ("workflow_dsl", "Receipt: Processed order 42", False),
+            ("approval_workflow", "Approved order 42", False),
+            ("compensation_workflow", "PASS failed payment released its reservation", False),
+            ("production_worker", "Worker ready", True),
             ("coordination", "PASS batch uniqueness concurrent rate limit", False),
             ("observability", "PASS completion metrics collection shutdown", False)],
 }
 
+
+# Readiness alone is not worker health: exercise a separate producer before SIGTERM.
+PROBES = {"production_worker": ("worker_probe", "Processed order 42")}
 
 def stop(process, grace=5):
     if process.poll() is None:
@@ -108,6 +117,8 @@ def run_example(name, expected, signal_after_output, workspace, env):
                 if time.monotonic() > deadline:
                     raise RuntimeError(f"Example timed out: {name}\n{tail(log_path)}")
                 if signal_after_output and not signaled and expected in tail(log_path):
+                    if probe := PROBES.get(name):
+                        run_example(probe[0], probe[1], False, workspace, env)
                     process.send_signal(signal.SIGTERM)
                     signaled = True
                 time.sleep(0.05)
@@ -132,8 +143,8 @@ def main():
         if args.edition != "pro":
             parser.error("--pro-source requires --edition pro")
         commit = subprocess.check_output(["git", "-C", str(args.pro_source), "rev-parse", "HEAD"], text=True).strip()
-        if commit != "0c6655acb6c4372bac55992de2f0d7cd73261b24":
-            parser.error("--pro-source must be the documented v0.2.0 release")
+        if commit != "92879b94a3be2580e749f3a0acc829b9276040dc":
+            parser.error("--pro-source must be the documented v0.2.2 release")
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("REDIS_", "JOOBQ_")) and key not in ("RACK_ENV", "CRYSTAL_ENV")}
     with tempfile.TemporaryDirectory(prefix="joobq-docs-") as temporary:
@@ -144,7 +155,9 @@ def main():
             (lib / dependency.name).symlink_to(dependency.resolve())
         if args.pro_source:
             (lib / "joobq_pro").symlink_to(args.pro_source.resolve())
-        for name, _, _ in CASES[args.edition]:
+        names = [name for name, _, _ in CASES[args.edition]]
+        names += [PROBES[name][0] for name in names if name in PROBES]
+        for name in names:
             shutil.copy2(fixture / f"{name}.cr", workspace)
             compile_example(name, workspace, env)
         with redis_server(workspace, env) as connected_env:

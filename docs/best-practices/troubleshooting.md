@@ -20,7 +20,7 @@ The legacy queue view does not automatically include Delivery receipts or Pro wo
 
 ## “Management tokens are required”
 
-The management API was enabled without all required role tokens. Either disable the API when it is not needed, or configure [management credentials](../configuration/access.md). Setting `rest_api_enabled = true` while logging “API disabled” does not disable it.
+The management API was enabled without any nonempty role token. Either disable the API when it is not needed, or configure [management credentials](../configuration/access.md). Setting `rest_api_enabled = true` while logging “API disabled” does not disable it.
 
 ## Pro cannot be installed or activated
 
@@ -32,7 +32,7 @@ Record `crystal --version`, `shard.lock`, and the complete `--error-trace`. Use 
 
 ## Jobs repeat or disappear from the DLQ
 
-Retries and recovery can repeat attempts. Inspect the stable business identity and external result before replaying. DLQ records have a TTL; expired retention is not successful completion. Keep retention long enough for your incident response process.
+Retries and recovery can repeat attempts. Inspect the stable business identity and external result before replaying. The documented Redis DLQ does not enforce `dead_letter_ttl`. If records disappear, investigate replay, purge/reset operations, Redis eviction, and restore history rather than assuming the seven-day setting removed them. Define retention long enough for incident response and monitor DLQ growth.
 
 ## Redis TLS or pool failures
 

@@ -22,6 +22,15 @@ Start with the [compatibility guide](introduction/compatibility.md). These docs 
 <tr><td><strong>Best Practices</strong></td><td>Design repeatable work and rehearse recovery.</td><td><a href="best-practices/README.md">Best Practices</a></td></tr>
 </tbody></table>
 
+## Build, choose a pattern, deploy
+
+| Your next step | Start here |
+| --- | --- |
+| Build and test real background work | [Guides](guides/README.md) |
+| Structure concurrency, compensation, and admission | [Design Patterns](design-patterns/README.md) |
+| Run workers and protect Redis state | [Production Deployment](production-deployment/README.md) |
+| Host on cloud VMs, containers, or Kubernetes | [JoobQ Cloud](joobq-cloud/README.md) |
+
 ## How the pieces fit
 
 ```mermaid
@@ -42,7 +51,7 @@ Crystal compiles job handlers to native code and uses fibers to overlap waiting 
 | --- | --- |
 | Typed jobs, queues, retries, scheduling, and DLQ inspection | [Core](core/README.md) |
 | Worker shutdown, TLS connections, and management tokens | [Configuration](configuration/README.md); these are not Pro-only |
-| Multi-step work with signals, timers, and compensation | [Pro workflows](pro/workflows.md) |
+| Typed sequential/parallel workflows, signals, timers, and compensation | [Pro workflow DSL](pro/workflow-dsl/README.md), since v0.2.2 |
 | Durable batch membership and unique admission | [Pro coordination](pro/coordination.md); uses opt-in Delivery |
 | Percentiles and alert evaluation | [Pro observability](pro/observability.md) |
 | Terminal queue inspection | [CLI management](pro/management.md); Core works too |

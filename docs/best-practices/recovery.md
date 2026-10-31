@@ -27,6 +27,12 @@ Define two goals before choosing Redis persistence: how much acknowledged work m
 | Redis restore | Missing/newer work, receipt retention, replay policy and measured RPO/RTO |
 | Pro reconciler interruption | Batch dispatch, callback dispatch and workflow progress recover |
 
+## Know the legacy startup recovery limit
+
+In both documented Core revisions, `Queue#start` calls `move_job_back_to_queue` once. That operation moves **at most one** member from the queue's shared processing list back to ready; it is not a full crash-recovery scan and has no per-process ownership check. Starting another consumer can therefore reclaim a job still running elsewhere. A restart alone does not prove all work left by SIGKILL was recovered.
+
+Quiesce consumers before planned replacement, inspect retained processing entries after a crash, and reconcile them through a tested recovery procedure. Do not enable overlapping rollouts on the assumption that legacy processing has leases. Pro's default activity transport uses these queues, though its workflow history and reconciler add their own attempt checks and redispatch. Delivery is the separate leased path; adopting it requires an explicit migration.
+
 ## Migrate a processing API separately from an upgrade
 
 A dependency upgrade does not move legacy `Job.enqueue` work into Delivery. Use separate namespaces and an explicit cutover plan. Stop or redirect producers, drain or account for old work, validate the new path with a small workload, and retain old state long enough to reconcile.

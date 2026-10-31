@@ -717,8 +717,9 @@ it does not stop jobs already running. These APIs enforce state preconditions, n
 
 ## Automatic releases
 
-Successful pushes to `master` publish a GitHub release after the complete CI
-matrix passes. Versions follow Azu's `(MINOR)` / `(MAJOR)` commit conventions,
-with a patch bump by default. The tagged manifest and runtime `VERSION` stay in
-sync. See [release automation](docs/releasing.md) for first-release behavior,
-branch protection, retry recovery and validation.
+Prepare a new `shard.yml` version in a reviewed pull request. After merge and the
+complete CI matrix, automation tags the exact tested commit and publishes a GitHub
+release. Unchanged versions do not create releases; CI never pushes a version
+commit to protected `master`. The tagged manifest and runtime `VERSION` stay in
+sync. See [release automation](docs/releasing.md) for version policy, permissions,
+retry recovery and validation.

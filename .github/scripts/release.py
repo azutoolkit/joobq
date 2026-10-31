@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare an atomic, CI-gated shard release; publish it idempotently with gh."""
+"""Tag the tested manifest version without changing master; publish it idempotently."""
 import argparse
 import json
 import os
@@ -33,21 +33,6 @@ def manifest(text):
     return matches[0]
 
 
-def next_version(declared, previous, messages):
-    # A repository with no tags publishes its declared version, not 0.0.1 or a
-    # bump inferred from its entire pre-release development history.
-    if previous is None:
-        return declared
-    major, minor, patch = version(previous)
-    if "(MAJOR)" in messages:
-        candidate = (major + 1, 0, 0)
-    elif "(MINOR)" in messages:
-        candidate = (major, minor + 1, 0)
-    else:
-        candidate = (major, minor, patch + 1)
-    return ".".join(map(str, max(candidate, version(declared))))
-
-
 def tags():
     return sorted((tag for tag in git("tag", "--list", "v*").splitlines()
                    if VERSION.fullmatch(tag[1:])), key=lambda tag: version(tag[1:]))
@@ -61,8 +46,10 @@ def ancestor(commit, head):
     return run("git", "merge-base", "--is-ancestor", commit, head, check=False).returncode == 0
 
 
-def bump_message(value):
-    return f"chore: bump version to {value} [skip ci]"
+def remote_tag(tag):
+    output = git("ls-remote", "origin", f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
+    refs = {ref: commit for commit, ref in (line.split() for line in output.splitlines())}
+    return refs.get(f"refs/tags/{tag}^{{}}", refs.get(f"refs/tags/{tag}", ""))
 
 
 def failure_details(result):
@@ -88,15 +75,11 @@ def prepare(source, dry_run=False):
     all_tags = tags()
     head = remote_head()
 
-    # A previous attempt may have pushed the bump/tag but failed to publish the
-    # GitHub release. Accept only that exact source or a verified version-only child.
+    # Publication can fail after a successful tag push. Recover only a tag that
+    # actually exists remotely and points to this exact tested source.
     for tag in reversed(all_tags):
         commit = git("rev-parse", f"{tag}^{{commit}}")
-        parents = git("show", "-s", "--format=%P", commit).split()
-        version_child = (parents == [source]
-                         and git("show", "-s", "--format=%s", commit) == bump_message(tag[1:])
-                         and git("diff", "--name-only", source, commit).splitlines() == ["shard.yml"])
-        if commit == source or version_child:
+        if commit == source and remote_tag(tag) == source:
             if manifest(git("show", f"{commit}:shard.yml")) != tag[1:]:
                 raise ValueError("Existing release tag disagrees with its shard.yml")
             if not ancestor(commit, head):
@@ -107,35 +90,32 @@ def prepare(source, dry_run=False):
         return {"tag": "", "reason": "master advanced; its newer CI run owns the release"}
     reachable = [tag for tag in all_tags if ancestor(tag, source)]
     previous = reachable[-1] if reachable else None
-    declared = manifest(Path("shard.yml").read_text())
-    messages = git("log", "--format=%B", f"{previous}..{source}") if previous else ""
-    value = next_version(declared, previous[1:] if previous else None, messages)
+    value = manifest(Path("shard.yml").read_text())
+    if previous:
+        if version(value) < version(previous[1:]):
+            raise ValueError("shard.yml is older than the latest release; prepare a newer version in a reviewed PR")
+        if value == previous[1:]:
+            return {"tag": "", "reason": "manifest version already released; no new release requested"}
     tag = "v" + value
     if tag in all_tags:
-        raise ValueError("Calculated tag already exists on a different commit; refusing to move it")
+        raise ValueError("Declared tag already exists on a different commit; refusing to move it")
     result = {"tag": tag, "latest": not all_tags or version(value) > version(all_tags[-1][1:]), "recovered": False}
     if dry_run:
         return result
 
-    text = Path("shard.yml").read_text()
-    Path("shard.yml").write_text(MANIFEST.sub(f"version: {value}", text))
-    git("config", "user.name", "github-actions[bot]")
-    git("config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
-    if git("diff", "--name-only", "--", "shard.yml"):
-        git("add", "shard.yml")
-        git("commit", "-m", bump_message(value), "--", "shard.yml")
-    git("tag", tag)
-    # A non-fast-forward or protection rejection cannot leave an orphan tag.
-    pushed = run("git", "push", "--atomic", "origin", "HEAD:refs/heads/master", f"refs/tags/{tag}", check=False)
+    # Never create an untested version-only child or push the protected branch.
+    # A master advance after this check cannot make the tag point at untested code.
+    git("tag", tag, source)
+    pushed = run("git", "push", "origin", f"refs/tags/{tag}", check=False)
     if pushed.returncode:
-        if remote_head() != source:
-            return {"tag": "", "reason": "master advanced during push; newer CI owns the release"}
+        if remote_tag(tag) == source:
+            return {**result, "recovered": True}  # accepted push, lost acknowledgement
+        git("tag", "-d", tag)  # a local-only tag must not masquerade as a release on retry
         raise RuntimeError(
-            "Atomic release push was refused; no tag was published.\n"
+            "Release tag push was refused; master was not changed.\n"
             f"{failure_details(pushed)}\n"
-            "If required checks or CodeQL block the version-only commit, configure RELEASE_TOKEN "
-            "with Contents read/write for this repository and an owner allowed to bypass the applicable rules. "
-            "The default GITHUB_TOKEN cannot bypass those rules. See docs/releasing.md."
+            "Check Actions contents:write permission and release-tag rules. "
+            "Do not disable CodeQL or bypass master protection. See docs/releasing.md."
         )
     return result
 

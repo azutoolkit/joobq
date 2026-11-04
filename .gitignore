@@ -10,6 +10,3 @@ __pycache__/
 *.pyc
 
 # Website (Astro)
-website/node_modules
-website/dist
-website/.astro

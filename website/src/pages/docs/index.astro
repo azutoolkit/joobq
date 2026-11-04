@@ -1,0 +1,28 @@
+---
+import DocsLayout from '../../components/DocsLayout.astro';
+import { getSidebar } from '../../lib/docs';
+import { site } from '../../data/site.config';
+import { url } from '../../lib/url';
+
+const sidebar = await getSidebar();
+---
+
+<DocsLayout title={site.docsUi.indexTitle} description={site.docsUi.indexDescription} slug="">
+  <div class="not-prose grid gap-4 sm:grid-cols-2">
+    {
+      sidebar.map((section) => (
+        <section class="panel p-5">
+          <h2 class="!mt-0 text-lg font-semibold">{section.label}</h2>
+          <p class="mt-1 text-sm text-muted">{section.blurb}</p>
+          <ul class="mt-4 space-y-2 text-sm">
+            {section.pages.map((page) => (
+              <li>
+                <a href={url(`/docs/${page.slug}`)}>{page.title}</a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
+    }
+  </div>
+</DocsLayout>

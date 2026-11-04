@@ -1,0 +1,238 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* Design tokens. Change a colour here and every component follows. */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-bg: #090d16;
+  --color-surface: #111827;
+  --color-surface-2: #0d1320;
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-line-strong: rgb(255 255 255 / 0.14);
+  --color-ink: #e6edf7;
+  --color-muted: #9aa7bb;
+  --color-faint: #6b778c;
+
+  --color-oss: #38bdf8;
+  --color-healthy: #10b981;
+  --color-warn: #f59e0b;
+  --color-pro: #a78bfa;
+  --color-danger: #fb7185;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+  }
+  body {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-oss);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: rgb(56 189 248 / 0.3);
+  }
+  code,
+  kbd,
+  pre {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  .container-x {
+    width: 100%;
+    max-width: 76rem;
+    margin-inline: auto;
+    padding-inline: 1rem;
+  }
+  @media (min-width: 640px) {
+    .container-x {
+      padding-inline: 1.5rem;
+    }
+  }
+  .panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+  }
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-oss);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem;
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .btn-primary {
+    background: var(--color-oss);
+    color: #04121d;
+  }
+  .btn-primary:hover {
+    background: #7dd3fc;
+  }
+  .btn-ghost {
+    border: 1px solid var(--color-line-strong);
+    color: var(--color-ink);
+  }
+  .btn-ghost:hover {
+    border-color: rgb(255 255 255 / 0.3);
+    background: rgb(255 255 255 / 0.04);
+  }
+  /* Tabs: [data-tabs] wraps [role=tab] buttons and [role=tabpanel] panels (script in BaseLayout). */
+  [role='tab'][aria-selected='true'] {
+    color: var(--color-ink);
+    border-color: var(--color-oss);
+    background: rgb(56 189 248 / 0.08);
+  }
+  [role='tabpanel'][hidden] {
+    display: none;
+  }
+  /* Inline `code` inside data-driven copy. */
+  .copy code {
+    font-size: 0.85em;
+    padding: 0.1em 0.35em;
+    border-radius: 0.3em;
+    background: rgb(255 255 255 / 0.06);
+    border: 1px solid var(--color-line);
+    color: #cfe3f5;
+    overflow-wrap: anywhere;
+  }
+  .code-block pre {
+    margin: 0;
+    padding: 1rem 1.125rem;
+    overflow-x: auto;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    background: transparent !important;
+  }
+}
+
+/* Documentation pages (rendered Markdown). */
+.prose-docs {
+  color: #c9d3e1;
+  line-height: 1.75;
+  font-size: 0.975rem;
+  min-width: 0;
+}
+.prose-docs > * + * {
+  margin-top: 1.1em;
+}
+.prose-docs h2 {
+  margin-top: 2.2em;
+  font-size: 1.35rem;
+  font-weight: 650;
+  color: var(--color-ink);
+  letter-spacing: -0.01em;
+}
+.prose-docs h3 {
+  margin-top: 1.8em;
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.prose-docs a {
+  color: var(--color-oss);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgb(56 189 248 / 0.4);
+}
+.prose-docs a:hover {
+  text-decoration-color: var(--color-oss);
+}
+.prose-docs ul,
+.prose-docs ol {
+  padding-left: 1.3em;
+}
+.prose-docs ul {
+  list-style: disc;
+}
+.prose-docs ol {
+  list-style: decimal;
+}
+.prose-docs li + li {
+  margin-top: 0.35em;
+}
+.prose-docs li::marker {
+  color: var(--color-faint);
+}
+.prose-docs strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.prose-docs :not(pre) > code {
+  font-size: 0.85em;
+  padding: 0.12em 0.38em;
+  border-radius: 0.3em;
+  background: rgb(255 255 255 / 0.06);
+  border: 1px solid var(--color-line);
+  color: #d7e6f5;
+  overflow-wrap: anywhere;
+}
+.prose-docs pre {
+  border: 1px solid var(--color-line);
+  border-radius: 0.6rem;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.prose-docs blockquote {
+  border-left: 3px solid var(--color-warn);
+  background: rgb(245 158 11 / 0.06);
+  padding: 0.6em 1em;
+  border-radius: 0 0.5rem 0.5rem 0;
+  color: #e7dcc4;
+}
+.prose-docs blockquote > * + * {
+  margin-top: 0.6em;
+}
+.prose-docs table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.prose-docs th,
+.prose-docs td {
+  border: 1px solid var(--color-line);
+  padding: 0.5em 0.75em;
+  text-align: left;
+  vertical-align: top;
+}
+.prose-docs th {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.prose-docs hr {
+  border-color: var(--color-line);
+}

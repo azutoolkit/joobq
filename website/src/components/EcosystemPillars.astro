@@ -1,0 +1,49 @@
+---
+import { Check, ChevronRight } from '@lucide/astro';
+import { pillars, pillarsHeading } from '../data/features';
+import { url } from '../lib/url';
+import { inlineCode as md } from '../lib/text';
+
+const accent = {
+  oss: { text: 'text-oss', border: 'border-oss/30', bar: 'bg-oss' },
+  pro: { text: 'text-pro', border: 'border-pro/30', bar: 'bg-pro' },
+  console: { text: 'text-healthy', border: 'border-healthy/30', bar: 'bg-healthy' },
+} as const;
+
+---
+
+<section class="container-x py-20" aria-labelledby="ecosystem-title">
+  <p class="eyebrow">{pillarsHeading.eyebrow}</p>
+  <h2 id="ecosystem-title" class="mt-3 max-w-2xl text-3xl font-semibold tracking-tight text-balance">
+    {pillarsHeading.title}
+  </h2>
+  <ol class="mt-10 grid gap-4 lg:grid-cols-3">
+    {
+      pillars.map((pillar, i) => (
+        <li class="panel relative flex flex-col overflow-hidden p-6">
+          <span class={`absolute inset-x-0 top-0 h-px ${accent[pillar.edition].bar} opacity-70`} aria-hidden="true" />
+          <div class="flex items-center justify-between gap-3">
+            <span class="font-mono text-xs text-faint">0{i + 1}</span>
+            <span class={`rounded-full border px-2 py-0.5 font-mono text-[0.7rem] ${accent[pillar.edition].border} ${accent[pillar.edition].text}`}>
+              {pillar.tag}
+            </span>
+          </div>
+          <h3 class={`mt-4 text-xl font-semibold ${accent[pillar.edition].text}`}>{pillar.name}</h3>
+          <p class="mt-2 text-sm text-muted">{pillar.summary}</p>
+          <ul class="copy mt-5 space-y-2.5 text-sm">
+            {pillar.points.map((point) => (
+              <li class="flex gap-2.5">
+                <Check size={16} class={`mt-0.5 shrink-0 ${accent[pillar.edition].text}`} aria-hidden="true" />
+                <span set:html={md(point)} />
+              </li>
+            ))}
+          </ul>
+          <a href={url(pillar.cta.href)} class={`mt-6 inline-flex items-center gap-1 pt-2 text-sm font-medium ${accent[pillar.edition].text} hover:underline`}>
+            {pillar.cta.label}
+            <ChevronRight size={16} aria-hidden="true" />
+          </a>
+        </li>
+      ))
+    }
+  </ol>
+</section>

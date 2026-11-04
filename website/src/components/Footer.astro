@@ -1,0 +1,35 @@
+---
+import { site } from '../data/site.config';
+import { url } from '../lib/url';
+---
+
+<footer class="mt-24 border-t border-line">
+  <div class="container-x grid gap-10 py-12 sm:grid-cols-2 lg:grid-cols-5">
+    <div class="lg:col-span-2">
+      <a href={url('/')} class="flex items-center gap-2 font-semibold">
+        <img src={url('/favicon.svg')} alt="" width="22" height="22" />
+        {site.name}
+      </a>
+      <p class="mt-3 max-w-sm text-sm text-muted">{site.description}</p>
+    </div>
+    {
+      site.footer.map((column) => (
+        <div>
+          <h2 class="font-mono text-xs uppercase tracking-wider text-faint">{column.heading}</h2>
+          <ul class="mt-3 space-y-2 text-sm">
+            {column.links.map((link) => (
+              <li>
+                <a href={url(link.href)} class="text-muted hover:text-ink">
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
+  </div>
+  <div class="border-t border-line">
+    <p class="container-x py-5 text-xs text-faint">{site.copyright}</p>
+  </div>
+</footer>

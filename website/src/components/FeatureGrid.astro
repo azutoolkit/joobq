@@ -1,0 +1,79 @@
+---
+import {
+  Layers,
+  Workflow,
+  Monitor,
+  Repeat,
+  Clock,
+  Lock,
+  Gauge,
+  GitBranch,
+  RotateCcwClock,
+  Shield,
+  Bell,
+  Activity,
+  Users,
+  Archive,
+  Search,
+  Server,
+} from '@lucide/astro';
+import type { FeatureSection, IconName } from '../data/features';
+import { editionLabels } from '../data/features';
+import { inlineCode } from '../lib/text';
+
+interface Props {
+  section: FeatureSection;
+}
+const { section } = Astro.props;
+
+const ICONS: Record<IconName, typeof Layers> = {
+  layers: Layers,
+  workflow: Workflow,
+  monitor: Monitor,
+  repeat: Repeat,
+  clock: Clock,
+  lock: Lock,
+  gauge: Gauge,
+  'git-branch': GitBranch,
+  history: RotateCcwClock,
+  shield: Shield,
+  bell: Bell,
+  activity: Activity,
+  users: Users,
+  archive: Archive,
+  search: Search,
+  server: Server,
+};
+const tone = {
+  oss: 'text-oss bg-oss/10 border-oss/25',
+  pro: 'text-pro bg-pro/10 border-pro/25',
+  console: 'text-healthy bg-healthy/10 border-healthy/25',
+} as const;
+---
+
+<section id={section.id} class="container-x scroll-mt-20 py-20" aria-labelledby={`${section.id}-title`}>
+  <p class="eyebrow">{section.eyebrow}</p>
+  <h2 id={`${section.id}-title`} class="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-balance">
+    {section.title}
+  </h2>
+  <p class="mt-4 max-w-2xl text-muted">{section.intro}</p>
+  <ul class="mt-10 grid gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+    {
+      section.features.map((feature) => {
+        const Icon = ICONS[feature.icon];
+        return (
+          <li class="flex flex-col bg-bg p-6 transition-colors hover:bg-surface/60">
+            <div class="flex items-center justify-between gap-3">
+              <span class={`grid size-9 place-items-center rounded-lg border ${tone[feature.edition]}`}>
+                <Icon size={18} aria-hidden="true" />
+              </span>
+              <span class="font-mono text-[0.68rem] text-faint">{editionLabels[feature.edition]}</span>
+            </div>
+            <h3 class="mt-4 font-semibold">{feature.title}</h3>
+            <p class="copy mt-2 text-sm leading-relaxed text-muted" set:html={inlineCode(feature.body)} />
+          </li>
+        );
+      })
+    }
+  </ul>
+</section>

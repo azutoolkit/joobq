@@ -8,3 +8,8 @@
 # Local Python validation artifacts
 __pycache__/
 *.pyc
+
+# Website (Astro)
+website/node_modules
+website/dist
+website/.astro

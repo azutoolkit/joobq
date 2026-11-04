@@ -1,0 +1,42 @@
+---
+import { ArrowRight } from '@lucide/astro';
+import CodeTabs from './CodeTabs.astro';
+import { site } from '../data/site.config';
+import { heroExamples } from '../data/code-examples';
+import { url } from '../lib/url';
+
+const { hero, versions } = site;
+---
+
+<section class="relative isolate overflow-hidden border-b border-line">
+  <div class="grid-bg absolute inset-0 -z-10 [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_75%)]"></div>
+  <div
+    class="absolute left-1/2 top-0 -z-10 h-80 w-[48rem] max-w-full -translate-x-1/2 rounded-full bg-oss/10 blur-3xl"
+    aria-hidden="true"
+  >
+  </div>
+  <div class="container-x grid items-center gap-12 py-16 lg:grid-cols-[1fr_1.1fr] lg:py-24">
+    <div class="min-w-0">
+      <p class="eyebrow">{hero.eyebrow}</p>
+      <h1 class="mt-4 text-4xl font-bold leading-[1.08] tracking-tight text-balance sm:text-5xl lg:text-[3.4rem]">
+        {hero.headline}
+      </h1>
+      <p class="mt-6 max-w-xl text-lg leading-relaxed text-muted text-pretty">{hero.subheadline}</p>
+      <div class="mt-8 flex flex-wrap gap-3">
+        <a href={url(hero.primary.href)} class="btn btn-primary">
+          {hero.primary.label}
+          <ArrowRight size={16} aria-hidden="true" />
+        </a>
+        <a href={url(hero.secondary.href)} class="btn btn-ghost">{hero.secondary.label}</a>
+      </div>
+      <dl class="mt-10 flex flex-wrap gap-x-8 gap-y-3 font-mono text-xs text-faint">
+        <div><dt class="inline">crystal</dt> <dd class="inline text-muted">&gt;= {versions.crystal}</dd></div>
+        <div><dt class="inline">joobq</dt> <dd class="inline text-oss">{versions.core}</dd></div>
+        <div><dt class="inline">joobq_pro</dt> <dd class="inline text-pro">{versions.pro}</dd></div>
+      </dl>
+    </div>
+    <div class="min-w-0">
+      <CodeTabs examples={heroExamples} id="hero" />
+    </div>
+  </div>
+</section>

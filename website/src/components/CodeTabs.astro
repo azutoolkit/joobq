@@ -1,0 +1,62 @@
+---
+import { Code } from 'astro:components';
+import type { CodeExample } from '../data/code-examples';
+import { editionLabels } from '../data/features';
+
+interface Props {
+  examples: CodeExample[];
+  /** Unique per page; prefixes the tab and panel ids. */
+  id: string;
+}
+const { examples, id } = Astro.props;
+const tone = { oss: 'text-oss', pro: 'text-pro', console: 'text-healthy' } as const;
+---
+
+<div data-tabs class="panel overflow-hidden shadow-2xl shadow-black/40">
+  <div class="flex items-center gap-2 border-b border-line bg-surface-2 px-3">
+    <span class="flex gap-1.5 py-3 pr-2" aria-hidden="true">
+      <span class="size-2.5 rounded-full bg-white/15"></span>
+      <span class="size-2.5 rounded-full bg-white/15"></span>
+      <span class="size-2.5 rounded-full bg-white/15"></span>
+    </span>
+    <div role="tablist" aria-label="Code examples" class="flex min-w-0 gap-1 overflow-x-auto py-2">
+      {
+        examples.map((example, i) => (
+          <button
+            type="button"
+            role="tab"
+            id={`${id}-tab-${example.id}`}
+            aria-controls={`${id}-panel-${example.id}`}
+            aria-selected={i === 0 ? 'true' : 'false'}
+            tabindex={i === 0 ? 0 : -1}
+            class="shrink-0 whitespace-nowrap rounded-md border border-transparent px-2.5 py-1.5 font-mono text-xs text-muted hover:text-ink"
+          >
+            {example.label}
+          </button>
+        ))
+      }
+    </div>
+  </div>
+  {
+    examples.map((example, i) => (
+      <div
+        role="tabpanel"
+        id={`${id}-panel-${example.id}`}
+        aria-labelledby={`${id}-tab-${example.id}`}
+        hidden={i !== 0}
+        tabindex="0"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2 font-mono text-[0.72rem]">
+          <span class="text-faint">{example.files.map((file) => file.filename).join(' · ')}</span>
+          <span class={tone[example.product]}>{editionLabels[example.product]}</span>
+        </div>
+        {example.files.map((file) => (
+          <div class="code-block max-h-[30rem] overflow-y-auto">
+            <Code code={file.code} lang={file.lang} theme="github-dark-default" />
+          </div>
+        ))}
+        <p class="border-t border-line px-4 py-3 text-xs text-muted">{example.caption}</p>
+      </div>
+    ))
+  }
+</div>

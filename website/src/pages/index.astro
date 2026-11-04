@@ -1,0 +1,21 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Hero from '../components/Hero.astro';
+import EcosystemPillars from '../components/EcosystemPillars.astro';
+import FeatureGrid from '../components/FeatureGrid.astro';
+import ConsolePreview from '../components/ConsolePreview.astro';
+import EditionComparison from '../components/EditionComparison.astro';
+import PricingCards from '../components/PricingCards.astro';
+import FAQ from '../components/FAQ.astro';
+import { featureSections } from '../data/features';
+---
+
+<BaseLayout landing>
+  <Hero />
+  <EcosystemPillars />
+  {featureSections.map((section) => <FeatureGrid section={section} />)}
+  <ConsolePreview />
+  <EditionComparison />
+  <PricingCards />
+  <FAQ />
+</BaseLayout>

@@ -1,0 +1,58 @@
+---
+import { Check } from '@lucide/astro';
+import { pricing, pricingHeading, pricingNote } from '../data/pricing';
+import { site } from '../data/site.config';
+import { url } from '../lib/url';
+
+// A CTA href of "contact" means the site's contact address.
+const ctaHref = (href: string) => (href === 'contact' ? site.contactUrl : url(href));
+---
+
+<section id="pricing" class="scroll-mt-20 border-y border-line bg-surface-2/60 py-20" aria-labelledby="pricing-title">
+  <div class="container-x">
+    <p class="eyebrow">{pricingHeading.eyebrow}</p>
+    <h2 id="pricing-title" class="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-balance">{pricingHeading.title}</h2>
+    <p class="mt-4 max-w-2xl text-sm text-muted">{pricingNote}</p>
+
+    <ul class="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {
+        pricing.map((tier) => (
+          <li
+            class:list={[
+              'panel relative flex flex-col p-6',
+              tier.highlighted && 'border-oss/50 shadow-[0_0_0_1px_rgba(56,189,248,0.25),0_20px_60px_-20px_rgba(56,189,248,0.35)]',
+            ]}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="font-semibold">{tier.name}</h3>
+              {tier.placeholder && (
+                <span class="rounded border border-warn/40 px-1.5 font-mono text-[0.65rem] uppercase tracking-wider text-warn">
+                  {pricingHeading.placeholderBadge}
+                </span>
+              )}
+            </div>
+            <p class="mt-4 flex items-baseline gap-1">
+              <span class="text-3xl font-bold tracking-tight">{tier.price}</span>
+              {tier.period && <span class="text-sm text-faint">{tier.period}</span>}
+            </p>
+            <p class="mt-2 text-sm text-muted">{tier.blurb}</p>
+            <ul class="mt-6 flex-1 space-y-2.5 text-sm">
+              {tier.features.map((feature) => (
+                <li class="flex gap-2.5">
+                  <Check size={16} class="mt-0.5 shrink-0 text-healthy" aria-hidden="true" />
+                  <span class="text-muted">{feature}</span>
+                </li>
+              ))}
+            </ul>
+            <a
+              href={ctaHref(tier.cta.href)}
+              class:list={['btn mt-8 justify-center', tier.highlighted ? 'btn-primary' : 'btn-ghost']}
+            >
+              {tier.cta.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>

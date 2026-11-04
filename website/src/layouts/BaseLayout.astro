@@ -18,15 +18,28 @@ const canonical = new URL(Astro.url.pathname, Astro.site).toString();
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
+    <script is:inline>
+      // Before first paint: the saved theme, else the system setting, else dark.
+      (function () {
+        var theme = null;
+        try {
+          theme = localStorage.getItem('joobq-theme');
+        } catch (e) {}
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{pageTitle}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
     <link rel="icon" type="image/svg+xml" href={url('/favicon.svg')} />
-    <meta name="theme-color" content="#090D16" />
+    <meta name="theme-color" content="#0f151d" />
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
@@ -45,6 +58,31 @@ const canonical = new URL(Astro.url.pathname, Astro.site).toString();
     <Footer />
 
     <script>
+      // Theme toggle ([data-theme-toggle] in the Navbar). Hidden without JavaScript.
+      const themeColor = { dark: '#0f151d', light: '#f6f7f9' } as const;
+      function applyTheme(theme: 'dark' | 'light') {
+        document.documentElement.setAttribute('data-theme', theme);
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor[theme]);
+        document.querySelectorAll<HTMLElement>('[data-theme-toggle]').forEach((button) => {
+          const label = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+          button.setAttribute('aria-label', label);
+          button.title = label;
+        });
+      }
+      applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+      document.querySelectorAll<HTMLElement>('[data-theme-toggle]').forEach((button) => {
+        button.hidden = false;
+        button.addEventListener('click', () => {
+          const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+          applyTheme(next);
+          try {
+            localStorage.setItem('joobq-theme', next);
+          } catch {
+            // Storage unavailable (private mode, blocked): the choice lasts for this page only.
+          }
+        });
+      });
+
       // Accessible tabs for every [data-tabs] group (CodeTabs, ConsolePreview).
       // Markup: [role=tablist] > [role=tab][aria-controls=<panel id>], and [role=tabpanel] panels.
       function select(group: Element, tab: HTMLElement) {

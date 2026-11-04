@@ -9,16 +9,11 @@ interface Props {
   id: string;
 }
 const { examples, id } = Astro.props;
-const tone = { oss: 'text-oss', pro: 'text-pro', console: 'text-healthy' } as const;
+const tone = { oss: 'pill-accent', pro: 'pill-pro', console: 'pill-neutral' } as const;
 ---
 
-<div data-tabs class="panel overflow-hidden shadow-2xl shadow-black/40">
-  <div class="flex items-center gap-2 border-b border-line bg-surface-2 px-3">
-    <span class="flex gap-1.5 py-3 pr-2" aria-hidden="true">
-      <span class="size-2.5 rounded-full bg-white/15"></span>
-      <span class="size-2.5 rounded-full bg-white/15"></span>
-      <span class="size-2.5 rounded-full bg-white/15"></span>
-    </span>
+<div data-tabs class="panel overflow-hidden">
+  <div class="flex items-center gap-2 border-b border-line bg-surface px-3">
     <div role="tablist" aria-label="Code examples" class="flex min-w-0 gap-1 overflow-x-auto py-2">
       {
         examples.map((example, i) => (
@@ -29,7 +24,7 @@ const tone = { oss: 'text-oss', pro: 'text-pro', console: 'text-healthy' } as co
             aria-controls={`${id}-panel-${example.id}`}
             aria-selected={i === 0 ? 'true' : 'false'}
             tabindex={i === 0 ? 0 : -1}
-            class="shrink-0 whitespace-nowrap rounded-md border border-transparent px-2.5 py-1.5 font-mono text-xs text-muted hover:text-ink"
+            class="shrink-0 whitespace-nowrap rounded-[0.4rem] border border-transparent px-2.5 py-1.5 font-mono text-xs text-muted hover:text-ink"
           >
             {example.label}
           </button>
@@ -46,16 +41,16 @@ const tone = { oss: 'text-oss', pro: 'text-pro', console: 'text-healthy' } as co
         hidden={i !== 0}
         tabindex="0"
       >
-        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2 font-mono text-[0.72rem]">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface-2 px-4 py-2 font-mono text-[0.72rem]">
           <span class="text-faint">{example.files.map((file) => file.filename).join(' · ')}</span>
-          <span class={tone[example.product]}>{editionLabels[example.product]}</span>
+          <span class={`pill pill-dot font-sans ${tone[example.product]}`}>{editionLabels[example.product]}</span>
         </div>
         {example.files.map((file) => (
           <div class="code-block max-h-[30rem] overflow-y-auto">
-            <Code code={file.code} lang={file.lang} theme="github-dark-default" />
+            <Code code={file.code} lang={file.lang} themes={{ light: 'github-light', dark: 'github-dark-dimmed' }} defaultColor={false} />
           </div>
         ))}
-        <p class="border-t border-line px-4 py-3 text-xs text-muted">{example.caption}</p>
+        <p class="border-t border-line bg-surface px-4 py-3 text-xs text-muted">{example.caption}</p>
       </div>
     ))
   }

@@ -17,7 +17,7 @@ const sidebar = await getSidebar();
           <ul class="mt-4 space-y-2 text-sm">
             {section.pages.map((page) => (
               <li>
-                <a href={url(`/docs/${page.slug}`)}>{page.title}</a>
+                <a class="text-accent hover:underline" href={url(`/docs/${page.slug}`)}>{page.title}</a>
               </li>
             ))}
           </ul>

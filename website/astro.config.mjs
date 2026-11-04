@@ -29,7 +29,9 @@ export default defineConfig({
   markdown: {
     rehypePlugins: [rehypeBaseLinks],
     shikiConfig: {
-      theme: 'github-dark-default',
+      // Both themes are emitted as CSS variables; global.css picks one from data-theme.
+      themes: { light: 'github-light', dark: 'github-dark-dimmed' },
+      defaultColor: false,
       wrap: false,
     },
   },

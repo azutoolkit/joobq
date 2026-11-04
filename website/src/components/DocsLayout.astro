@@ -6,6 +6,7 @@ import { getSidebar, neighbours } from '../lib/docs';
 import { site } from '../data/site.config';
 import { editionLabels } from '../data/features';
 import { url } from '../lib/url';
+import { withPeriod } from '../lib/text';
 
 interface Props {
   title: string;
@@ -20,7 +21,8 @@ const sidebar = await getSidebar();
 const { prev, next } = neighbours(sidebar, slug);
 const section = sidebar.find((s) => s.dir === slug.split('/')[0]);
 const toc = headings.filter((h) => h.depth === 2);
-const productTone = { oss: 'text-oss border-oss/30', pro: 'text-pro border-pro/30', console: 'text-healthy border-healthy/30' } as const;
+const productPill = { oss: 'pill-accent', pro: 'pill-pro', console: 'pill-neutral' } as const;
+const heading = withPeriod(title);
 ---
 
 <BaseLayout title={title} description={description}>
@@ -31,12 +33,12 @@ const productTone = { oss: 'text-oss border-oss/30', pro: 'text-pro border-pro/3
           <Menu size={16} aria-hidden="true" /> {site.docsUi.menu}
         </summary>
         <nav aria-label="Documentation" class="space-y-6 px-4 pb-4 lg:px-0">
-          <a href={url('/docs')} class:list={['block text-sm', slug === '' ? 'text-oss' : 'text-muted hover:text-ink']}>{site.docsUi.overview}</a>
+          <a href={url('/docs')} class:list={['block text-sm', slug === '' ? 'font-medium text-accent' : 'text-muted hover:text-ink']}>{site.docsUi.overview}</a>
           {
             sidebar.map((group) => (
               <div>
-                <h2 class="font-mono text-[0.7rem] uppercase tracking-wider text-faint">{group.label}</h2>
-                <ul class="mt-2 space-y-0.5 border-l border-line">
+                <h2 class="label">{group.label}</h2>
+                <ul class="mt-2 space-y-0.5">
                   {group.pages.map((page) => {
                     const active = page.slug === slug;
                     return (
@@ -45,8 +47,8 @@ const productTone = { oss: 'text-oss border-oss/30', pro: 'text-pro border-pro/3
                           href={url(`/docs/${page.slug}`)}
                           aria-current={active ? 'page' : undefined}
                           class:list={[
-                            '-ml-px block border-l py-1 pl-3 text-sm',
-                            active ? 'border-oss text-ink' : 'border-transparent text-muted hover:border-line-strong hover:text-ink',
+                            'block rounded-[0.4rem] border-l-2 px-3 py-1.5 text-sm',
+                            active ? 'border-accent bg-accent-tint font-medium text-accent' : 'border-transparent text-muted hover:bg-hover hover:text-ink',
                           ]}
                         >
                           {page.title}
@@ -68,15 +70,13 @@ const productTone = { oss: 'text-oss border-oss/30', pro: 'text-pro border-pro/3
 
     <article class="min-w-0">
       <header class="border-b border-line pb-6">
-        <div class="flex flex-wrap items-center gap-2 font-mono text-xs text-faint">
-          {section && <span>{section.label}</span>}
-          {
-            product && (
-              <span class={`rounded-full border px-2 py-0.5 ${productTone[product]}`}>{editionLabels[product]}</span>
-            )
-          }
+        <div class="flex flex-wrap items-center gap-3">
+          {section && <span class="eyebrow">{section.label}</span>}
+          {product && <span class={`pill pill-dot ${productPill[product]}`}>{editionLabels[product]}</span>}
         </div>
-        <h1 class="mt-3 text-3xl font-bold tracking-tight text-balance sm:text-4xl">{title}</h1>
+        <h1 class="mt-3 text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+          {heading.text}<span class="text-accent">{heading.period}</span>
+        </h1>
         <p class="mt-3 text-lg text-muted">{description}</p>
       </header>
       <div class="prose-docs mt-8">
@@ -88,7 +88,7 @@ const productTone = { oss: 'text-oss border-oss/30', pro: 'text-pro border-pro/3
           <footer class="mt-14 border-t border-line pt-6">
             <nav class="grid gap-3 sm:grid-cols-2" aria-label="Previous and next page">
               {prev ? (
-                <a href={url(`/docs/${prev.slug}`)} class="panel block p-4 hover:border-line-strong">
+                <a href={url(`/docs/${prev.slug}`)} class="panel block p-4 hover:border-accent">
                   <span class="flex items-center gap-1 font-mono text-xs text-faint">
                     <ChevronLeft size={14} aria-hidden="true" /> {site.docsUi.previous}
                   </span>
@@ -98,7 +98,7 @@ const productTone = { oss: 'text-oss border-oss/30', pro: 'text-pro border-pro/3
                 <span />
               )}
               {next && (
-                <a href={url(`/docs/${next.slug}`)} class="panel block p-4 text-right hover:border-line-strong">
+                <a href={url(`/docs/${next.slug}`)} class="panel block p-4 text-right hover:border-accent">
                   <span class="flex items-center justify-end gap-1 font-mono text-xs text-faint">
                     {site.docsUi.next} <ChevronRight size={14} aria-hidden="true" />
                   </span>
@@ -118,7 +118,7 @@ const productTone = { oss: 'text-oss border-oss/30', pro: 'text-pro border-pro/3
       toc.length > 1 && (
         <aside class="hidden xl:block">
           <nav aria-label="On this page" class="sticky top-20">
-            <h2 class="font-mono text-[0.7rem] uppercase tracking-wider text-faint">{site.docsUi.onThisPage}</h2>
+            <h2 class="label">{site.docsUi.onThisPage}</h2>
             <ul class="mt-3 space-y-1.5 text-sm">
               {toc.map((h) => (
                 <li>

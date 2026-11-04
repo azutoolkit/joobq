@@ -1,15 +1,18 @@
 ---
 import { Check, Minus } from '@lucide/astro';
 import { comparison, comparisonColumns, comparisonHeading, type Cell } from '../data/comparison';
+import { withPeriod } from '../lib/text';
 
-const headTone = { oss: 'text-oss', pro: 'text-pro', console: 'text-healthy' } as const;
+// One accent: column heads carry a dot, violet only for Pro.
+const headDot = { oss: 'bg-accent', pro: 'bg-pro', console: 'bg-faint' } as const;
+const title = withPeriod(comparisonHeading.title);
 const isText = (cell: Cell): cell is string => typeof cell === 'string';
 ---
 
 <section id="comparison" class="container-x scroll-mt-20 py-20" aria-labelledby="comparison-title">
   <p class="eyebrow">{comparisonHeading.eyebrow}</p>
   <h2 id="comparison-title" class="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-balance">
-    {comparisonHeading.title}
+    {title.text}<span class="text-accent">{title.period}</span>
   </h2>
   <p class="mt-4 max-w-2xl text-muted">{comparisonHeading.intro}</p>
 
@@ -17,11 +20,14 @@ const isText = (cell: Cell): cell is string => typeof cell === 'string';
     <table class="w-full min-w-[44rem] border-collapse text-left text-sm">
       <thead>
         <tr class="border-b border-line">
-          <th scope="col" class="sticky left-0 z-10 w-[38%] bg-surface p-4 font-normal text-faint"><span class="sr-only">Feature</span></th>
+          <th scope="col" class="label sticky left-0 z-10 w-[38%] bg-surface p-4 align-bottom">Feature</th>
           {
             comparisonColumns.map((col) => (
               <th scope="col" class="p-4 align-bottom">
-                <div class={`font-semibold ${headTone[col.key]}`}>{col.name}</div>
+                <div class="flex items-center gap-2 font-semibold">
+                  <span class={`size-1.5 shrink-0 rounded-full ${headDot[col.key]}`} aria-hidden="true" />
+                  {col.name}
+                </div>
                 <div class="mt-0.5 font-mono text-[0.7rem] font-normal text-faint">{col.sub}</div>
               </th>
             ))
@@ -32,7 +38,7 @@ const isText = (cell: Cell): cell is string => typeof cell === 'string';
         comparison.map((group) => (
           <tbody>
             <tr>
-              <th colspan={4} scope="colgroup" class="bg-surface-2 px-4 py-2 font-mono text-[0.72rem] font-normal uppercase tracking-wider text-faint">
+              <th colspan={4} scope="colgroup" class="label border-t border-line bg-surface-2 px-4 py-2">
                 {group.group}
               </th>
             </tr>
@@ -45,13 +51,13 @@ const isText = (cell: Cell): cell is string => typeof cell === 'string';
                     <td class="p-4 align-top">
                       {isText(cell) ? (
                         <span class="flex gap-2 text-muted">
-                          <Check size={16} class={`mt-0.5 shrink-0 ${headTone[col.key]}`} aria-hidden="true" />
+                          <Check size={16} class="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
                           {cell}
                         </span>
                       ) : cell ? (
-                        <Check size={16} class={headTone[col.key]} aria-label="Included" />
+                        <span class="kpi-icon !size-6 text-ok"><Check size={14} stroke-width={2.5} aria-label="Included" /></span>
                       ) : (
-                        <Minus size={16} class="text-faint/70" aria-label="Not included" />
+                        <Minus size={16} class="text-faint" aria-label="Not included" />
                       )}
                     </td>
                   );

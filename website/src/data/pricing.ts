@@ -23,6 +23,8 @@ export const pricingHeading = {
   eyebrow: 'Pricing',
   title: 'Free to start, licensed when you run the console',
   placeholderBadge: 'placeholder',
+  // Shown on the highlighted tier. Not "Most popular": there are no sales figures to back that.
+  popularBadge: 'Recommended',
 };
 
 export const pricingNote =

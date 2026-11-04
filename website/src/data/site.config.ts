@@ -41,6 +41,12 @@ export interface DocsSection {
   blurb: string;
 }
 
+/** A short fact the product backs, shown in the hero and the footer. */
+export interface TrustCue {
+  label: string;
+  detail: string;
+}
+
 export interface SiteConfig {
   name: string;
   title: string;
@@ -55,6 +61,10 @@ export interface SiteConfig {
   navCta: Cta;
   announcement: Announcement;
   hero: HeroCopy;
+  /** Only claims the source backs: no certifications, SLAs, customer logos or tamper-proof audit. */
+  trust: TrustCue[];
+  /** The console-style mono line in the footer. */
+  footerTagline: string;
   docsSections: DocsSection[];
   footer: { heading: string; links: NavLink[] }[];
   copyright: string;
@@ -113,6 +123,17 @@ export const site: SiteConfig = {
     primary: { label: 'Quickstart Guide', href: '/docs/tutorials/first-10-minutes' },
     secondary: { label: 'Explore JoobQUI Console', href: '#console' },
   },
+  trust: [
+    // joobqui runs next to your workers and reads the same Redis (self-hosted and agent products).
+    { label: 'Self-hosted', detail: 'Workers and Redis stay in your infrastructure.' },
+    // shard.yml: license: MIT.
+    { label: 'MIT core', detail: 'The JoobQ queue is open source.' },
+    // joobqui: viewer/operator/admin roles, OpenID Connect sign-on, TOTP two-factor.
+    { label: 'RBAC · SSO · TOTP', detail: 'Three roles, OpenID Connect, two-factor.' },
+    // joobqui: an audit row for every state change, exportable to CSV / JSON.
+    { label: 'Audit log', detail: 'A row for every state change.' },
+  ],
+  footerTagline: 'Open source core · Self-hosted console',
   docsSections: [
     { dir: 'tutorials', label: 'Tutorials', blurb: 'Learn by doing, start to finish.' },
     { dir: 'how-to', label: 'How-To Guides', blurb: 'Steps for one task in production.' },

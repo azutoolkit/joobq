@@ -1,5 +1,5 @@
 ---
-import { Menu, ArrowRight } from '@lucide/astro';
+import { Menu, ArrowRight, Sun, Moon } from '@lucide/astro';
 import { site } from '../data/site.config';
 import { url, navHref } from '../lib/url';
 
@@ -15,14 +15,12 @@ const githubPath =
 
 {
   announcement.enabled && (
-    <div class="border-b border-line bg-surface-2 text-sm">
+    <div class="border-b border-line bg-surface-2 text-[0.8125rem]">
       <div class="container-x flex flex-wrap items-center justify-center gap-x-3 gap-y-1 py-2 text-center">
-        <span class="inline-block rounded border border-pro/40 px-1.5 font-mono text-[0.7rem] uppercase tracking-wider text-pro">
-          New
-        </span>
+        <span class="pill pill-pro pill-dot font-semibold uppercase tracking-wider !text-[0.625rem]">New</span>
         <span class="text-muted">{announcement.text}</span>
         {announcement.href && (
-          <a href={url(announcement.href)} class="inline-flex items-center gap-1 font-medium text-oss hover:underline">
+          <a href={url(announcement.href)} class="inline-flex items-center gap-1 font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-accent">
             {announcement.linkLabel ?? 'Read more'}
             <ArrowRight size={14} aria-hidden="true" />
           </a>
@@ -32,18 +30,18 @@ const githubPath =
   )
 }
 
-<header class="sticky top-0 z-50 border-b border-line bg-bg/85 backdrop-blur">
-  <nav class="container-x flex h-14 items-center gap-6" aria-label="Main">
+<header class="sticky top-0 z-50 border-b border-line bg-surface/80 backdrop-blur-lg">
+  <nav class="container-x flex h-16 items-center gap-6" aria-label="Main">
     <a href={url('/')} class="flex shrink-0 items-center gap-2 font-semibold tracking-tight">
-      <img src={url('/favicon.svg')} alt="" width="24" height="24" />
-      <span>{site.name}</span>
+      <img src={url('/favicon.svg')} alt="" width="28" height="28" />
+      <span class="text-[1.05rem]">{site.name}</span>
     </a>
 
     <ul class="hidden items-center gap-1 text-sm text-muted lg:flex">
       {
         nav.map((link) => (
           <li>
-            <a href={navHref(link.href, landing)} class="rounded-md px-2.5 py-1.5 hover:bg-white/5 hover:text-ink">
+            <a href={navHref(link.href, landing)} class="rounded-md px-2.5 py-1.5 hover:bg-hover hover:text-ink">
               {link.label}
             </a>
           </li>
@@ -54,33 +52,37 @@ const githubPath =
     <div class="ml-auto flex items-center gap-2">
       <a
         href={site.repoUrl}
-        class="hidden items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-white/5 hover:text-ink sm:inline-flex"
+        class="hidden items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-hover hover:text-ink sm:inline-flex"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d={githubPath} /></svg>
         GitHub
       </a>
+      <button type="button" class="icon-btn" data-theme-toggle hidden aria-label="Switch theme">
+        <Sun size={16} class="theme-icon-dark" aria-hidden="true" />
+        <Moon size={16} class="theme-icon-light" aria-hidden="true" />
+      </button>
       <a href={url(navCta.href)} class="btn btn-primary hidden !py-1.5 sm:inline-flex">{navCta.label}</a>
 
       <details class="group relative lg:hidden">
         <summary
-          class="flex cursor-pointer list-none items-center rounded-md border border-line-strong p-2 text-muted hover:text-ink [&::-webkit-details-marker]:hidden"
+          class="icon-btn cursor-pointer list-none [&::-webkit-details-marker]:hidden"
           aria-label="Open menu"
         >
           <Menu size={18} aria-hidden="true" />
         </summary>
-        <div class="panel absolute right-0 top-12 w-64 p-2 shadow-2xl shadow-black/50">
+        <div class="panel absolute right-0 top-12 w-64 p-2">
           <ul class="flex flex-col text-sm">
             {
               nav.map((link) => (
                 <li>
-                  <a href={navHref(link.href, landing)} class="block rounded-md px-3 py-2 text-muted hover:bg-white/5 hover:text-ink">
+                  <a href={navHref(link.href, landing)} class="block rounded-md px-3 py-2 text-muted hover:bg-hover hover:text-ink">
                     {link.label}
                   </a>
                 </li>
               ))
             }
             <li>
-              <a href={site.repoUrl} class="flex items-center gap-2 rounded-md px-3 py-2 text-muted hover:bg-white/5 hover:text-ink">
+              <a href={site.repoUrl} class="flex items-center gap-2 rounded-md px-3 py-2 text-muted hover:bg-hover hover:text-ink">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d={githubPath} /></svg> GitHub
               </a>
             </li>

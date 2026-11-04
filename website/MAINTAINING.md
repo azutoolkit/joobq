@@ -78,3 +78,31 @@ The output is plain files in `dist/`. Two environment variables control URLs at 
 
 Root-relative links in Markdown (`/docs/...`) get `BASE_PATH` added at build time; in components use `url()` from
 `src/lib/url.ts`.
+
+## 5. Theme tokens
+
+The look follows the JoobQUI control-plane console. Every colour is a CSS variable in `src/styles/global.css`:
+dark values on `:root`, light values on `:root[data-theme='light']`, mapped to Tailwind names in `@theme inline`
+(`bg-surface`, `text-muted`, `text-accent`, `border-line`, ...). Components never use raw colours.
+
+| Token | Dark | Light | Use |
+| --- | --- | --- | --- |
+| `bg` / `surface` / `surface-2` | `#0f151d` / `#11161f` / `#0c1118` | `#f6f7f9` / `#ffffff` / `#eef0f3` | Page, cards, banded sections |
+| `line` | `#202731` | `#dfe3e8` | 1px borders |
+| `ink` / `muted` / `faint` | `#e8ebf1` / `#a0a6b0` / `#8a919c` | `#171717` / `#4c505a` / `#5d626c` | Text |
+| `accent` | `#19cec6` | `#006d6d` | The only accent: links, eyebrows, primary button |
+| `ok` / `warn` / `err` | `#8fc990` / `#c7b77c` / `#fb9890` | `#064b34` / `#7d6700` / `#c01d27` | Status pills only |
+| `pro` | `#a78bfa` | `#7c3aed` | Small marker for JoobQ Pro, nothing else |
+
+- To change the accent, set `--accent`, `--accent-hover`, `--accent-ink` (text on the accent) and `--accent-tint`
+  in both blocks. Keep text tokens at 4.5:1 or more against `bg`, `surface` and `surface-2` (WCAG AA); the light
+  accent is darker than the console's `#007c7c` for that reason.
+- Building blocks: `.panel`, `.eyebrow`, `.label`, `.pill` + `.pill-{ok,warn,err,accent,pro,neutral}` (`.pill-dot`
+  adds the dot), `.kpi`, `.icon-tile`, `.btn-primary`, `.btn-secondary`, `.table-hairline`. No glows, gradient text
+  or shadows beyond the panel hairline.
+- The theme: an inline script in `BaseLayout.astro` sets `data-theme` before first paint (saved choice in
+  `localStorage` key `joobq-theme`, else the system setting, else dark); the navbar button toggles it.
+- Code blocks use Shiki's dual themes (`github-light` / `github-dark-dimmed`, `astro.config.mjs` and `CodeTabs.astro`)
+  and follow `data-theme` through the `--shiki-*` variables.
+- Trust cues (hero, console mock-up) are `trust` in `src/data/site.config.ts`. Only claims the source backs: no
+  certifications, SLAs, customer logos or "tamper-proof" audit.

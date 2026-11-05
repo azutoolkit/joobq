@@ -13,7 +13,7 @@ module JoobQ
 
           # Record timeout error to error context
           timeout_error = Exception.new("Job expired after timeout")
-          MonitoredErrorHandler.handle_job_error(
+          error_context = MonitoredErrorHandler.handle_job_error(
             job,
             queue,
             timeout_error,
@@ -26,6 +26,7 @@ module JoobQ
             },
             schedule: false # it dead-letters the job itself, just below
           )
+          job = ErrorHandler.update_job_with_error(job, error_context) # a struct job is a copy here
 
           DeadLetterManager.add(job, queue.store) if InFlight.settle
         else

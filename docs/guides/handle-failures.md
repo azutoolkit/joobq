@@ -25,7 +25,7 @@ step :charge, ChargeCard,
   retry: retry_policy(attempts: 3, initial: 1.second, maximum: 10.seconds)
 ```
 
-In the DSL, `attempts: 3` includes the first attempt. Core's `config.retries = 3` means the initial attempt plus three retries. These are different settings. An activity may raise `JoobQPro::Workflows::NonRetryableError` for a permanent failure. A timeout does not cancel an external HTTP request or reverse a payment.
+In the DSL, `attempts: 3` includes the first attempt. Core's `config.retries = 3` means the initial attempt plus three retries. These are different settings. An activity may raise `JoobQPro::Workflows::NonRetryableError` for a permanent failure; a Core job raises `JoobQ::NonRetryableError` (see [retries and dead letters](../core/retries-dlq.md)). A timeout does not cancel an external HTTP request or reverse a payment.
 
 ## Inspect before replay
 

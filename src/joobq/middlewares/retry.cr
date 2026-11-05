@@ -55,9 +55,11 @@ module JoobQ
           },
           schedule: false # this middleware does the scheduling, once
         )
+        # A struct job is a copy here: the error goes on this copy, the one that is stored below
+        job = ErrorHandler.update_job_with_error(job, error_context)
 
-        # Retry while the job has budget left (every error type, as before); then dead letter, once
-        if current_retries > 0
+        # Retry while the job has budget left, unless the error says retrying cannot help; then dead letter, once
+        if current_retries > 0 && !ex.is_a?(NonRetryableError)
           # Decrement retries
           job.retries = current_retries - 1
 
@@ -74,7 +76,7 @@ module JoobQ
               retries_remaining: updated_job.retries,
               max_retries: max_retries
             )
-          elsif job.retrying?
+          elsif updated_job.retrying?
             # The retry was attempted (the job was marked retrying) but could not be stored: do not lose the job.
             Log.error &.emit("Job retry could not be stored, moving the job to the dead letter queue",
               job_id: job.jid.to_s,
@@ -82,7 +84,7 @@ module JoobQ
             )
             move_to_dead_letter(job, queue, error_context)
           else
-            Log.warn &.emit("Job retry already in progress, skipping duplicate retry",
+            Log.warn &.emit("This failure's retry is already scheduled, skipping the duplicate",
               job_id: job.jid.to_s,
               queue: queue.name
             )
@@ -115,7 +117,17 @@ module JoobQ
     # Maximum delay in milliseconds (1 hour)
     private MAX_DELAY_MS = 3_600_000_i64
 
-    # Idempotent retry that prevents duplicate retries for the same job
+    # Takes the retry lock for one failure of a job: the lock holds the attempt that failed, so a second handler
+    # of that same failure finds it and backs off, while the job's next failure (another attempt) replaces it.
+    # The lock is still there when the retry it guarded runs and fails again: keyed by the job alone, that
+    # failure was skipped and the job lost. One key per job, so every place that clears it still does.
+    ACQUIRE_RETRY_LOCK = <<-LUA
+      if redis.call('GET', KEYS[1]) == ARGV[1] then return 0 end
+      redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+      return 1
+    LUA
+
+    # Idempotent retry: schedules each failure of a job once, however many handlers see that failure
     # Returns a tuple of (success: Bool, modified_job: Job)
     def self.retry_idempotent(job : JoobQ::Job, queue : BaseQueue, retry_attempt : Int32) : {Bool, JoobQ::Job}
       return {false, job} unless queue.store.is_a?(RedisStore)
@@ -131,10 +143,9 @@ module JoobQ
       # Set lock TTL to be delay + buffer to prevent duplicate retries
       lock_ttl = (delay_ms / 1000).to_i + RETRY_LOCK_BASE_TTL
 
-      # Use Redis SET with NX (only if not exists) and EX (expiration) for atomic lock
-      lock_acquired = redis_store.redis.set(retry_lock_key, "retrying", nx: true, ex: lock_ttl)
+      lock_acquired = redis_store.redis.eval(ACQUIRE_RETRY_LOCK, [retry_lock_key], ["attempt:#{retry_attempt}", lock_ttl.to_s]) == 1
 
-      if lock_acquired == "OK"
+      if lock_acquired
         move_succeeded = false
         begin
           # Mark job as retrying
@@ -172,7 +183,7 @@ module JoobQ
           end
         end
       else
-        # Lock already exists, retry already in progress
+        # This failure (this attempt) has already been scheduled
         return {false, job}
       end
     end

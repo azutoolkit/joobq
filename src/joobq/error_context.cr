@@ -65,6 +65,8 @@ module JoobQ
 
     def self.classify_error(exception : Exception) : String
       case exception
+      when NonRetryableError
+        "non_retryable_error"
       when ArgumentError
         "validation_error"
       when Socket::ConnectError, Redis::CannotConnectError
@@ -159,7 +161,7 @@ module JoobQ
 
     def should_retry? : Bool
       case error_type
-      when "validation_error", "configuration_error", "implementation_error"
+      when "validation_error", "configuration_error", "implementation_error", "non_retryable_error"
         false
       when "connection_error", "timeout_error"
         retry_count < 3
@@ -219,8 +221,8 @@ module JoobQ
         end
       end
 
-      # Update job with error information
-      update_job_with_error(job, error_context)
+      # Update job with error information (a struct job is a copy: keep the updated one for the steps below)
+      job = update_job_with_error(job, error_context)
 
       # Handle retry or dead letter based on error type. A caller that decides this itself (the Retry middleware, the
       # Timeout middleware) passes `schedule: false`: scheduling here as well would run the job once more per attempt.
@@ -246,14 +248,21 @@ module JoobQ
       end
     end
 
+    # The most of an error's message and backtrace kept on a stored job (bytes; the backtrace is also at most 20
+    # lines). A job with its error is written to the retry and dead letter sets and read back by every console.
+    MAX_MESSAGE_BYTES   = 4096
+    MAX_BACKTRACE_BYTES = 8192
+
+    # Records the error on the job and returns the job. A struct job is copied when it is passed in, so callers use
+    # the job returned: `job = ErrorHandler.update_job_with_error(job, context)`.
     def self.update_job_with_error(job : Job, error_context : ErrorContext) : Job
       # Don't set status here - let retry middleware handle status transitions
       # Status will be set to either Retrying or Dead based on remaining retries
 
       job.error = {
         failed_at:      error_context.occurred_at,
-        message:        error_context.error_message,
-        backtrace:      error_context.backtrace.join("\n"),
+        message:        truncated(error_context.error_message, MAX_MESSAGE_BYTES),
+        backtrace:      truncated(error_context.backtrace.join("\n"), MAX_BACKTRACE_BYTES),
         cause:          error_context.error_cause || "",
         error_type:     error_context.error_type,
         error_class:    error_context.error_class,
@@ -262,6 +271,20 @@ module JoobQ
       }
 
       job
+    end
+
+    # `text` cut to at most `max_bytes` bytes, on a character boundary, ending with "..." when cut
+    def self.truncated(text : String, max_bytes : Int32) : String
+      return text if text.bytesize <= max_bytes
+
+      kept = String.build(max_bytes) do |io|
+        budget = max_bytes - 3
+        text.each_char do |char|
+          break if (budget -= char.bytesize) < 0
+          io << char
+        end
+      end
+      kept + "..."
     end
 
     def self.schedule_retry(job : Job, queue : BaseQueue, error_context : ErrorContext) : Nil

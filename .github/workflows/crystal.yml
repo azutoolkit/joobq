@@ -6,19 +6,22 @@ on:
     branches: [master]
 permissions:
   contents: read
-# Serialize master releases without cancelling a run between its tag and release.
+# Cancel superseded runs on a branch/PR, but never on master: a master run must finish
+# its tag-and-release step uninterrupted.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Full matrix (8 jobs) on master so releases are fully tested; a representative
+      # subset (2 jobs) on PRs to keep iteration cheap.
       matrix:
-        redis: ["7.4.12", "8.0.6"]
+        redis: ${{ github.ref == 'refs/heads/master' && fromJSON('["7.4.12","8.0.6"]') || fromJSON('["8.0.6"]') }}
         workers: [1, 4]
-        connection: [legacy, url]
+        connection: ${{ github.ref == 'refs/heads/master' && fromJSON('["legacy","url"]') || fromJSON('["url"]') }}
     container:
       image: crystallang/crystal:1.22.1
     steps:

@@ -3,3 +3,59 @@ root: ./docs/
 structure:
   readme: README.md
   summary: SUMMARY.md
+
+# Pages moved into the Diataxis sections (tutorials, how-to, reference, explanation).
+redirects:
+  best-practices: explanation/reliability-practices.md
+  best-practices/architecture: explanation/application-architecture.md
+  best-practices/idempotency: how-to/write-idempotent-jobs.md
+  best-practices/performance: how-to/measure-performance.md
+  best-practices/recovery: how-to/recover-and-migrate.md
+  best-practices/troubleshooting: how-to/troubleshoot.md
+  configuration: reference/configuration.md
+  configuration/access: how-to/secure-management-access.md
+  configuration/concurrency: how-to/tune-concurrency-and-shutdown.md
+  configuration/redis: how-to/connect-to-redis.md
+  core: explanation/job-lifecycle.md
+  core/delivery: explanation/delivery.md
+  core/queues-workers: explanation/queues-and-workers.md
+  core/retries-dlq: explanation/retries-and-dead-letters.md
+  core/scheduling: explanation/delayed-and-recurring-jobs.md
+  design-patterns: explanation/choosing-a-pattern.md
+  design-patterns/fan-out-and-join: how-to/fan-out-and-join.md
+  design-patterns/sagas: how-to/sagas-and-compensation.md
+  design-patterns/thin-jobs: how-to/thin-jobs.md
+  design-patterns/transactional-outbox: how-to/transactional-outbox.md
+  guides: how-to/README.md
+  guides/clients: how-to/use-clients-and-producers.md
+  guides/configuration: how-to/configure-an-application.md
+  guides/handle-failures: how-to/handle-failures.md
+  guides/jobs: how-to/write-and-enqueue-jobs.md
+  guides/queues: how-to/configure-queues.md
+  guides/scheduling: how-to/schedule-jobs.md
+  guides/test-workflows: how-to/test-workflows.md
+  guides/wait-for-approval: how-to/wait-for-approval.md
+  guides/workers: how-to/run-workers.md
+  guides/workflows: how-to/build-and-run-workflows.md
+  introduction/adding-pro: how-to/add-pro.md
+  introduction/compatibility: reference/compatibility.md
+  joobq-cloud: explanation/cloud-topologies.md
+  joobq-cloud/kubernetes: how-to/deploy-on-kubernetes.md
+  joobq-cloud/prepare-your-application: how-to/prepare-a-cloud-deployment.md
+  pro: explanation/pro-features.md
+  pro/coordination: explanation/distributed-coordination.md
+  pro/management: reference/azu-cli-and-terminal.md
+  pro/observability: explanation/metrics-and-observability.md
+  pro/workflow-dsl: tutorials/parallel-workflow-dsl.md
+  pro/workflow-dsl/lifecycle: reference/workflow-lifecycle-controls.md
+  pro/workflow-dsl/migration: how-to/migrate-to-the-workflow-dsl.md
+  pro/workflow-dsl/reference: reference/workflow-dsl.md
+  pro/workflows: explanation/durable-workflows.md
+  production-deployment: explanation/production-deployment.md
+  production-deployment/deploy-workers: how-to/deploy-workers.md
+  production-deployment/operate-and-upgrade: how-to/operate-and-upgrade.md
+  production-deployment/redis-and-recovery: how-to/redis-and-recovery.md
+  quick-start: tutorials/first-background-job.md
+  quick-start/azu-application: how-to/use-joobq-in-azu.md
+  quick-start/first-workflow: tutorials/first-pro-workflow.md
+  introduction: README.md

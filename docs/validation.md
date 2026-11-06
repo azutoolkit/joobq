@@ -4,7 +4,7 @@ description: Reproduce the documentation checks and understand what they do not 
 
 # Documentation validation
 
-The [compatibility page](introduction/compatibility.md) records the release baselines. Executable fixtures live in `examples/docs/`; their committed lockfiles resolve Core and Pro separately. The quick-start Crystal code is checked byte-for-byte against its executable fixture.
+The [compatibility page](reference/compatibility.md) records the release baselines. Executable fixtures live in `examples/docs/`; their committed lockfiles resolve Core and Pro separately. The quick-start Crystal code is checked byte-for-byte against its executable fixture.
 
 ## Run the checks
 
@@ -71,7 +71,7 @@ These checks do not establish a production throughput guarantee, complete chaos 
 
 ## Workflow DSL release checks
 
-The [DSL guide](pro/workflow-dsl/README.md) and the workflow fixtures target **Pro v0.2.2**, release commit `92879b94a3be2580e749f3a0acc829b9276040dc`. `examples/docs/pro/workflow_dsl.cr` is checked against the book and Pro's example (apart from the local source require). The private Pro documentation workflow pins this release, compiles all eight Pro fixture programs, and runs them against disposable Redis. The public Core job never needs private Pro access.
+The [DSL guide](tutorials/parallel-workflow-dsl.md) and the workflow fixtures target **Pro v0.2.2**, release commit `92879b94a3be2580e749f3a0acc829b9276040dc`. `examples/docs/pro/workflow_dsl.cr` is checked against the book and Pro's example (apart from the local source require). The private Pro documentation workflow pins this release, compiles all eight Pro fixture programs, and runs them against disposable Redis. The public Core job never needs private Pro access.
 
 Validated locally on **October 30, 2026** with Crystal **1.22.1** and Redis **8.0.2**: all **eleven** fixture programs present at that revision passed (three Core, eight Pro), including approval/query, compensation, a separate producer/worker probe, coordination, observability, retry/DLQ/replay, and SIGTERM shutdown. Dependencies were installed from the frozen Core v0.5.1 and Pro v0.2.2 fixture graphs. The GitBook checker and its five regression tests passed. All 17 Mermaid diagrams rendered in Chromium with Mermaid 11.17.2. The Kubernetes manifest parsed successfully, with matching selectors, volume references, and shutdown budget checks; it was not applied to a cluster. The systemd unit and managed-cloud topology remain deployment recipes to validate in your own environment.
 
@@ -91,7 +91,7 @@ python3 lib/joobq/scripts/run_integration.py --probe /tmp/workflow-dsl-example
 
 ## Source accuracy audit
 
-This audit uses the exact [documented releases](introduction/compatibility.md), not current `master`. The new task guides cover Jobs, Queues, Scheduling, Configuration, Workers, Clients, and Workflows. Source links below are pinned; Pro links require repository access.
+This audit uses the exact [documented releases](reference/compatibility.md), not current `master`. The new task guides cover Jobs, Queues, Scheduling, Configuration, Workers, Clients, and Workflows. Source links below are pinned; Pro links require repository access.
 
 | Documented behavior | Implementation evidence |
 | --- | --- |

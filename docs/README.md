@@ -9,27 +9,27 @@ JoobQ moves work out of your request cycle and into Redis-backed queues. Write a
 Use Core to send notifications, process orders, and schedule background work. Add Pro when that work needs dependencies, signals, compensation, or more detailed operational visibility. You do not need an Azu web application to use either shard.
 
 {% hint style="info" %}
-Start with the [compatibility guide](introduction/compatibility.md). These docs teach released APIs first and label experimental paths. Redis persistence and application idempotency remain part of reliable operation.
+Start with the [compatibility guide](reference/compatibility.md). These docs teach released APIs first and label experimental paths. Redis persistence and application idempotency remain part of reliable operation.
 {% endhint %}
 
 ## Start here
 
 <table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody>
-<tr><td><strong>Quick Start</strong></td><td>Run your first order-processing job.</td><td><a href="quick-start/README.md">Quick Start</a></td></tr>
-<tr><td><strong>Core Concepts</strong></td><td>Understand queues, workers, retries, and dead letters.</td><td><a href="core/README.md">Core Concepts</a></td></tr>
-<tr><td><strong>Pro Features</strong></td><td>Coordinate workflows and inspect their progress.</td><td><a href="pro/README.md">Pro Features</a></td></tr>
-<tr><td><strong>Configuration</strong></td><td>Connect Redis and size your workers.</td><td><a href="configuration/README.md">Configuration</a></td></tr>
-<tr><td><strong>Best Practices</strong></td><td>Design repeatable work and rehearse recovery.</td><td><a href="best-practices/README.md">Best Practices</a></td></tr>
+<tr><td><strong>Quick Start</strong></td><td>Run your first order-processing job.</td><td><a href="tutorials/first-background-job.md">Quick Start</a></td></tr>
+<tr><td><strong>Core Concepts</strong></td><td>Understand queues, workers, retries, and dead letters.</td><td><a href="explanation/job-lifecycle.md">Core Concepts</a></td></tr>
+<tr><td><strong>Pro Features</strong></td><td>Coordinate workflows and inspect their progress.</td><td><a href="explanation/pro-features.md">Pro Features</a></td></tr>
+<tr><td><strong>Configuration</strong></td><td>Connect Redis and size your workers.</td><td><a href="reference/configuration.md">Configuration</a></td></tr>
+<tr><td><strong>Best Practices</strong></td><td>Design repeatable work and rehearse recovery.</td><td><a href="explanation/reliability-practices.md">Best Practices</a></td></tr>
 </tbody></table>
 
 ## Build, choose a pattern, deploy
 
 | Your next step | Start here |
 | --- | --- |
-| Build and test real background work | [Guides](guides/README.md) |
-| Structure concurrency, compensation, and admission | [Design Patterns](design-patterns/README.md) |
-| Run workers and protect Redis state | [Production Deployment](production-deployment/README.md) |
-| Host on cloud VMs, containers, or Kubernetes | [JoobQ Cloud](joobq-cloud/README.md) |
+| Build and test real background work | [Guides](how-to/README.md) |
+| Structure concurrency, compensation, and admission | [Design Patterns](explanation/choosing-a-pattern.md) |
+| Run workers and protect Redis state | [Production Deployment](explanation/production-deployment.md) |
+| Host on cloud VMs, containers, or Kubernetes | [JoobQ Cloud](explanation/cloud-topologies.md) |
 
 ## How the pieces fit
 
@@ -43,19 +43,19 @@ flowchart LR
   Pro <-->|workflow history| History[(Redis history)]
 ```
 
-Crystal compiles job handlers to native code and uses fibers to overlap waiting work. Redis coordinates producers and workers. Actual throughput depends on your jobs, persistence, network, and concurrency; see [capacity planning](best-practices/performance.md) for a measurement method rather than a universal speed claim.
+Crystal compiles job handlers to native code and uses fibers to overlap waiting work. Redis coordinates producers and workers. Actual throughput depends on your jobs, persistence, network, and concurrency; see [capacity planning](how-to/measure-performance.md) for a measurement method rather than a universal speed claim.
 
 ## Core and Pro, together
 
 | Need | Where to start |
 | --- | --- |
-| Typed jobs, queues, retries, scheduling, and DLQ inspection | [Core](core/README.md) |
-| Worker shutdown, TLS connections, and management tokens | [Configuration](configuration/README.md); these are not Pro-only |
-| Typed sequential/parallel workflows, signals, timers, and compensation | [Pro workflow DSL](pro/workflow-dsl/README.md), since v0.2.2 |
-| Durable batch membership and unique admission | [Pro coordination](pro/coordination.md); uses opt-in Delivery |
-| Percentiles and alert evaluation | [Pro observability](pro/observability.md) |
-| Terminal queue inspection | [CLI management](pro/management.md); Core works too |
+| Typed jobs, queues, retries, scheduling, and DLQ inspection | [Core](explanation/job-lifecycle.md) |
+| Worker shutdown, TLS connections, and management tokens | [Configuration](reference/configuration.md); these are not Pro-only |
+| Typed sequential/parallel workflows, signals, timers, and compensation | [Pro workflow DSL](tutorials/parallel-workflow-dsl.md), since v0.2.2 |
+| Durable batch membership and unique admission | [Pro coordination](explanation/distributed-coordination.md); uses opt-in Delivery |
+| Percentiles and alert evaluation | [Pro observability](explanation/metrics-and-observability.md) |
+| Terminal queue inspection | [CLI management](reference/azu-cli-and-terminal.md); Core works too |
 
 [Screenshot: Azu CLI running azu joobq with the orders queue selected, waiting and processing counts, worker heartbeats, and a clearly labeled unavailable workflow provider when Pro is not loaded.]
 
-**Next:** [Run your first job](quick-start/README.md), or [add Pro to an existing app](introduction/adding-pro.md).
+**Next:** [Run your first job](tutorials/first-background-job.md), or [add Pro to an existing app](how-to/add-pro.md).

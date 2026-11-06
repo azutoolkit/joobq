@@ -75,6 +75,11 @@ module JoobQ
 
     @owner_heartbeat = BackgroundLoop.new("processing_owner")
     @list_move_checked = Atomic(Bool).new(false)
+    # Endpoint and timeouts kept so a queue dispatcher can mint its own dedicated blocking connection (a BLMOVE
+    # holds its connection for the block, so it must not take one from the shared pool).
+    @blocking_endpoint : RedisEndpoint? = nil
+    @connect_timeout : Time::Span = 5.seconds
+    @command_timeout : Time::Span = 5.seconds
 
     def initialize(@host : String = ENV.fetch("REDIS_HOST", "localhost"),
                    @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
@@ -85,7 +90,10 @@ module JoobQ
                    command_timeout : Time::Span = ENV.fetch("REDIS_COMMAND_TIMEOUT", "5.0").to_f64.seconds,
                    operation_timeout : Time::Span = ENV.fetch("REDIS_OPERATION_TIMEOUT", "5.0").to_f64.seconds)
       raise ArgumentError.new("Redis timeouts must be positive") if connect_timeout <= Time::Span.zero || command_timeout <= Time::Span.zero
-      @redis = RedisPool.new(RedisEndpoint.new(@host, @port, password: @password),
+      @blocking_endpoint = RedisEndpoint.new(@host, @port, password: @password)
+      @connect_timeout = connect_timeout
+      @command_timeout = command_timeout
+      @redis = RedisPool.new(@blocking_endpoint.not_nil!,
         @pool_size, @pool_timeout, connect_timeout, command_timeout, operation_timeout)
 
       # Initialize specialized components
@@ -113,6 +121,9 @@ module JoobQ
                    operation_timeout : Time::Span = ENV.fetch("REDIS_OPERATION_TIMEOUT", "5.0").to_f64.seconds)
       endpoint = RedisEndpoint.parse(url, verify, ca_file)
       @endpoint = endpoint
+      @blocking_endpoint = endpoint
+      @connect_timeout = connect_timeout
+      @command_timeout = command_timeout
       @host = endpoint.host
       @port = endpoint.port
       @password = nil # the endpoint's clients hold the credentials; the store keeps none
@@ -248,6 +259,23 @@ module JoobQ
     rescue ex
       Log.error &.emit("Error dequeuing job", queue: queue_name, error: ex.message)
       nil
+    end
+
+    # A dedicated, non-pooled connection for a queue dispatcher's blocking BLMOVE. The command timeout is kept well
+    # above the block timeout so the block itself never trips it; closing the connection interrupts a blocked call.
+    def blocking_connection : RedisClient
+      endpoint = @blocking_endpoint || raise "blocking connection needs an endpoint"
+      timeout = {@command_timeout, (BLOCKING_TIMEOUT + 1.0).seconds}.max
+      RedisClient.new(endpoint, connect_timeout: @connect_timeout, command_timeout: timeout)
+    end
+
+    # Claims the oldest job, blocking up to BLOCKING_TIMEOUT, on the caller's dedicated connection (not the pool).
+    # Claims into this process's own processing list, exactly like `dequeue`, so recovery is unchanged. Returns nil
+    # only on an empty queue (the block timed out). A connection error — including the close used to interrupt the
+    # block on stop — is raised, not swallowed, so the dispatcher can tell "empty" from "Redis is down" and back off
+    # on the latter instead of reconnect-storming.
+    def blocking_claim(queue_name : String, connection : Redis) : String?
+      connection.command(["BLMOVE", queue_name, processing_queue(queue_name), "LEFT", "LEFT", BLOCKING_TIMEOUT.to_s]).as?(String)
     end
 
     # Claims up to `batch_size` jobs from the head of the queue without blocking, oldest first (the order the replies

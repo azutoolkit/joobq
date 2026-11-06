@@ -6,11 +6,13 @@ description: Give producers, workers, and inspection tools one predictable boot 
 
 *How-to · Core*
 
-Start with the [supported dependency graph](../reference/compatibility.md). Then give every process the same job definitions, Redis endpoint, and queue registrations. Keep process startup separate from configuration.
+## Prerequisites
 
-## Use a shared initializer
+- JoobQ installed ([Install JoobQ](install.md)).
 
-A small application can use this layout:
+## Steps
+
+1. Put job classes and queue configuration in one initializer that both the producer and the worker require:
 
 ```text
 src/
@@ -19,35 +21,24 @@ src/
   enqueue_order.cr           # Requires initializer; admits work
   worker.cr                  # Requires initializer; starts workers
 ```
-
-The [queue guide](configure-queues.md) contains both registration variants. In an Azu application, `azu generate joobq` (Azu CLI 0.1.62) creates this setup; follow the [Azu walkthrough](use-joobq-in-azu.md) before modifying its generated YAML.
-
-Do not call `forge`, register recurring callbacks, or start a Pro worker in a shared inspection initializer. Those actions start work. CLI status and dashboard adapters load the initializer too.
-
-## Supply Redis settings before boot
-
-For a disposable local development instance:
+   In an Azu application, `azu generate joobq` (Azu CLI 0.1.62) creates this layout ([Use JoobQ in an Azu application](use-joobq-in-azu.md)).
+2. Keep `JoobQ.forge`, recurring schedules and Pro workers out of that initializer; start them in the worker entry point only.
+3. Set Redis before boot; a non-empty `REDIS_URL` takes precedence over `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASS`:
 
 ```sh
 export REDIS_URL=redis://127.0.0.1:6379/0
 export REDIS_POOL_SIZE=20
 crystal run src/worker.cr
 ```
+4. Use one loading path: either `JoobQ.configure` in code or YAML loading, not both replacing each other.
+5. Leave `rest_api_enabled = false` unless you need the management API ([Secure management access](secure-management-access.md)).
 
-`RedisStore.from_env` gives a nonempty `REDIS_URL` precedence over legacy host/port/password variables. Set environment values before configuration creates the store. Replacing a variable after a pool exists does not reconnect that pool to a different endpoint.
+## Verify
 
-Production connections should use verified TLS and secret-managed credentials. See the [Redis options and defaults](connect-to-redis.md). Pool size is per configured pool, so budget across all processes and replicas.
+- The producer and the worker log the same Redis host and port at start.
+- A job enqueued by the producer is processed by the worker.
 
-## Choose one loading path
+## See also
 
-The framework supports programmatic configuration and YAML discovery/loading. An explicit queue initializer is straightforward; a generated YAML setup is also valid. Avoid loading one configuration and then silently replacing it in another initializer.
-
-Environment-specific discovery and `JOOBQ_CONFIG_PATH`/`JOOBQ_CONFIG_FILE` have ordering rules; those variables are not unconditional overrides of earlier files. Check the [configuration reference](../reference/configuration.md) and inspect effective queue registrations without printing credentials.
-
-## Enable only what you need
-
-Keep `rest_api_enabled = false` unless you need the management listener. When enabled, provide at least one distinct role token of 32 bytes or more. A reader-only token configuration is supported; see [management access](secure-management-access.md).
-
-The configured seven-day `dead_letter_ttl` is not enforced by the released Redis DLQ implementation. Plan retention explicitly. Likewise, `config.timeout` does not kill running job fibers. Treat configuration names as API inputs, not guarantees beyond their implementation.
-
-**Next:** [Worker lifecycle](run-workers.md), [clients](use-clients-and-producers.md), and [architecture at a glance](../explanation/application-architecture.md).
+- [Configuration](../reference/configuration.md): every setting and its default.
+- [Architecture at a glance](../explanation/application-architecture.md)

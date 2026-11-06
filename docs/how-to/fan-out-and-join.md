@@ -6,9 +6,13 @@ description: Run independent workflow branches together and join them before con
 
 *How-to · Pro*
 
-Use `parallel` when independent work can overlap. Each branch waits for the preceding sequence. The next step waits for every branch under the engine's existing dependency-completion rules.
+## Prerequisites
 
-The [runnable parallel workflow](../tutorials/parallel-workflow-dsl.md) processes an order, then runs a receipt activity alongside a durable timer. For an ordered shipping branch, use `sequence`:
+- A workflow you can edit ([Build and run workflows](build-and-run-workflows.md)).
+
+## Steps
+
+1. Put the independent steps in a `parallel` block, and steps that must run in order inside it in a `sequence`:
 
 <!-- illustrative: inside a workflow after a reserve step, with application-defined activities -->
 ```crystal
@@ -23,6 +27,13 @@ end
 
 step :complete, CompleteOrder
 ```
+2. Add the joining step after the block; it waits for every branch.
+3. Pass results explicitly with `input: output(:step)`; an omitted input is the workflow's input.
+4. Do not read a sibling branch's output inside the block; add `after:` or move the consumer after the block.
+
+## Verify
+
+The run's history shows the branches starting together after `reserve`, and the join after both:
 
 ```mermaid
 flowchart LR
@@ -33,10 +44,7 @@ flowchart LR
   Ship --> Complete
 ```
 
-`complete` joins `receipt` and `ship`. Groups create dependency edges, not synthetic activities. Results are explicit: omitted activity input is the original workflow input, not the previous result.
+## See also
 
-Do not read an unfinished sibling's output. Add a dependency with `after:` or move the consumer after the block.
-
-Parallel branches are eligible to run together; worker capacity and downstream limits determine actual concurrency. Avoid expanding unbounded input into thousands of steps during construction. For large workloads, choose bounded groups or the existing child-workflow API and measure history growth.
-
-**Next:** [Sagas](sagas-and-compensation.md) and [concurrency tuning](tune-concurrency-and-shutdown.md).
+- [Workflows and sagas](../explanation/durable-workflows.md)
+- [Build a parallel workflow with the DSL](../tutorials/parallel-workflow-dsl.md)

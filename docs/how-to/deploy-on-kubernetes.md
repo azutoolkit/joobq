@@ -6,13 +6,15 @@ description: Deploy a tested worker image with private Redis access and enough t
 
 *How-to · Core · Pro*
 
-Use this as a starting manifest for the [Pro worker entry point](deploy-workers.md). It registers the `orders` workflow and owns SIGTERM handling. Build and push its image first; replace the example image with your tested immutable image digest before deployment.
+## Prerequisites
 
-## Prepare configuration
+- An image of the [Pro worker entry point](deploy-workers.md), built with `-Dpreview_mt`, pushed with an immutable digest, able to run as UID 10001, with its shared libraries and CA trust inside (the manifest mounts the root filesystem read-only).
+- An `orders` namespace, an `orders-worker` Secret with `REDIS_URL` (and `JOOBQ_PRO_LICENSE` if used), and a `redis-ca` ConfigMap with your provider's `ca.pem`. For a publicly trusted certificate, leave out the CA volume and `REDIS_CA_FILE`.
+- Network policy that lets the worker reach Redis and its own dependencies.
 
-Create an `orders` namespace, an `orders-worker` Secret containing `REDIS_URL` and, where applicable, `JOOBQ_PRO_LICENSE`, and a `redis-ca` ConfigMap containing your provider's `ca.pem`. Manage secret values outside Git. For a publicly trusted certificate, omit the CA volume and `REDIS_CA_FILE` variable.
+## Steps
 
-The worker needs private access to Redis and its application dependencies. Configure network policies and provider firewall rules for that topology; do not expose the management API just to make a probe convenient.
+1. Save the manifest and replace the example image with your digest; CPU and memory values are placeholders to measure:
 
 {% code title="worker-deployment.yaml — replace the image before applying" %}
 ```yaml
@@ -75,23 +77,21 @@ spec:
             name: redis-ca
 ```
 {% endcode %}
-
-Build the image with `-Dpreview_mt` for Crystal 1.22.1 if you intend `CRYSTAL_WORKERS=2` to select two runtime threads. CPU and memory values are illustrative. Measure your workload and account for connection buffers, input sizes, and workflow history. The image must include its required shared libraries and CA trust, and allow UID 10001 to execute the binary. The example uses a read-only root filesystem; mount deliberate writable storage if your application needs scratch files or a local archive.
-
-## Roll out, then prove progress
-
-After provisioning the prerequisites and replacing the image:
+2. Apply it and wait for the rollout:
 
 ```sh
 kubectl apply -f worker-deployment.yaml
 kubectl -n orders rollout status deployment/orders-worker
 kubectl -n orders logs deployment/orders-worker
 ```
+3. Keep one replica and the `Recreate` strategy until you have tested recovery with overlapping workers ([Recover and migrate](recover-and-migrate.md)).
 
-A running Pod confirms process scheduling, not successful order completion. Submit a representative canary through your application and inspect its result. Add health checks based on the signals your application actually exposes; this example has no HTTP health endpoint.
+## Verify
 
-The initial single replica and `Recreate` strategy avoid automatic overlapping worker processes during rollout and cause a processing pause. Before enabling rolling updates or more replicas, test the installed runtime's processing recovery, duplicate-safe effects, connection budget, and Pro build-pinning policy. Legacy queues, opt-in Delivery, and Pro workflows have different recovery paths. In particular, [legacy startup recovery](recover-and-migrate.md#know-the-legacy-startup-recovery-limit) can move another consumer's active job and only reclaims one processing entry per start.
+- `kubectl -n orders rollout status deployment/orders-worker` reports the rollout complete.
+- A canary job or run submitted through your application completes; a running Pod alone does not show that.
+- Deleting the Pod lets it stop within the 45-second grace period (the entry point uses 20 s for Pro and 10 s for Core; both library defaults are 15 s).
 
-The 45-second grace period leaves margin around the 20-second Pro and 10-second Core shutdown timeouts that `production_worker.cr` passes (both library defaults are 15 seconds). Rehearse termination under load; Kubernetes can force a kill after the grace period.
+## See also
 
-**Next:** [Operate and upgrade](operate-and-upgrade.md).
+- [Reliability and recovery](../explanation/reliability-and-recovery.md)

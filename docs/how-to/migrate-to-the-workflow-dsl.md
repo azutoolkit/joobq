@@ -6,11 +6,13 @@ description: Adopt the DSL without silently changing persisted identities or dep
 
 *How-to · Pro · Preview*
 
-The DSL is in JoobQ Pro since v0.2.2; these steps use Pro 0.2.4. Keep existing `Definition.new`, `Step.*`, and `register_activity` code working while you migrate; none of those constructor APIs is deprecated. The DSL authoring API remains a preview.
+## Prerequisites
 
-## Preserve identity first
+- Pro 0.2.4 (the DSL is in Pro since v0.2.2) and an existing `Definition.new` / `Step.*` / `register_activity` workflow; those APIs stay supported.
 
-The DSL's implicit activity name is its fully qualified Crystal class name. Existing `register_activity` calls commonly use the final class-name segment or an explicit alias. Declare that existing name deliberately:
+## Steps
+
+1. Write the DSL version, naming each activity with the name it was registered under (the DSL's default is the fully qualified class name), and pass `input: nil` where the old step had no input (an omitted DSL input is the workflow input):
 
 <!-- illustrative: conversion of an existing definition whose activity name is ChargeCard -->
 ```crystal
@@ -19,25 +21,17 @@ Checkout = workflow "checkout", version: 1 do
   step :charge, "ChargeCard", input: nil
 end
 ```
+2. Keep the workflow name, version, step ids, activity names, inputs, deadlines and lifecycle settings; wrap steps that ran independently in `parallel` (the DSL is sequential by default); keep declaration and dependency order.
+3. Compare `old_definition.to_json` with `blueprint.definition.to_json`, then compare their `hash_id`.
+4. Exercise a run, a retry, a compensation, a restart and a replay against isolated Redis.
+5. Deploy workers that register the new blueprint before you admit runs that use new activity names.
 
-Explicit `nil` matters: the old constructor defaults to null input, while an omitted DSL activity input uses `${input}`. Matching step IDs and workflow names alone is not enough for hash equality.
+## Verify
 
-## Compare the complete graph
+- The two JSON documents and the two `hash_id` values are equal.
+- Runs started before the change complete on their original definition.
 
-1. Preserve workflow name, version, step IDs, activity aliases, inputs, deadlines, and lifecycle settings.
-2. Translate independent steps into `parallel`; the DSL is sequential by default.
-3. Preserve declaration and dependency-array order when exact JSON/hash equivalence is required.
-4. Compare `old_definition.to_json` with `blueprint.definition.to_json`, then compare `hash_id`.
-5. Exercise representative executions, retry and compensation paths, restart recovery, and replay before rollout.
+## See also
 
-When values and ordering match, the serialized definition and hash match. A deliberate graph change produces a different hash. Existing runs remain pinned to their original definition unless you invoke the engine's explicit migration APIs.
-
-## Registration and deployment
-
-`Worker#register(blueprint)` installs activity bindings and publishes definitions. Repeated registration of the same typed binding is idempotent. A different implementation using the same name is rejected; select a distinct alias and deployment strategy rather than silently replacing it.
-
-`Client#register(blueprint)` publishes only the definition. Deploy compatible workers before admitting work that uses new activity names. Build pinning remains the existing engine's responsibility.
-
-Blueprints return detached definitions so inspection cannot mutate their validated contents. Catalog publication is not atomic across workflows. Following a connection error, reconcile published definitions before assuming a complete rollout.
-
-The DSL allocates builders and serializes data during authoring/registration. The activity runner, Redis history format, dispatch path, and handler argument serialization remain the existing execution path; this release makes no throughput improvement claim.
+- [Workflow DSL](../reference/workflow-dsl.md)
+- [Workflows and sagas](../explanation/durable-workflows.md)

@@ -6,23 +6,24 @@ description: Measure completed work, tail latency, and recovery on your own work
 
 *How-to · Core*
 
-Crystal and Redis can sustain high throughput, but a no-op benchmark does not predict mail delivery, payment calls, or SQL-heavy jobs. This documentation does not promise a universal jobs-per-second number.
+## Prerequisites
 
-## Record a reproducible test
+- A test environment shaped like production (CPU, memory, Redis version and persistence, network), and a representative job, not a no-op.
 
-Capture the source revision and lockfile, Crystal version and flags, allocated CPU/RAM, Redis version and persistence, network latency, job payload size, handler work, worker count, batch size, pool sizes, and run duration.
+## Steps
 
-Report completed jobs per second, p50/p95/p99 completion latency, oldest queued age, errors/retries, CPU, RSS, GC pressure, and Redis connection/command latency. Distinguish accepted admissions from completed jobs and retained metric windows from lifetime totals.
+1. Record the conditions: source revision and `shard.lock`, Crystal version and flags, allocated CPU and memory, Redis version and persistence, payload size, worker count, `worker_batch_size` and pool sizes.
+2. Run one process with a fixed worker count and record completed jobs per second, p50/p95/p99 completion time, oldest waiting age, errors and retries, CPU and RSS.
+3. Raise the worker count step by step until completions stop rising or downstream latency rises; change one setting at a time.
+4. Repeat with the multithreaded build and `CRYSTAL_WORKERS` set to the CPUs allocated to the process.
+5. Run the best setting for a sustained period, then again while stopping a worker and restarting Redis, and check every job's effect afterwards.
+6. To compare with the committed Core measurement, run `benchmarks/legacy.cr` from the joobq repository: `crystal build benchmarks/legacy.cr --release -o /tmp/joobq-legacy`, then `CRYSTAL_WORKERS=4 BENCH_JOBS=30000 BENCH_MODE=worker python3 scripts/run_integration.py --probe /tmp/joobq-legacy`.
 
-## Tune one constraint at a time
+## Verify
 
-1. Establish a single-process baseline with representative handlers.
-2. Increase queue workers until throughput stops improving or downstream latency rises.
-3. Test multiple Crystal runtime threads with the same build flags used in production.
-4. Adjust batching and pools while watching fairness, connection limits, and queue age.
-5. Run a sustained workload, then repeat with worker termination and Redis disruption.
-6. Verify counts and business effects after recovery, not only during the fastest interval.
+You have a table of completed jobs per second and p99 completion time per setting, with the conditions of step 1 written next to it.
 
-Batching reduces command overhead but can increase the amount of work held by one worker. More parallelism can exhaust database or HTTP pools. Optimize the measured bottleneck while retaining idempotency and recovery checks.
+## See also
 
-[Screenshot: A benchmark report showing source revision, allocated CPUs, completed jobs per second, p99 completion latency, error count, and memory trend, with no unsupported headline throughput claim.]
+- [Why JoobQ](../explanation/why-joobq.md): the committed measurement and its conditions.
+- [Workers and concurrency](../explanation/workers-and-concurrency.md)

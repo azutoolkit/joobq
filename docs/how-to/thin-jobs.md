@@ -6,9 +6,15 @@ description: Keep a job small so its business operation is easy to test and reus
 
 *How-to · Core*
 
-Let the job carry a small input and call a business operation. The operation should be useful without a queue, which makes it easier to test and reuse from an HTTP endpoint or command.
+## Prerequisites
 
-This runnable **Core** example formats a receipt summary. It does not send email. Install the [Core baseline](../reference/compatibility.md) before running it.
+- A Core project ([Install JoobQ](install.md)).
+
+## Steps
+
+1. Put the business operation in its own class or module that takes plain values and needs no queue.
+2. Give the job only the identifiers the operation needs, and call the operation from `perform`.
+3. Check the operation directly in a spec or at boot, as the example does before it starts a worker:
 
 {% code title="src/receipt_worker.cr" %}
 <!-- example: core/thin_job.cr -->
@@ -47,11 +53,13 @@ SummarizeReceiptJob.enqueue(order_id: 42_i64, total_cents: 2500)
 JoobQ.forge
 ```
 {% endcode %}
+4. Keep `enqueue` calls in your producers, and `JoobQ.forge` in the worker entry point only.
 
-Run `crystal run src/receipt_worker.cr`; expect `Order 42: 2500 cents`, then stop it with Ctrl-C. The example checks the business function before starting Redis-backed processing.
+## Verify
 
-In a deployed application, keep producer calls such as `enqueue` outside the worker startup file. Put business operations in application services, registration in an initializer, and startup/shutdown in the worker entry point.
+Run `crystal run src/receipt_worker.cr`. It prints `Order 42: 2500 cents`; stop it with Ctrl-C.
 
-For real receipts, pass a record ID and a versioned business key. Let the service load the data it needs and enforce idempotency at the database or provider boundary. Do not serialize credentials or open connections into jobs.
+## See also
 
-**Next:** [Transactional outbox](transactional-outbox.md).
+- [Architecture at a glance](../explanation/application-architecture.md)
+- [Write idempotent jobs](write-idempotent-jobs.md)

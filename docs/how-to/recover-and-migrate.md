@@ -6,19 +6,30 @@ description: Recover deliberately when processes, networks, or storage fail.
 
 *How-to · Core · Pro*
 
-Define two goals before choosing Redis persistence: how much acknowledged work may be lost (RPO), and how long recovery may take (RTO). A “zero data loss” requirement needs a tested storage and failover design, not just successful enqueue responses.
+## Prerequisites
 
-## Recovery checklist
+- Access to the Redis the work lives in, and the logs and deployment revisions of the incident window.
 
-1. Preserve logs, queue names, job/receipt identifiers, deployment revisions, and timestamps. Redact payloads and credentials.
-2. Identify whether work uses legacy queues, Delivery, or Pro workflows. Their state and recovery paths differ.
-3. Determine whether the external effect already happened before replaying.
-4. Restore connectivity or storage into an isolated environment first when corruption or rollback is suspected.
-5. Inspect pending, processing, delayed, and dead-letter state. For Delivery, include leases, receipts, and reconciliation journals.
-6. Replay a selected item after reviewing its identity and idempotency behavior. Monitor before expanding recovery.
-7. Record unresolved outcomes and follow up; an empty ready queue alone is not proof of completion.
+## Recover after an incident
 
-## Rehearse these failures
+1. Keep the evidence: logs, queue names, job and run ids, deployment revisions, timestamps. Redact payloads and credentials.
+2. Find out which path the work used: Core queues, Delivery or Pro workflows.
+3. For each job you might replay, check whether its external effect already happened.
+4. If you suspect corruption or a bad rollback, restore into an isolated environment first.
+5. Inspect waiting, processing (`joobq:processing:<queue>`), delayed and dead-letter state; for Delivery also leases and receipts.
+6. Replay one reviewed job, watch it, then the rest. Record every outcome you could not resolve.
+7. Before you start consumers again after a crash, quiesce them: a restarting queue moves only one job back from its processing list.
+
+## Migrate to another processing path
+
+1. Use a separate namespace for the new path (for example a new Delivery runtime namespace).
+2. Stop or redirect producers, then drain or account for the old work.
+3. Validate the new path with a small workload, keeping the old state until it is reconciled.
+4. Write down the rollback boundary: do not start old binaries against state written by the new release until you have tested that they can read it.
+
+## Rehearse failures
+
+In staging, cause each failure below and check what the second column names:
 
 | Failure | What to verify |
 | --- | --- |
@@ -29,16 +40,11 @@ Define two goals before choosing Redis persistence: how much acknowledged work m
 | Redis restore | Missing/newer work, receipt retention, replay policy and measured RPO/RTO |
 | Pro reconciler interruption | Batch dispatch, callback dispatch and workflow progress recover |
 
-## Know the legacy startup recovery limit
+## Verify
 
-In both documented Core revisions, `Queue#start` calls `move_job_back_to_queue` once. That operation moves **at most one** member from the queue's shared processing list back to ready; it is not a full crash-recovery scan and has no per-process ownership check. Starting another consumer can therefore reclaim a job still running elsewhere. A restart alone does not prove all work left by SIGKILL was recovered.
+Every job and run id from step 1 is either complete with its effect checked, or recorded as unresolved with an owner.
 
-Quiesce consumers before planned replacement, inspect retained processing entries after a crash, and reconcile them through a tested recovery procedure. Do not enable overlapping rollouts on the assumption that legacy processing has leases. Pro's default activity transport uses these queues, though its workflow history and reconciler add their own attempt checks and redispatch. Delivery is the separate leased path; adopting it requires an explicit migration.
+## See also
 
-## Migrate a processing API separately from an upgrade
-
-A dependency upgrade does not move legacy `Job.enqueue` work into Delivery. Use separate namespaces and an explicit cutover plan. Stop or redirect producers, drain or account for old work, validate the new path with a small workload, and retain old state long enough to reconcile.
-
-Document the rollback boundary. A new consumer may write state an old release cannot read. Do not start old binaries against that state until you have tested compatibility. Never delete queue keys or journals merely to make a deployment look healthy.
-
-For Pro, retain the compatible Core revision from its lockfile. See [compatibility](../reference/compatibility.md) and the [Delivery preview](../explanation/delivery.md).
+- [Reliability and recovery](../explanation/reliability-and-recovery.md): the startup recovery limit and unknown outcomes.
+- [Delivery](../explanation/delivery.md)

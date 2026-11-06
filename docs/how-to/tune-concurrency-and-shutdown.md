@@ -6,33 +6,29 @@ description: Tune work in flight without confusing fibers, threads, and connecti
 
 *How-to · Core*
 
-Start with a small worker count and measure completion latency, queue age, retries, and downstream saturation. A larger pool or more fibers can make an overloaded dependency slower.
+## Prerequisites
 
-| Control | Scope |
-| --- | --- |
-| Queue worker count | Concurrent workers for a queue in one process |
-| Worker batch size | In-flight claim limit per legacy worker loop and amount fetched per poll |
-| `CRYSTAL_WORKERS` | Runtime threads when compiled with the applicable multithreading flag |
-| Redis pool size | Connections available to one configured pool |
-| Delivery capacity | Opt-in runtime capacity, separate from legacy queue workers |
-| Pro rate limit | Shared admission budget for a named key and time window |
+- A representative workload ([Measure performance](measure-performance.md)).
 
-## Try multiple runtime threads
+## Steps
+
+1. Set the queue's worker count and `worker_batch_size`; a process runs at most workers times batch size jobs at once on that queue.
+2. Set `REDIS_POOL_SIZE` for the total of all workers in the process.
+3. To try several runtime threads, build with `-Dpreview_mt` and set `CRYSTAL_WORKERS` to the CPUs allocated to the process:
 
 ```sh
 mkdir -p bin
 crystal build src/worker.cr --release -Dpreview_mt -o bin/worker
 CRYSTAL_WORKERS=4 ./bin/worker
 ```
+4. Give shutdown enough time: `JoobQ.forge(shutdown_timeout: ...)` (default 15 seconds), or `azu jobs:worker --shutdown-timeout 25`, and a supervisor stop timeout longer than that.
+5. If you call `JoobQ.forge(trap_signals: false)`, call `JoobQ.shutdown` yourself and read `JoobQ.abandoned_jobs` afterwards; for Pro, call `JoobQPro.shutdown` first.
 
-Create `bin/` first if needed. Choose thread count from the CPUs actually allocated to the process, not the host's total. Verify application code and third-party clients under the same runtime mode. Fibers do not make a CPU-bound handler parallel by themselves.
+## Verify
 
-## Give shutdown time to finish
+- Send SIGTERM while jobs run: the process exits `0` when all finished, `3` when some were put back on their queue.
+- Throughput rose and downstream latency stayed within your limit at the new setting.
 
-`JoobQ.forge` installs signal handling by default. SIGTERM, SIGINT, and SIGHUP initiate shutdown. The worker stops claiming new work, drains active work within its budget, and attempts to return unfinished work. A forced kill, unavailable Redis, or expired supervisor grace period can prevent that final handoff.
+## See also
 
-The Core baseline exits with status `3` when shutdown reports abandoned work. Alert on that outcome and investigate retained queue/processing state. A second termination signal can force exit; do not use repeated signals as a normal drain procedure.
-
-If you disable signal trapping, your application owns the lifecycle. `JoobQ.shutdown` returns `true` for the first completed invocation and `false` for subsequent calls; that Boolean is not a clean-drain result. Check `JoobQ.abandoned_jobs` and shutdown logs. `JoobQPro.shutdown`, by contrast, reports whether its services stopped successfully within the budget. For Pro workflows, stop Pro services before Core. Allow a supervisor grace period longer than the complete shutdown budget.
-
-`azu jobs:worker --shutdown-timeout 25` controls the CLI worker's Core drain budget. It does not impose a deadline on every external side effect. Check [CLI management](../reference/azu-cli-and-terminal.md) before changing worker-process options.
+- [Workers and concurrency](../explanation/workers-and-concurrency.md)

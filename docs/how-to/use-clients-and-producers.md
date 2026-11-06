@@ -6,17 +6,11 @@ description: Admit jobs and interact with workflow runs without starting another
 
 *How-to · Core · Pro*
 
-Choose the API for the processing path you use. Core jobs, Pro workflows, and Delivery have different identities and completion models.
+## Prerequisites
 
-| Path | Producer interface | Completion |
-| --- | --- | --- |
-| Legacy Core jobs | Typed `Job.enqueue`, `delay`, or `batch_enqueue` | Application results, events, and queue inspection; no general result-wait client |
-| Pro workflows | `JoobQPro::Workflows::Client` | `describe`, `history`, `query`, and `result` |
-| Delivery preview | Explicit runtime/ledger admission | Receipts and reconciliation in a separate namespace |
+- The shared initializer, required by the producer, without `JoobQ.forge` ([Configure an application](configure-an-application.md)).
 
 ## Enqueue a Core job
-
-Load the shared initializer; do not call `forge` in the producer:
 
 <!-- illustrative: src/enqueue_order.cr in the application from the configuration guide -->
 ```crystal
@@ -24,14 +18,12 @@ require "./initializers/joobq"
 jid = ProcessOrderJob.enqueue(order_id: 42_i64)
 puts jid
 ```
+Store the returned `jid` with your record; it is not a completion receipt, and a second `enqueue` is not deduplicated.
 
-An ID returned by admission does not mean the handler finished. If admission raises after Redis accepted the write, the outcome may be unknown. Retrying legacy enqueue is not automatically deduplicated; carry a stable business key and reconcile the effect.
+## Start and follow a Pro workflow
 
-## Connect a Pro workflow client
-
-Start the [production worker example](deploy-workers.md), then run its [separate producer probe](deploy-workers.md#check-it-from-a-separate-producer). `Client.new` uses the configured Redis store; it does not start orchestrators or activity workers. Construct it after loading the same store configuration as your workers.
-
-For that example's registered `orders` workflow:
+1. Create a `JoobQPro::Workflows::Client` after loading the same store configuration as the workers; it starts no workers.
+2. Start the run with a stable id, so a second start with that id is a no-op (`try_start` returns whether this call created it):
 
 <!-- illustrative: producer code after requiring joobq_pro and configuring the shared Redis store -->
 ```crystal
@@ -39,15 +31,15 @@ client = JoobQPro::Workflows::Client.new
 id, created = client.try_start("orders", 42_i64, id: "order-42-v1")
 result = client.result(id, timeout: 10.seconds)
 ```
+3. Store the run id; `result` waits in the calling fiber and its timeout does not cancel the run, so expose a status endpoint rather than holding a request open.
+4. Read the run with `describe(id)`, `history(id, after_seq: ..., limit: ...)` (default limit 200), `query(id, name)`; send a signal with `signal(id, name, payload)`.
+5. Authorize the caller before you accept a run id or signal from an end user.
 
-A stable run ID makes another start a no-op while that ID exists; `created` tells you whether this call created the run. Existing IDs do not validate a newly supplied payload against the original input. Reuse an ID only for the same business intent, and account for retention before relying on it permanently.
+## Verify
 
-`result` polls and waits in the calling fiber. A client wait timeout does not cancel the workflow. Avoid holding a web request open for a long workflow: store the run ID and expose an application status endpoint instead.
+`client.describe(id).status` shows the run, and `client.result(id)` returns its output when it completes.
 
-## Inspect and interact
+## See also
 
-`describe(id)` returns current state. `history(id, after_seq: ..., limit: ...)` reads a bounded history page; the default limit is 200, so page when you need the full history. `query` evaluates a declared read-only query. `signal` appends a message and does not deduplicate repeated submissions.
-
-`Client#register(definition)` (for a blueprint, `blueprint.definition`) publishes a definition but installs no activity handlers. Deploy workers with the matching handlers before admitting that definition. Authorize business operations before accepting a run ID or signal from an end user; Redis credentials are not tenant-level authorization.
-
-**Next:** [Wait for approval](wait-for-approval.md), [handle failures](handle-failures.md), and [Delivery boundaries](../explanation/delivery.md).
+- [Workflows and sagas](../explanation/durable-workflows.md)
+- [Workflow lifecycle controls](../reference/workflow-lifecycle-controls.md)

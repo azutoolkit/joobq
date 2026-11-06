@@ -6,11 +6,14 @@ description: Protect queue history and prove that a backup can restore useful wo
 
 *How-to · Core · Pro*
 
-Treat Redis as application state. Queue entries, delayed work, leases, receipts, and workflow histories can all matter during recovery. A cache-style eviction policy is a poor fit for this data.
+## Prerequisites
 
-## Connect securely
+- A Redis server you configure yourself, or a managed Redis whose persistence and eviction settings you can choose.
+- A place to keep encrypted backups.
 
-Inject `REDIS_URL` from your secret manager using a `rediss://` endpoint. Configure trust and pool limits explicitly; these values are starting points to measure, not universal tuning recommendations.
+## Steps
+
+1. Give workers a TLS URL and the trust settings through your secret manager; measure the pool size you need rather than copying these values:
 
 ```sh
 export REDIS_TLS_VERIFY=true
@@ -22,29 +25,23 @@ export REDIS_COMMAND_TIMEOUT=5.0
 export REDIS_OPERATION_TIMEOUT=5.0
 ./bin/worker
 ```
-
-Validate the certificate hostname and the ACL commands used by your enabled features, including Lua scripts. Use separate credentials and endpoints for environments. A successful connection does not validate workflow dispatch, reconciliation, or failover behavior.
-
-## Choose persistence and capacity
-
-For a self-managed Redis instance, this configuration fragment favors durable acknowledgments and preserves keys when memory is exhausted:
+2. On a self-managed Redis, turn on AOF with `fsync` on every write and refuse writes instead of evicting keys when memory is full:
 
 ```conf
 appendonly yes
 appendfsync always
 maxmemory-policy noeviction
 ```
+3. Take provider snapshots or coordinated backups of the RDB/AOF files together with their manifest; encrypt them and record the Redis version, application revision and snapshot time.
+4. Rehearse a restore into an isolated endpoint, with producers and workers stopped. Compare the job and run ids you expect with what is there, then start a small workload and reconcile uncertain outcomes.
+5. Rehearse a Redis restart, lost acknowledgements and disk pressure in staging.
 
-Set memory and disk capacity for your workload and retained histories; `noeviction` turns exhaustion into write failures rather than silently deleting work. Measure the latency cost of `appendfsync always`. Replication and persistence settings still do not guarantee that every acknowledged write survives every failover.
+## Verify
 
-## Make recovery routine
+- `redis-cli CONFIG GET appendonly` answers `yes`, and `CONFIG GET maxmemory-policy` answers `noeviction`.
+- The restore rehearsal brought back the jobs and runs you expected, and you have measured how long it took.
 
-1. Take provider-supported snapshots or coordinated Redis backups. Preserve the required RDB/AOF files and manifest together; do not copy a changing multipart AOF directory blindly.
-2. Encrypt backups, restrict access, and keep a tested retention policy. Record Redis version, application revision, snapshot time, and the corresponding persistence settings.
-3. Restore into an isolated endpoint with producers and workers initially stopped. Never aim a rehearsal at production.
-4. Compare expected run/job identifiers and states before starting compatible workers. Account for writes after the backup and effects already committed in external systems.
-5. Resume a small workload, reconcile uncertain outcomes, and measure actual RPO/RTO before reopening admission.
+## See also
 
-Include Redis restart, lost acknowledgments, disk pressure, and failed failover in staging exercises. Managed providers may restrict commands or alter failover semantics; validate the exact service tier you plan to use.
-
-**Next:** [Operate and upgrade](operate-and-upgrade.md) and the [incident recovery checklist](recover-and-migrate.md).
+- [Reliability and recovery](../explanation/reliability-and-recovery.md)
+- [Recover and migrate](recover-and-migrate.md)

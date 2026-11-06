@@ -6,18 +6,15 @@ description: Choose retries, compensation, and replay based on what actually hap
 
 *How-to · Core · Pro*
 
-Start with the failed operation, not the retry button. Did it fail before doing any work, or could the external effect already have happened?
+## Prerequisites
 
-| Situation | Useful response |
-| --- | --- |
-| Temporary dependency outage | A bounded retry with a stable business identity |
-| Invalid input or a permanent business rejection | Stop retrying; return or record an actionable failure |
-| A later workflow step fails after an earlier effect | Run a compensating operation where one exists |
-| Redis disconnects before an acknowledgment | Reconcile the original identity; the outcome may be unknown |
+- A job or workflow activity that calls something that can fail.
 
-## Set a workflow retry budget
+## Steps
 
-The activity below is application code. Keep external calls idempotent and set their own client timeouts.
+1. Set the Core retry budget with `config.retries` (0 to 100, default 3 retries after the first run), or per job with its `retries` and `max_retries` properties.
+2. For a failure that retrying cannot fix (a declined card, a deleted record), raise `JoobQ::NonRetryableError` or a subclass; in a workflow activity, `JoobQPro::Workflows::NonRetryableError`.
+3. In a workflow, set a retry policy on the step; `attempts:` counts the first attempt:
 
 <!-- illustrative: inside a workflow block with an application-defined ChargeCard activity -->
 ```crystal
@@ -26,20 +23,20 @@ step :charge, ChargeCard,
   timeout: 10.seconds,
   retry: retry_policy(attempts: 3, initial: 1.second, maximum: 10.seconds)
 ```
-
-In the DSL, `attempts: 3` includes the first attempt. Core's `config.retries = 3` means the initial attempt plus three retries. These are different settings. An activity may raise `JoobQPro::Workflows::NonRetryableError` for a permanent failure; a Core job raises `JoobQ::NonRetryableError` (see [retries and dead letters](../explanation/retries-and-dead-letters.md)). A timeout does not cancel an external HTTP request or reverse a payment.
-
-## Inspect before replay
-
-In a configured Azu app using the [documented CLI](../reference/azu-cli-and-terminal.md):
+4. After fixing the cause, inspect the dead letters and preview a replay before running it:
 
 ```sh
 azu jobs:dlq --queue orders --limit 20 --json
 azu jobs:retry --queue orders --limit 1 --dry-run
 ```
+5. For a workflow, inspect the run with `client.describe(id)` and `client.history(id)` instead of replaying its activity jobs.
 
-These inspect legacy queue failures. A Pro workflow has its own run history: inspect it through `client.describe(id)` and `client.history(id)`. Do not treat a workflow activity's transport job as an independent order to replay.
+## Verify
 
-Before retrying, repair the cause, verify whether the effect already happened, and preserve its business idempotency key. Start with one reviewed item. Watch completed work and error rates before expanding recovery.
+- `azu jobs:dlq --queue orders --json` lists the failed jobs with their errors.
+- After the replay, the job's effect is there once and the entry is gone from the dead letters.
 
-**Next:** [Sagas](sagas-and-compensation.md), [dead-letter handling](../explanation/retries-and-dead-letters.md), or [recovery procedures](redis-and-recovery.md).
+## See also
+
+- [Retries, backoff and the DLQ](../explanation/retries-and-dead-letters.md)
+- [Reliability and recovery](../explanation/reliability-and-recovery.md)

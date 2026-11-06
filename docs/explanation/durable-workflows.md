@@ -32,6 +32,16 @@ sequenceDiagram
 
 Every transition is a numbered history event, and the run's state is folded from those events. Steps run one after another unless you group them with `parallel`; `after:` adds explicit dependencies. Fan-out is static: the graph is fixed when the workflow is defined, and a `for_each` over a runtime list is **Roadmap**.
 
+A blueprint is built and validated in your process without touching Redis; `worker.register` installs the activity handlers and publishes the definition; `worker.start` returns at once. Crystal branches and loops in a workflow block run when the blueprint is built, so decisions that depend on a run's input use `only_if:` and references. A run keeps the definition it started with: registering a changed blueprint does not change open runs, though their activity code is whatever the workers run.
+
+Activities travel over Core's ordinary queues unless you configure Delivery. A run is pinned at start to the workflow's promoted worker build (or the `build` given to `start`), and only workers of that build run its activities (compensations go through the shared activity queue). A signal unblocks a `wait_for` step and is not deduplicated, while an update is validated by the workflow and answers with an outcome; `result`'s timeout only stops waiting, it does not cancel the run.
+
+A workflow is a serialized graph, not durable execution of arbitrary Crystal code. Groups such as `parallel` add dependency edges, not extra activities; branches become eligible together and worker capacity decides how many run at once. An activity's input is deserialized when the worker calls it, so a valid reference does not prove a JSON field has the expected type.
+
+`result` returns the outputs keyed by step id and raises `WorkflowFailed` for any other end. A definition with the same values in the same order has the same hash; any change gives a new hash. `blueprint.definition` returns a detached copy, `Client#register` publishes a definition without installing handlers, and registering a second implementation under an activity name that is already bound is refused.
+
+Workflow workers announce their build every 3 seconds, and a build whose workers have all stopped is reported as stalled. A compensation that fails leaves the run marked `compensation_incomplete`.
+
 ## Example
 
 <!-- example: pro/compensation_workflow.cr -->

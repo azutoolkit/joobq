@@ -6,9 +6,13 @@ description: Recover from a later failure with explicit compensating operations.
 
 *How-to · Pro*
 
-A reservation succeeds, then payment fails. You cannot roll both systems back with one database transaction. A saga records an explicit compensation—such as releasing the reservation—and runs it when the workflow unwinds.
+## Prerequisites
 
-This demo deliberately declines payment. Its in-memory flag only makes compensation visible in the example; it is not a durable inventory implementation.
+- Pro installed ([Add Pro](add-pro.md)) and a development Redis.
+
+## Steps
+
+1. For each step whose effect can be undone, declare `compensate: compensation(UndoActivity, input: output(:step))`:
 
 {% code title="src/compensated_checkout.cr" %}
 <!-- example: pro/compensation_workflow.cr -->
@@ -65,8 +69,12 @@ ensure
 end
 ```
 {% endcode %}
+2. Give compensations their own timeouts, a stable business key and an owner for runs that end `compensation_incomplete`; compensations do not inherit the step's retry policy.
+3. Run it: `crystal run src/compensated_checkout.cr`.
 
-Run `crystal run src/compensated_checkout.cr`. Expect `PASS failed payment released its reservation`. The workflow remains failed even though compensation succeeded.
+## Verify
+
+The program prints `PASS failed payment released its reservation`: `charge` failed, `ReleaseInventory` ran, and the run ended failed.
 
 ```mermaid
 sequenceDiagram
@@ -81,8 +89,6 @@ sequenceDiagram
   W->>W: Finish failed
 ```
 
-Real compensations need stable business identity, their own external-client timeouts, and a reconciliation path. A refund is not the same operation as deleting a charge. Some effects, such as a sent email, cannot be undone.
+## See also
 
-The existing engine compensates completed steps in reverse completion order. A compensation failure can leave the workflow with `compensation_incomplete`; compensations do not inherit the original step's retry policy. Monitor that outcome and assign an operator recovery path. Keep long-running activities cancellation-aware so unwinding can progress.
-
-**Next:** [Handle failures](handle-failures.md).
+- [Workflows and sagas](../explanation/durable-workflows.md)

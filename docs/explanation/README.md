@@ -20,6 +20,7 @@ Explanation pages give the background behind the tasks: the model, the trade-off
 * [Retries, backoff and the DLQ](retries-and-dead-letters.md) · Core
 * [Cron and recurring jobs](delayed-and-recurring-jobs.md) · Core · Pro · JoobQUI
 * [Rate limiting and throttling](rate-limiting-and-throttling.md) · Core · Pro
+* [Reliability and recovery](reliability-and-recovery.md) · Core · Pro
 
 ## Advanced
 

@@ -6,9 +6,13 @@ description: Pause a workflow for an external decision without holding an activi
 
 *How-to · Pro*
 
-An order needs a decision before it can continue. Use a signal wait rather than leaving an activity polling for approval. The engine records the signal payload in workflow history.
+## Prerequisites
 
-**Requires:** the [Pro setup](add-pro.md) and development Redis. This complete example sends its own approval so you can run it from one terminal. It does not charge a card or update an order database.
+- Pro installed ([Add Pro](add-pro.md)) and a development Redis.
+
+## Steps
+
+1. Add a `wait_for` step with a timeout, pass the signal's payload to the next step with `output(:approval, :approved)`, and declare a query for the decision:
 
 {% code title="src/review_order.cr" %}
 <!-- example: pro/approval_workflow.cr -->
@@ -52,28 +56,19 @@ ensure
 end
 ```
 {% endcode %}
+2. Run it (the example sends its own approval):
 
 ```sh
 crystal run src/review_order.cr
 ```
+3. In your application, store the run id with the order and send the signal from an authenticated endpoint after checking that the caller may approve: `client.signal(id, "approve", {approved: true})`.
+4. Handle a declined decision or a timeout as a failure of the run.
 
-Expect `Approved order 42`. `wait_for` bounds the wait; `output(:approval, :approved)` passes the decision into typed activity input. `query` exposes the recorded decision without changing the workflow.
+## Verify
 
-```mermaid
-sequenceDiagram
-  participant App as Application
-  participant W as Workflow
-  participant H as Approver
-  App->>W: Start order-review
-  W->>W: Wait for approve signal
-  H->>App: Approve order
-  App->>W: Signal approved=true
-  W->>W: CompleteApprovedOrder
-  App->>W: Query decision or await result
-```
+The program prints `Approved order 42`, and `client.query(id, "approval")` returns the recorded decision.
 
-In your app, keep the returned run ID with the order. An authenticated endpoint can send the signal from a separate `JoobQPro::Workflows::Client`; authorize the business decision before doing so. Do not trust an order ID supplied by a caller as proof of access.
+## See also
 
-Repeated signals are messages, not an automatic deduplication mechanism. Deduplicate approval requests in your application when necessary. A query before approval can return null. Handle a declined decision or wait timeout as a failure; the demo intentionally exercises the approved path.
-
-**Next:** [Handle failures](handle-failures.md) or [compensate completed work](sagas-and-compensation.md).
+- [Workflows and sagas](../explanation/durable-workflows.md)
+- [Build a durable workflow and saga](https://joobq-website.onrender.com/docs/tutorials/02-your-first-durable-workflow)

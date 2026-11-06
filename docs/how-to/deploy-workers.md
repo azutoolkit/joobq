@@ -6,11 +6,13 @@ description: Run a separate worker service with explicit startup and shutdown ow
 
 *How-to · Core · Pro*
 
-Build once from `shard.lock`, then run that binary with environment-specific configuration. Keep producers separate: a worker starting or restarting should not create a new order by itself.
+## Prerequisites
 
-## Own the lifecycle
+- The worker's code in a project with a committed `shard.lock`; for Pro, read access to the Pro repository at build time.
 
-This complete Pro entry point registers a small workflow and waits for SIGTERM or SIGINT. Replace its sample activity with your application code. It does not enqueue work during boot and leaves the management API disabled.
+## Steps
+
+1. Write a worker entry point that registers your workflows, waits for SIGTERM or SIGINT, and stops Pro before Core. It enqueues nothing at boot:
 
 {% code title="src/worker.cr" %}
 <!-- example: pro/production_worker.cr -->
@@ -57,6 +59,7 @@ end
 exit(clean && JoobQ.abandoned_jobs == 0 ? 0 : 3)
 ```
 {% endcode %}
+2. Build it once from the lockfile (this build enables `-Dpreview_mt` so `CRYSTAL_WORKERS` can select threads):
 
 ```sh
 shards install --frozen
@@ -64,39 +67,7 @@ mkdir -p bin
 crystal build src/worker.cr --release -Dpreview_mt -o bin/worker
 CRYSTAL_WORKERS=4 ./bin/worker
 ```
-
-This build enables `-Dpreview_mt` on Crystal 1.22.1; `CRYSTAL_WORKERS` alone does not enable multithreading. Choose a thread count appropriate to your allocated CPUs and dependencies. Core-only applications can use `JoobQ.forge`'s built-in signal handling; this Pro entry point owns signal handling itself so Pro stops before Core.
-
-The configured budgets are 20 seconds for Pro, then 10 seconds for Core. This entry point exits nonzero when Pro reports an incomplete stop or Core reports abandoned jobs. Core's Boolean return is not a clean-drain result, and some teardown failures are logged rather than reflected in the exit status; inspect shutdown logs as well. A forced kill or Redis outage can prevent a final handoff. Idempotent activity effects remain necessary.
-
-## Check it from a separate producer
-
-With the worker running and the same Redis configuration in another terminal:
-
-{% code title="src/worker_probe.cr" %}
-<!-- example: pro/worker_probe.cr -->
-```crystal
-require "joobq_pro"
-
-# Run separately, after production_worker.cr is ready, against the same Redis.
-client = JoobQPro::Workflows::Client.new
-# A fresh canary each invocation; retries within this invocation reuse its ID.
-request_id = UUID.random.to_s
-id, created = client.try_start("orders", 42_i64, id: request_id)
-raise "Expected a new run" unless created
-repeated_id, repeated = client.try_start("orders", 42_i64, id: id)
-raise "Repeated start created another run" if repeated || repeated_id != id
-result = client.result(id, timeout: 10.seconds)
-raise "Unexpected worker result" unless result["process"].as_s == "Processed order 42"
-puts result["process"].as_s
-```
-{% endcode %}
-
-Run `crystal run src/worker_probe.cr`; expect `Processed order 42`. This checks admission, dispatch, and completion. The worker's startup log alone cannot do that. In production, use a canary activity that is safe to repeat and represents the dependencies you need to monitor.
-
-## Run under a supervisor
-
-For a Linux service installed under `/srv/orders`, provision an `orders` service account and a secret-managed `/etc/orders/worker.env`. Give that file restrictive permissions. This example expects the binary and required shared libraries to be installed already.
+3. Run it under a supervisor. For a Linux service under `/srv/orders`, with an `orders` account and a secret-managed `/etc/orders/worker.env` readable only by it:
 
 ```ini
 [Unit]
@@ -119,9 +90,35 @@ NoNewPrivileges=true
 [Install]
 WantedBy=multi-user.target
 ```
+4. For a container, make the binary the exec-form entrypoint and set a termination grace period longer than the shutdown timeouts (here 20 s for Pro, then 10 s for Core): at least 45 seconds.
+5. Keep build-time repository credentials out of the runtime image.
+6. To scale, add processes; each runs its own workers against the same Redis.
 
-For containers, use the binary as the exec-form entrypoint and set a termination grace period of at least 45 seconds for these budgets; measure the margin under load. Build for the target OS, libc, and architecture. Keep private dependency credentials out of the runtime image and image layers.
+## Verify
 
-`Worker ready` confirms startup only. Continuous readiness needs worker progress and a representative canary, not just a live process or Redis `PING`.
+With the worker running, run this producer from another terminal with the same Redis settings:
 
-**Next:** [Redis and recovery](redis-and-recovery.md).
+{% code title="src/worker_probe.cr" %}
+<!-- example: pro/worker_probe.cr -->
+```crystal
+require "joobq_pro"
+
+# Run separately, after production_worker.cr is ready, against the same Redis.
+client = JoobQPro::Workflows::Client.new
+# A fresh canary each invocation; retries within this invocation reuse its ID.
+request_id = UUID.random.to_s
+id, created = client.try_start("orders", 42_i64, id: request_id)
+raise "Expected a new run" unless created
+repeated_id, repeated = client.try_start("orders", 42_i64, id: id)
+raise "Repeated start created another run" if repeated || repeated_id != id
+result = client.result(id, timeout: 10.seconds)
+raise "Unexpected worker result" unless result["process"].as_s == "Processed order 42"
+puts result["process"].as_s
+```
+{% endcode %}
+`crystal run src/worker_probe.cr` prints `Processed order 42`. On SIGTERM the worker exits `0` after a clean stop and non-zero when Pro reported an incomplete stop or Core abandoned jobs.
+
+## See also
+
+- [Workers and concurrency](../explanation/workers-and-concurrency.md)
+- [Deploy on Kubernetes](deploy-on-kubernetes.md)

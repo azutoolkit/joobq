@@ -67,6 +67,7 @@
   * [Retries, backoff and the DLQ](explanation/retries-and-dead-letters.md)
   * [Cron and recurring jobs](explanation/delayed-and-recurring-jobs.md)
   * [Rate limiting and throttling](explanation/rate-limiting-and-throttling.md)
+  * [Reliability and recovery](explanation/reliability-and-recovery.md)
   * [Workflows and sagas](explanation/durable-workflows.md)
   * [Batches and unique jobs](explanation/distributed-coordination.md)
   * [Delivery](explanation/delivery.md)

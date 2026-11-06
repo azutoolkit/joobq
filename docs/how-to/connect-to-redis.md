@@ -6,7 +6,13 @@ description: Connect every producer and worker to the same verified Redis servic
 
 *How-to · Core*
 
-`JoobQ::RedisStore.from_env` accepts `REDIS_URL` or the legacy host/port/password variables. A supplied URL takes precedence in that loader. Prefer one configuration style per deployment.
+## Prerequisites
+
+- The Redis endpoint, and for TLS its CA certificate if it is not publicly trusted.
+
+## Steps
+
+1. Set the connection before the process configures JoobQ, either with host and port or with a URL. A non-empty `REDIS_URL` takes precedence over `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASS`.
 
 {% tabs %}
 {% tab title="Local development" %}
@@ -23,9 +29,11 @@ export REDIS_TLS_VERIFY=true
 export REDIS_CA_FILE=/run/secrets/redis-ca.pem
 crystal run src/worker.cr
 ```
-Keep the hostname consistent with the server certificate. Do not disable certificate verification to work around a trust-store problem.
+Keep the hostname the same as the one on the server certificate; do not turn verification off.
 {% endtab %}
 {% endtabs %}
+
+2. Adjust the pool and timeouts if you need to:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -40,22 +48,14 @@ Keep the hostname consistent with the server certificate. Do not disable certifi
 | `REDIS_TLS_VERIFY` | `true` | Verify TLS certificates |
 | `REDIS_CA_FILE` | Unset | Optional CA certificate file |
 
-An operation can fail after Redis accepted it but before its reply arrived. Treat that as an unknown outcome. Reconcile with stable identifiers where supported; retrying an external effect blindly can duplicate it.
+3. Start the worker.
 
-## Persistence is a deployment decision
+## Verify
 
-Redis acknowledgment is not a promise that a write survived every machine, storage, or failover failure. Choose AOF/RDB settings, replication, backups, retention, and recovery procedures for your recovery-point and recovery-time objectives. Avoid eviction policies that silently remove queue or receipt keys.
+- The worker's log shows `Redis store initialized` with the host and port you set, and no connection errors.
+- A job you enqueue from a producer with the same settings is processed.
 
-```mermaid
-flowchart LR
-  App[Producer] --> Pool[Bounded connection pool]
-  Pool --> Redis[(Redis primary)]
-  Worker[Workers] --> Redis
-  Redis --> Replica[(Replica)]
-  Redis --> Backup[Backups]
-  Backup --> Restore[Isolated restore rehearsal]
-```
+## See also
 
-Cluster key placement, proxy behavior, managed failover, and ACL permissions need validation with the exact Lua scripts and commands your enabled features use. A successful `PING` alone does not validate those paths.
-
-**Next:** [Recovery and migration](recover-and-migrate.md).
+- [Set up Redis and recovery](redis-and-recovery.md): persistence and backups.
+- [Reliability and recovery](../explanation/reliability-and-recovery.md): unknown outcomes and what persistence protects.

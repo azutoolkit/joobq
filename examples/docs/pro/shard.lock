@@ -6,11 +6,11 @@ shards:
 
   joobq:
     git: https://github.com/azutoolkit/joobq.git
-    version: 0.4.2+git.commit.2e5be17d145ead36d2d419c8ba4e4029837dd9c5
+    version: 0.5.6
 
   joobq_pro:
     git: https://github.com/azutoolkit/joobq-pro.git
-    version: 0.2.2
+    version: 0.2.4
 
   pool:
     git: https://github.com/ysbaddaden/pool.git
@@ -19,3 +19,4 @@ shards:
   redis:
     git: https://github.com/stefanwille/crystal-redis.git
     version: 2.9.1
+

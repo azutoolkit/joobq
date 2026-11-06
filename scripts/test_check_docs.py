@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_docs import anchors, check, markup_errors
+from check_docs import anchors, check, landing_errors, markup_errors
 
 
 class DocumentationChecks(unittest.TestCase):
@@ -33,6 +33,23 @@ class DocumentationChecks(unittest.TestCase):
             (docs / 'orphan.md').write_text('# Orphan\n')
             errors = '\n'.join(check(root))
             for expected in ('page missing from SUMMARY', 'missing target', 'link escapes repository', 'missing anchor', 'example differs'):
+                self.assertIn(expected, errors)
+
+    def test_section_landing_lists_each_page_with_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            section = Path(directory) / 'docs' / 'how-to'
+            section.mkdir(parents=True)
+            (section / 'a.md').write_text('# A\n')
+            (section / 'b.md').write_text('# B\n')
+            (section / 'README.md').write_text('# How-to\n## Core\n* [A](a.md) · Core\n* Later · Pro · coming soon\n'
+                                               '* [Console](https://example.com/docs/x) · JoobQUI\n')
+            errors = '\n'.join(landing_errors(section))
+            self.assertIn('must list b.md exactly once', errors)
+            (section / 'README.md').write_text('# How-to\n## Core\n* [A](a.md) · Core\n* [B](b.md) · Core · Preview\n')
+            self.assertEqual([], landing_errors(section))
+            (section / 'README.md').write_text('# How-to\n## Elsewhere\n* [A](a.md)\n* Later · Pro\n* [B](b.md) · Core\n')
+            errors = '\n'.join(landing_errors(section))
+            for expected in ('unknown area', 'malformed entry: * [A](a.md)', 'must be marked coming soon'):
                 self.assertIn(expected, errors)
 
 

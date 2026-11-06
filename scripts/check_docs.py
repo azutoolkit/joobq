@@ -12,7 +12,12 @@ FENCE = re.compile(r"^```([^\n]*)\n(.*?)^```[ \t]*$", re.M | re.S)
 LINK = re.compile(r"(?<!!)\[[^\]\n]+\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)|href=\"([^\"]+)\"")
 EXAMPLE = re.compile(r"<!-- example: ([a-z_/]+\.cr) -->\s*```crystal\n(.*?)^```", re.M | re.S)
 ILLUSTRATIVE = re.compile(r"<!-- illustrative: [^\n]+ -->\s*$")
-PAIRS = {"hint": "endhint", "tabs": "endtabs", "tab": "endtab", "code": "endcode"}
+PAIRS = {"hint": "endhint", "tabs": "endtabs", "tab": "endtab", "code": "endcode", "stepper": "endstepper", "step": "endstep"}
+SECTIONS = ("tutorials", "how-to", "reference", "explanation")
+AREAS = ("Getting Started", "Core", "Advanced", "Production Ops")
+# "* [Label](page.md) · Core · Pro" or "* Label · Pro · coming soon"; labels are scopes, then Preview or coming soon.
+ENTRY = re.compile(r"\* (?:\[[^\]]+\]\((?P<target>[^)\s]+)\)|[^\[\]·]+?)"
+                   r"(?P<labels>(?: · (?:Core|Pro|JoobQUI))+(?: · (?:Preview|coming soon))?)")
 
 
 def anchors(text):
@@ -101,10 +106,41 @@ def check(root):
                      "pro/approval_workflow.cr", "pro/compensation_workflow.cr", "pro/production_worker.cr", "pro/worker_probe.cr"):
         if required not in seen_examples:
             errors.append(f"missing executable quick-start example: {required}")
-    for section in ("introduction", "quick-start", "core", "pro", "configuration", "best-practices",
-                    "guides", "design-patterns", "production-deployment", "joobq-cloud"):
-        if not (docs / section).is_dir():
+    for section in SECTIONS:
+        if not (docs / section / "README.md").is_file():
             errors.append(f"missing required section: {section}")
+            continue
+        errors += landing_errors(docs / section)
+    return errors
+
+
+def landing_errors(section):
+    """A section README lists each of its pages once, grouped by area, with scope labels (the website reads it)."""
+    errors = []
+    relative = section.relative_to(section.parents[1])
+    listed = []
+    area = None
+    for line in (section / "README.md").read_text().splitlines():
+        if line.startswith("## "):
+            area = line[3:]
+            if area not in AREAS:
+                errors.append(f"{relative}/README.md: unknown area: {area}")
+        elif line.startswith("* "):
+            match = ENTRY.fullmatch(line)
+            if area is None or not match:
+                errors.append(f"{relative}/README.md: malformed entry: {line}")
+                continue
+            target = match["target"]
+            if target and not urlsplit(target).scheme:
+                listed.append(target)
+            elif not target and "coming soon" not in match["labels"]:
+                errors.append(f"{relative}/README.md: an entry without a link must be marked coming soon: {line}")
+    pages = sorted(path.name for path in section.glob("*.md") if path.name != "README.md")
+    for page in pages:
+        if listed.count(page) != 1:
+            errors.append(f"{relative}/README.md: must list {page} exactly once")
+    for target in sorted(set(listed) - set(pages)):
+        errors.append(f"{relative}/README.md: lists a page outside the section: {target}")
     return errors
 
 

@@ -4,6 +4,8 @@ description: Test business behavior, graph structure, and real worker execution 
 
 # Test workflows
 
+*How-to · Pro*
+
 A useful test tells you which boundary broke. Keep three layers: business logic without Redis, the workflow graph without workers, and execution against an isolated Redis instance.
 
 ## Check the graph

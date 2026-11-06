@@ -1,58 +1,43 @@
 ---
-description: Connect a concrete job type to the right queue and execution capacity.
+description: Give each job type its queue and worker count, and keep urgent work on a queue of its own.
 ---
 
-# Configure queues
+# Configure queues and worker counts
 
-A legacy queue consumes one concrete job type. Producers choose a queue through the job's `@queue`; the worker must register that same queue name and type. Sharing Redis alone does not establish this mapping.
+*How-to · Core*
 
-## Register before starting workers
+## Prerequisites
 
-For standalone **Core v0.5.1**, load `ProcessOrderJob` from the [quick start](../tutorials/first-background-job.md), then configure it:
+- The job classes, loaded before `JoobQ.configure` runs (in a file the web process and the worker both require).
 
-<!-- illustrative: shared initializer after requiring ProcessOrderJob -->
-```crystal
-JoobQ.configure do |config|
-  config.rest_api_enabled = false
-  config.worker_batch_size = 1
-  queue "orders", 2, ProcessOrderJob
-end
-```
+## Steps
 
-With a batch size of one, the two worker loops can hold two jobs in flight. With the default batch size of ten, the same two workers can hold twenty. A handler can create additional fibers of its own, so this is not an application-wide concurrency limit.
+1. Declare one queue per job type with its worker count (1 to 1000), and set `@queue` in the job to the same name:
 
-For **Pro v0.2.2's pinned Core**, use its compatible factory registration for legacy jobs:
+   <!-- illustrative: shared initializer after requiring the job classes -->
+   ```crystal
+   JoobQ.configure do |config|
+     config.rest_api_enabled = false
+     config.worker_batch_size = 2 # jobs each worker holds at once (default 10)
+     queue "emails-urgent", 4, SendPasswordResetJob
+     queue "emails-bulk", 1, SendNewsletterJob
+   end
+   ```
 
-<!-- illustrative: shared initializer after requiring ProcessOrderJob, on Pro's pinned Core -->
-```crystal
-JoobQ::QueueFactory.register_job_type(ProcessOrderJob)
-JoobQ.configure do |config|
-  config.rest_api_enabled = false
-  config.worker_batch_size = 1
-  config.queue_configs["orders"] = {
-    job_class_name: "ProcessOrderJob", workers: 2, throttle: nil,
-  }
-end
-```
+2. Give urgent work its own queue and more workers: Core has no priority field, and a queue serves its newest waiting job first.
+3. Add a fourth argument to space out starts in this process, for example `{limit: 10, period: 1.second}`.
+4. Size `REDIS_POOL_SIZE` (default 500) for the total of all workers in the process.
 
-Do not apply both alternatives. Pro workflow activities are registered through `Workflows::Worker#register`, which creates their transport queues; they are not `ProcessOrderJob` registrations.
+## Verify
 
-## Separate workload classes
+- Start the worker. Its log has one `JoobQ starting <name> queue...` line per queue.
+- In an Azu application: `azu jobs:status --queue emails-urgent --json`.
+- In JoobQUI: **Queues** shows each queue with its worker count (`joobqui_queue_concurrency` in `/metrics`).
 
-Use different queue names for different concrete job types and for workloads needing separate operational control. For example, report generation should not occupy every worker needed by order notifications. Give each producer and consumer the same Redis database, job definitions, and queue mapping.
+The most jobs one process runs at once on a queue is workers times `worker_batch_size`: here 8 for `emails-urgent` and 2 for `emails-bulk`.
 
-## Inspect and pause
+## See also
 
-In an Azu app configured with the [documented CLI](../reference/azu-cli-and-terminal.md):
-
-```sh
-azu jobs:status --queue orders --json
-azu jobs:pause --queue orders
-azu jobs:resume --queue orders
-```
-
-Pause/resume require confirmation. Pausing stops further claims; jobs already claimed can still execute, and producers can continue enqueueing. This is a shared pause state, not a kill switch for external effects.
-
-Before adding replicas or overlapping deployments, read the [legacy startup recovery limit](recover-and-migrate.md#know-the-legacy-startup-recovery-limit). An empty ready queue is not proof that every claimed job completed.
-
-**Next:** [Run workers](run-workers.md) and [tune concurrency](tune-concurrency-and-shutdown.md).
+- [Queues and priorities](../explanation/queues-and-workers.md)
+- [Tune concurrency and shutdown](tune-concurrency-and-shutdown.md)
+- [Pause queues during an outage](pause-queues-during-an-outage.md)

@@ -4,6 +4,8 @@ description: Admit jobs and interact with workflow runs without starting another
 
 # Use clients and producers
 
+*How-to · Core · Pro*
+
 Choose the API for the processing path you use. Core jobs, Pro workflows, and Delivery have different identities and completion models.
 
 | Path | Producer interface | Completion |
@@ -46,6 +48,6 @@ A stable run ID makes another start a no-op while that ID exists; `created` tell
 
 `describe(id)` returns current state. `history(id, after_seq: ..., limit: ...)` reads a bounded history page; the default limit is 200, so page when you need the full history. `query` evaluates a declared read-only query. `signal` appends a message and does not deduplicate repeated submissions.
 
-`Client#register(blueprint)` publishes a definition but installs no activity handlers. Deploy workers with the matching handlers before admitting that definition. Authorize business operations before accepting a run ID or signal from an end user; Redis credentials are not tenant-level authorization.
+`Client#register(definition)` (for a blueprint, `blueprint.definition`) publishes a definition but installs no activity handlers. Deploy workers with the matching handlers before admitting that definition. Authorize business operations before accepting a run ID or signal from an end user; Redis credentials are not tenant-level authorization.
 
 **Next:** [Wait for approval](wait-for-approval.md), [handle failures](handle-failures.md), and [Delivery boundaries](../explanation/delivery.md).

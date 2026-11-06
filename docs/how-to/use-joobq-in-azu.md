@@ -4,7 +4,9 @@ description: Generate jobs and inspect the same application configuration from t
 
 # Use JoobQ in an Azu application
 
-Use Azu CLI `v0.1.59` in an existing application. Its generator creates environment-specific configuration, a registered example job, and a worker entry point.
+*How-to · Core*
+
+Use Azu CLI 0.1.62 in an existing application. Its generator creates environment-specific configuration, a registered example job, and a worker entry point.
 
 First, install the [Core quick-start dependency](../tutorials/first-background-job.md) or the [compatible Pro pair](add-pro.md), run `shards install`, and require `./initializers/joobq` from your application entry point after generating it. The generator writes files; it does not install dependencies.
 

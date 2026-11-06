@@ -4,6 +4,8 @@ description: Monitor completed work and deploy changes without abandoning old ru
 
 # Operate and upgrade
 
+*How-to · Core · Pro*
+
 Measure the outcome your users need. “The worker is running” is useful, but “orders complete within their latency objective” is the better signal.
 
 ## Watch the right signals

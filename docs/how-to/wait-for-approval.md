@@ -4,9 +4,11 @@ description: Pause a workflow for an external decision without holding an activi
 
 # Wait for approval
 
+*How-to · Pro*
+
 An order needs a decision before it can continue. Use a signal wait rather than leaving an activity polling for approval. The engine records the signal payload in workflow history.
 
-**Requires:** the [Pro v0.2.2 setup](add-pro.md) and development Redis. This complete example sends its own approval so you can run it from one terminal. It does not charge a card or update an order database.
+**Requires:** the [Pro setup](add-pro.md) and development Redis. This complete example sends its own approval so you can run it from one terminal. It does not charge a card or update an order database.
 
 {% code title="src/review_order.cr" %}
 <!-- example: pro/approval_workflow.cr -->

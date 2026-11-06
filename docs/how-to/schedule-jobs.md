@@ -1,25 +1,30 @@
 ---
-description: Choose delayed admission, a local recurring callback, or a durable Pro schedule.
+description: Run one job later, or enqueue a job at a fixed interval, so that it is processed by the queue's workers.
 ---
 
-<!-- diataxis: split in how-to PR -->
+# Delay and schedule jobs
 
-# Schedule jobs
+*How-to · Core*
 
-First choose what needs to survive a process restart. A delayed job is stored in Redis. Core recurring and cron registrations are process-local loops. Pro workflow schedules add persisted scheduling and leader coordination.
+## Prerequisites
 
-| API | Execution behavior |
-| --- | --- |
-| `Job.delay(for: ...)` | Stores one job for later queue admission; workers and delayed-job processing must be running |
-| `Job.schedule(every: ...)` / `scheduler.every` | Immediately starts a local loop calling the same job instance's `perform`; bypasses queue middleware |
-| `scheduler.cron` | Runs your callback on the cron schedule in that process; enqueue explicitly inside the callback for queued processing |
-| Pro workflow schedules | Persisted workflow starts with overlap, catch-up, and backfill policies |
+- A job class registered on a queue, and a worker process running `JoobQ.forge`: the delayed set is moved to the queue by that process once a second.
 
-## Keep recurring callbacks small
+## Delay one job
 
-A Core recurring callback runs directly, may overlap a previous invocation, and logs failures rather than applying queue retries or DLQ handling. It starts on registration, with the first invocation immediately eligible. Use it to enqueue a fresh job if you need normal worker processing.
+Call `delay` (or `enqueue_at`) with a `Time::Span` and the job's arguments; it returns the job's id:
 
-This complete **Core v0.5.1** example owns both the local recurring producer and the queue workers in one process:
+<!-- illustrative: ProcessOrderJob from the first tutorial -->
+```crystal
+jid = ProcessOrderJob.delay(for: 5.minutes, order_id: 42_i64)
+```
+
+The job waits in `joobq:delayed_jobs` and joins its queue at the first check after it is due. Both methods take a span, not a `Time`: for "at 09:00", compute the span yourself.
+
+## Enqueue a job at a fixed interval
+
+1. Write a small job whose `perform` only enqueues the real job.
+2. Call `schedule(every:)` on it in one process. It calls `perform` at once and then every interval, in that process only.
 
 {% code title="src/report_scheduler.cr" %}
 <!-- example: core/scheduled_jobs.cr -->
@@ -64,35 +69,18 @@ JoobQ.forge
 ```
 {% endcode %}
 
-```sh
-crystal run src/report_scheduler.cr
+## Verify
+
+Output of `crystal run src/report_scheduler.cr` (log lines omitted):
+
+```
+Generated report 42
 ```
 
-Expect `Generated report 42` shortly after startup, then about once per minute. Stop with Ctrl-C. The output only demonstrates scheduling and dispatch; replace the formatter with idempotent report generation.
+The report ran on the `reports` queue's worker, so it has the queue's retries and dead letters.
 
-Own this recurring registration in one process. Restarting it resets the local schedule and can run immediately again. Registering it twice creates two loops; there is no distributed leader, persisted catch-up, or deduplication for Core recurring callbacks. Stopping a scheduler prevents future callbacks but does not join every already-spawned callback fiber, so keep admission callbacks short.
+## See also
 
-## Use cron when wall-clock timing matters
-
-Inside the same Core worker's configuration block, after defining `GenerateReportJob`, this alternative admits a report at 09:00 UTC each day:
-
-<!-- illustrative: alternative scheduler registration inside JoobQ.configure -->
-```crystal
-scheduler(Time::Location.load("UTC")) do
-  cron("0 9 * * *") do
-    GenerateReportJob.enqueue(report_id: 42_i64)
-  end
-end
-```
-
-Choose one registration owner and an explicit timezone. Cron registrations also start their local loops when registered, so keep them out of an initializer loaded by status tools.
-
-{% hint style="warning" %}
-The baseline YAML `setup_schedulers_from_config` path logs scheduling intent instead of admitting the configured jobs. Use the executable programmatic APIs above; do not assume a YAML scheduler entry proves work will run.
-{% endhint %}
-
-## Use a durable workflow schedule when needed
-
-For persisted workflow starts and explicit overlap/catch-up policy, use [Pro workflow schedules](../explanation/delayed-and-recurring-jobs.md). At least one Pro worker must have its workflow scheduler enabled (`scheduler: true`, the default). The production worker example deliberately disables it; timers and workflow deadlines still work through the reconciler.
-
-**Next:** [Worker lifecycle](run-workers.md) and [failure recovery](handle-failures.md).
+- [Run cron and recurring jobs](run-cron-and-recurring-jobs.md): wall-clock patterns.
+- [Cron and recurring jobs](../explanation/delayed-and-recurring-jobs.md): which schedules go through a queue.
+- Pro workflow schedules (overlap, catch-up, time zone): [Workflows and sagas](../explanation/durable-workflows.md).

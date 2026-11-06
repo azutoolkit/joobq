@@ -4,6 +4,8 @@ description: Deploy a tested worker image with private Redis access and enough t
 
 # Deploy on Kubernetes
 
+*How-to · Core · Pro*
+
 Use this as a starting manifest for the [Pro worker entry point](deploy-workers.md). It registers the `orders` workflow and owns SIGTERM handling. Build and push its image first; replace the example image with your tested immutable image digest before deployment.
 
 ## Prepare configuration
@@ -90,6 +92,6 @@ A running Pod confirms process scheduling, not successful order completion. Subm
 
 The initial single replica and `Recreate` strategy avoid automatic overlapping worker processes during rollout and cause a processing pause. Before enabling rolling updates or more replicas, test the installed runtime's processing recovery, duplicate-safe effects, connection budget, and Pro build-pinning policy. Legacy queues, opt-in Delivery, and Pro workflows have different recovery paths. In particular, [legacy startup recovery](recover-and-migrate.md#know-the-legacy-startup-recovery-limit) can move another consumer's active job and only reclaims one processing entry per start.
 
-The 45-second grace period leaves margin around the example's 20-second Pro and 10-second Core shutdown budgets. Rehearse termination under load; Kubernetes can force a kill after the grace period.
+The 45-second grace period leaves margin around the 20-second Pro and 10-second Core shutdown timeouts that `production_worker.cr` passes (both library defaults are 15 seconds). Rehearse termination under load; Kubernetes can force a kill after the grace period.
 
 **Next:** [Operate and upgrade](operate-and-upgrade.md).

@@ -2,9 +2,9 @@
 description: Retries should repeat the attempt without repeating the business effect.
 ---
 
-<!-- diataxis: split in explanation PR -->
-
 # Write idempotent jobs
+
+*How-to · Core*
 
 A job can finish its external operation and lose its completion acknowledgment. When it runs again, it must recognize the same business action.
 

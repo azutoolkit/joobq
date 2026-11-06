@@ -4,6 +4,8 @@ description: Give producers, workers, and inspection tools one predictable boot 
 
 # Configure an application
 
+*How-to · Core*
+
 Start with the [supported dependency graph](../reference/compatibility.md). Then give every process the same job definitions, Redis endpoint, and queue registrations. Keep process startup separate from configuration.
 
 ## Use a shared initializer
@@ -18,7 +20,7 @@ src/
   worker.cr                  # Requires initializer; starts workers
 ```
 
-The [queue guide](configure-queues.md) contains both registration variants. On Azu CLI v0.1.59, `azu generate joobq` creates this setup; follow the [Azu walkthrough](use-joobq-in-azu.md) before modifying its generated YAML.
+The [queue guide](configure-queues.md) contains both registration variants. In an Azu application, `azu generate joobq` (Azu CLI 0.1.62) creates this setup; follow the [Azu walkthrough](use-joobq-in-azu.md) before modifying its generated YAML.
 
 Do not call `forge`, register recurring callbacks, or start a Pro worker in a shared inspection initializer. Those actions start work. CLI status and dashboard adapters load the initializer too.
 

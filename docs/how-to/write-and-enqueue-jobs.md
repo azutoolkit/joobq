@@ -4,6 +4,8 @@ description: Write a typed job, admit work, and keep retries safe.
 
 # Write and enqueue jobs
 
+*How-to · Core*
+
 A Core job is a Crystal type that includes `JoobQ::Job` and implements `perform`. Its serializable properties carry the input; the worker reconstructs that type before running it. Start with the complete [first job](../tutorials/first-background-job.md), or the [thin-job example](thin-jobs.md) when you want a separately testable business service.
 
 ## Choose how to run it

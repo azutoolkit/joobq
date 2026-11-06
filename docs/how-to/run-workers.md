@@ -4,6 +4,8 @@ description: Start the correct runtime, check progress, and stop it deliberately
 
 # Run workers
 
+*How-to · Core · Pro*
+
 A producer stores work. A worker executes it. Run them as separate processes so an HTTP restart, a CLI inspection, or a new order does not accidentally start another consumer.
 
 ## Start Core workers
@@ -24,7 +26,7 @@ crystal run src/worker.cr
 
 `forge` starts configured queue workers, delayed-job processing, the expired-job reaper, and configured schedulers. It also starts the management API if enabled, installs termination handlers by default, and blocks until shutdown.
 
-If it reports zero queues, check job loading and registration before tuning Redis. A producer can enqueue successfully while no compatible consumer is running.
+If its log has no `JoobQ starting <queue> queue...` line for your queue, check job loading and registration before tuning Redis. A producer can enqueue successfully while no compatible consumer is running.
 
 In an Azu application, `azu jobs:worker` provides the CLI's worker entry point. It does not execute a customized `src/worker.cr` verbatim. Run your file directly if it owns additional services.
 

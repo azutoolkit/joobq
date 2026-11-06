@@ -1,47 +1,53 @@
 ---
-description: Separate operational authorization from dependency access and licensing.
+description: Turn on Core's HTTP management API with bearer tokens for the roles you need, and check that each role gets what it should.
 ---
 
-<!-- diataxis: split in reference PR -->
+# Secure management access
 
-# Management access and Pro credentials
+*How-to · Core · Pro*
 
-Three credentials serve different purposes:
+## Prerequisites
 
-| Credential | Used for |
-| --- | --- |
-| Authorized Git access | Downloading the private `joobq-pro` shard during dependency installation |
-| `JOOBQ_PRO_LICENSE` | Pro license configuration |
-| JoobQ management tokens | Authorizing HTTP management requests |
+- A worker process you start with `JoobQ.forge`.
+- A secret manager for the tokens. Pro repository access and `JOOBQ_PRO_LICENSE` are separate credentials; neither grants management access.
 
-Installing Pro does not grant an HTTP client administrator access. Setting a license does not download code into a running Core binary.
+## Steps
 
-## Enable the management API deliberately
+1. Create one token per role you need, each at least 32 bytes, and give them to the worker process:
 
-The API is disabled by default. When enabled, the baseline policy requires **at least one** configured token, and every configured token must be at least 32 bytes. Configure only the roles you need. The following example enables all three roles with independent values:
+   ```sh
+   export JOOBQ_API_READER_TOKEN="$(openssl rand -hex 32)"
+   export JOOBQ_API_OPERATOR_TOKEN="$(openssl rand -hex 32)"
+   # export JOOBQ_API_ADMIN_TOKEN="$(openssl rand -hex 32)"   only if someone must reset or delete
+   ```
 
-```sh
-export JOOBQ_API_READER_TOKEN="$(openssl rand -hex 32)"
-export JOOBQ_API_OPERATOR_TOKEN="$(openssl rand -hex 32)"
-export JOOBQ_API_ADMIN_TOKEN="$(openssl rand -hex 32)"
+2. Turn the API on in the worker's configuration (it is off by default):
+
+   <!-- illustrative: inside the worker's JoobQ.configure block -->
+   ```crystal
+   config.rest_api_enabled = true
+   ```
+
+3. Start the worker. `forge` serves the API on `127.0.0.1:8080`; keep it on loopback, or put it behind a TLS proxy that passes the `Authorization` header through.
+4. Give clients only the token for their role. A reader may `GET`; an operator may also make other changes; only an admin may `DELETE` or call paths containing `/reset` or `/config`.
+
+## Verify
+
+Against a worker started with a reader and an operator token:
+
+```
+curl -s -o /dev/null -w '%{http_code}' -X GET http://127.0.0.1:8080/joobq/health/check  -> 401
+curl -s -o /dev/null -w '%{http_code}' -X GET -H "Authorization: Bearer $JOOBQ_API_READER_TOKEN" http://127.0.0.1:8080/joobq/health/check  -> 200
+curl -s -o /dev/null -w '%{http_code}' -X GET -H "Authorization: Bearer $JOOBQ_API_READER_TOKEN" http://127.0.0.1:8080/joobq/jobs/registry  -> 200
+curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $JOOBQ_API_READER_TOKEN" http://127.0.0.1:8080/joobq/queues/orders/reprocess  -> 403
+curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $JOOBQ_API_OPERATOR_TOKEN" http://127.0.0.1:8080/joobq/queues/orders/reprocess  -> 200
+curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $JOOBQ_API_OPERATOR_TOKEN" http://127.0.0.1:8080/joobq/pipeline/stats/reset  -> 403
+curl -s -o /dev/null -w '%{http_code}' -X GET -H "Authorization: Bearer $JOOBQ_API_READER_TOKEN" http://127.0.0.1:8080/joobq/nope  -> 404
 ```
 
-These commands create temporary development credentials in your shell. Persist production credentials in your secret manager. Do not print them in support requests or commit them in `.env` files.
+Every route, the health check included, needs a token. A worker with the API on and no token, or a token shorter than 32 bytes, stops at boot with `management tokens are required` or `management tokens must be at least 32 bytes`.
 
-| Role | Intended operations |
-| --- | --- |
-| Reader | GET/HEAD inspection |
-| Operator | Operational mutations such as supported replay actions |
-| Administrator | Destructive/reset/configuration actions |
+## See also
 
-Roles are hierarchical: an operator can also read, and an administrator can perform all three roles. Use distinct token values; reusing a value for several roles makes it resolve to the highest role loaded from the environment. A reader-only configuration is valid.
-
-Clients authenticate with an `Authorization: Bearer …` header. Keep the listener on loopback, its default, unless your deployment supplies a protected transport and network boundary. An unencrypted remote connection can expose the token. A reverse proxy must preserve authentication and restrict access.
-
-{% hint style="info" %}
-The Azu CLI's project-local adapters and the HTTP management API are different access paths. Do not assume setting an HTTP reader token makes a CLI process with application credentials read-only.
-{% endhint %}
-
-Rotate credentials with a planned client/server rollout, verify old credentials stop working, and audit which credentials each operator receives. Remote read-only monitoring should remain separate from mutation tooling.
-
-For Pro installation and customer feature configuration, follow [Adding Pro](add-pro.md).
+- [Security model](https://joobq-website.onrender.com/docs/explanation/security-audit-and-redaction)
+- [Configuration](../reference/configuration.md): every `JOOBQ_*` variable.

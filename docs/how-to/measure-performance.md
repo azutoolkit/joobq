@@ -2,7 +2,9 @@
 description: Measure completed work, tail latency, and recovery on your own workload.
 ---
 
-# Performance testing
+# Measure performance
+
+*How-to · Core*
 
 Crystal and Redis can sustain high throughput, but a no-op benchmark does not predict mail delivery, payment calls, or SQL-heavy jobs. This documentation does not promise a universal jobs-per-second number.
 

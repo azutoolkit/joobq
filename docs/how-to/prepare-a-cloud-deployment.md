@@ -2,7 +2,9 @@
 description: Prepare a versioned worker artifact, runtime configuration, and cloud connection budget.
 ---
 
-# Prepare your application
+# Prepare a cloud deployment
+
+*How-to · Core · Pro*
 
 Keep worker code portable by separating the artifact from its runtime configuration. The same tested binary can run on a VM or in a compatible container environment.
 

@@ -4,9 +4,11 @@ description: Build a typed workflow, start a run, and follow its result through 
 
 # Build and run workflows
 
+*How-to · Pro*
+
 Use a workflow when several operations need explicit ordering, waits, and recovery. A **definition** describes the graph; a **run** is one execution with its own ID and history; an **activity** is the Crystal code that performs an effect.
 
-This guide targets **Pro v0.2.2**, which includes the preview DSL. Install the [compatible Pro dependency graph](add-pro.md) and start development Redis first. Existing constructors remain supported.
+This guide uses Pro 0.2.4 and its preview DSL. Install the [compatible Pro dependency graph](add-pro.md) and start development Redis first. Existing constructors remain supported.
 
 ## Run a complete example
 

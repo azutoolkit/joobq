@@ -2,7 +2,9 @@
 description: Start with the installed version, then follow the job through its actual processing path.
 ---
 
-# Troubleshooting
+# Troubleshoot
+
+*How-to · Core · Pro*
 
 ## The worker starts but processes nothing
 
@@ -14,13 +16,13 @@ Next compare producer and worker Redis host, port, database, and TLS configurati
 
 Use `azu jobs:status --json` from the application directory. Confirm the initializer is loadable and workers are registered/alive. Very short jobs may finish between polls; inspect completion history or logs rather than expecting a permanent processing count.
 
-The released `forge` does not automatically start `WorkerRegistry`. An empty worker list is therefore possible even while jobs complete; see [release-specific notes](../reference/compatibility.md#release-specific-integration-notes).
+The released `forge` does not automatically start `WorkerRegistry`. An empty worker list is therefore possible even while jobs complete; see [release-specific notes](../reference/compatibility.md).
 
 The legacy queue view does not automatically include Delivery receipts or Pro workflow history. Use the matching integration and [management guide](../reference/azu-cli-and-terminal.md). An unavailable provider is different from zero work.
 
-## “Management tokens are required”
+## “management tokens are required”
 
-The management API was enabled without any nonempty role token. Either disable the API when it is not needed, or configure [management credentials](secure-management-access.md). Setting `rest_api_enabled = true` while logging “API disabled” does not disable it.
+The management API was enabled without any nonempty role token. Either disable the API when it is not needed, or configure [management credentials](secure-management-access.md). `forge` logs `Rest API Enabled: true` or `false` at start.
 
 ## Pro cannot be installed or activated
 

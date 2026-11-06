@@ -2,7 +2,9 @@
 description: Bridge a database transaction and Redis admission without hiding the crash window.
 ---
 
-# Transactional outbox
+# Enqueue from a transactional outbox
+
+*How-to · Core*
 
 An order commit and a Redis enqueue are two separate commits. If the process stops between them, the order can exist without its background work. An outbox keeps the intent to enqueue in the same database transaction as the order change.
 

@@ -2,7 +2,9 @@
 description: Choose retries, compensation, and replay based on what actually happened.
 ---
 
-# Handle failures
+# Set retries and handle failures
+
+*How-to · Core · Pro*
 
 Start with the failed operation, not the retry button. Did it fail before doing any work, or could the external effect already have happened?
 

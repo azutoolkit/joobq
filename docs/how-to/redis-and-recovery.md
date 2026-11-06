@@ -2,7 +2,9 @@
 description: Protect queue history and prove that a backup can restore useful work.
 ---
 
-# Redis and recovery
+# Set up Redis and recovery
+
+*How-to · Core · Pro*
 
 Treat Redis as application state. Queue entries, delayed work, leases, receipts, and workflow histories can all matter during recovery. A cache-style eviction policy is a poor fit for this data.
 

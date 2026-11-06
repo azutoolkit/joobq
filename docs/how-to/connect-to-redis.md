@@ -2,9 +2,9 @@
 description: Connect every producer and worker to the same verified Redis service.
 ---
 
-<!-- diataxis: split in how-to PR -->
+# Connect to Redis
 
-# Redis connections and resilience
+*How-to · Core*
 
 `JoobQ::RedisStore.from_env` accepts `REDIS_URL` or the legacy host/port/password variables. A supplied URL takes precedence in that loader. Prefer one configuration style per deployment.
 

@@ -2,7 +2,9 @@
 description: Recover deliberately when processes, networks, or storage fail.
 ---
 
-# Recovery and migration
+# Recover and migrate
+
+*How-to · Core · Pro*
 
 Define two goals before choosing Redis persistence: how much acknowledged work may be lost (RPO), and how long recovery may take (RTO). A “zero data loss” requirement needs a tested storage and failover design, not just successful enqueue responses.
 

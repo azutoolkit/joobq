@@ -2,7 +2,9 @@
 description: Keep a job small so its business operation is easy to test and reuse.
 ---
 
-# Thin jobs
+# Keep jobs thin
+
+*How-to · Core*
 
 Let the job carry a small input and call a business operation. The operation should be useful without a queue, which makes it easier to test and reuse from an HTTP endpoint or command.
 

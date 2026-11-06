@@ -54,6 +54,7 @@ This creates a temporary project, generates the JoobQ setup and a typed job, run
 | `core/throttle.cr` | A queue throttle spaces starts `period / limit` apart |
 | `core/management_api.cr` | Management API: 401 without a token, reader may read, reader and operator refused where a higher role is needed |
 | `core/delivery.cr` | Delivery: the same request admitted twice runs once; clean drain |
+| `core/cron_job.cr` | A six-field cron pattern in the scheduler DSL enqueues a job twice |
 | `core/welcome_worker.cr` | The JoobQUI recovery tutorial's worker starts and stops on SIGTERM |
 | `pro/first_workflow.cr` | Typed DSL input, blueprint registration, checked workflow result, Pro then Core shutdown |
 | `pro/workflow_dsl.cr` | Explicit result chaining, parallel receipt/timer branches, retry policy, checked result |

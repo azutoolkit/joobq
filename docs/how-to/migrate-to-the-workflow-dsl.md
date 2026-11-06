@@ -2,9 +2,11 @@
 description: Adopt the DSL without silently changing persisted identities or dependency graphs.
 ---
 
-# Migrate a constructor-based definition
+# Migrate to the workflow DSL
 
-Upgrade to **JoobQ Pro v0.2.2** before adopting the DSL. Keep existing `Definition.new`, `Step.*`, and `register_activity` code working while you migrate; none of those constructor APIs is deprecated. The DSL authoring API remains a preview.
+*How-to · Pro · Preview*
+
+The DSL is in JoobQ Pro since v0.2.2; these steps use Pro 0.2.4. Keep existing `Definition.new`, `Step.*`, and `register_activity` code working while you migrate; none of those constructor APIs is deprecated. The DSL authoring API remains a preview.
 
 ## Preserve identity first
 

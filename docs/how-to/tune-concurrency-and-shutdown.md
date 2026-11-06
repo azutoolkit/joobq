@@ -2,7 +2,9 @@
 description: Tune work in flight without confusing fibers, threads, and connection counts.
 ---
 
-# Concurrency and shutdown
+# Tune concurrency and shutdown
+
+*How-to · Core*
 
 Start with a small worker count and measure completion latency, queue age, retries, and downstream saturation. A larger pool or more fibers can make an overloaded dependency slower.
 

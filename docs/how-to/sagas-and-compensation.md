@@ -2,11 +2,13 @@
 description: Recover from a later failure with explicit compensating operations.
 ---
 
-# Sagas
+# Compensate with a saga
+
+*How-to · Pro*
 
 A reservation succeeds, then payment fails. You cannot roll both systems back with one database transaction. A saga records an explicit compensation—such as releasing the reservation—and runs it when the workflow unwinds.
 
-This **Pro v0.2.2** demo deliberately declines payment. Its in-memory flag only makes compensation visible in the example; it is not a durable inventory implementation.
+This demo deliberately declines payment. Its in-memory flag only makes compensation visible in the example; it is not a durable inventory implementation.
 
 {% code title="src/compensated_checkout.cr" %}
 <!-- example: pro/compensation_workflow.cr -->

@@ -2,13 +2,15 @@
 description: Run a separate worker service with explicit startup and shutdown ownership.
 ---
 
-# Deploy workers
+# Deploy and scale workers
+
+*How-to · Core · Pro*
 
 Build once from `shard.lock`, then run that binary with environment-specific configuration. Keep producers separate: a worker starting or restarting should not create a new order by itself.
 
 ## Own the lifecycle
 
-This complete **Pro v0.2.2** entry point registers a small workflow and waits for SIGTERM or SIGINT. Replace its sample activity with your application code. It does not enqueue work during boot and leaves the management API disabled.
+This complete Pro entry point registers a small workflow and waits for SIGTERM or SIGINT. Replace its sample activity with your application code. It does not enqueue work during boot and leaves the management API disabled.
 
 {% code title="src/worker.cr" %}
 <!-- example: pro/production_worker.cr -->

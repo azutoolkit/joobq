@@ -11,11 +11,16 @@ RedisStore.new(
 )
 ```
 
-## Reliable Queue Pattern (BRPOPLPUSH)
+## Reliable Queue Pattern (FIFO, BLMOVE)
+
+Producers RPUSH to the tail; workers claim from the head into the processing list (Redis 6.2+; the shard has no
+`blmove`, so the raw command is sent):
 
 ```crystal
-job_json = redis.brpoplpush(queue_name, processing_key, timeout)
+job_json = redis.command(["BLMOVE", queue_name, processing_key, "LEFT", "LEFT", timeout.to_s])
 ```
+
+Crash recovery (`move_job_back_to_queue`) and shutdown requeue put jobs back at the head, in claim order.
 
 ## Key Structure
 

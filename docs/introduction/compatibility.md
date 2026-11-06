@@ -15,7 +15,7 @@ The two quick starts use different dependency graphs. Keep their lockfiles; do n
 | JoobQ Pro | Tag `v0.2.2`, commit `92879b94a3be2580e749f3a0acc829b9276040dc` | Requires authorized access to the private repository |
 | Core used by Pro | `2e5be17d145ead36d2d419c8ba4e4029837dd9c5` | Pro's release pins this revision; do not override it with Core `v0.5.1` |
 | Azu CLI | `v0.1.59` command interfaces | Optional; its operator adapters compile against the application's installed shards |
-| Redis | 7.4.12 and 8.0.6 in the existing integration matrix | TLS, persistence and authentication are deployment settings, not consequences of installing a shard |
+| Redis | 7.4.12 and 8.0.6 in the existing integration matrix | TLS, persistence and authentication are deployment settings, not consequences of installing a shard. Core 0.6.0 and later need Redis 6.2 or newer (`BLMOVE`/`LMOVE`) |
 
 ## Release-specific integration notes
 

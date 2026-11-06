@@ -31,6 +31,8 @@ Define two goals before choosing Redis persistence: how much acknowledged work m
 
 In both documented Core revisions, `Queue#start` calls `move_job_back_to_queue` once. That operation moves **at most one** member from the queue's shared processing list back to ready; it is not a full crash-recovery scan and has no per-process ownership check. Starting another consumer can therefore reclaim a job still running elsewhere. A restart alone does not prove all work left by SIGKILL was recovered.
 
+From Core 0.6.0 the same call moves **every** member of the processing list back to the head of the queue in one atomic step, in claim order, so the recovered jobs run first. It still has no per-process ownership check: starting a consumer while another one is working on the queue moves that consumer's running jobs back too.
+
 Quiesce consumers before planned replacement, inspect retained processing entries after a crash, and reconcile them through a tested recovery procedure. Do not enable overlapping rollouts on the assumption that legacy processing has leases. Pro's default activity transport uses these queues, though its workflow history and reconciler add their own attempt checks and redispatch. Delivery is the separate leased path; adopting it requires an explicit migration.
 
 ## Migrate a processing API separately from an upgrade

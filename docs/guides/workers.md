@@ -52,6 +52,6 @@ Choose threads from allocated CPUs. Set queue workers and `worker_batch_size` se
 
 Core's default signal handlers initiate a bounded shutdown. Work still running at the deadline may be requeued while its original fiber finishes an external effect. The exit status is `3` when Core reports abandoned jobs; inspect shutdown logs too.
 
-A SIGKILL cannot run that drain. Legacy startup reclaims only one processing member per queue start and can reclaim another process's work. Follow the [recovery limits and procedure](../best-practices/recovery.md), and use duplicate-safe handlers.
+A SIGKILL cannot run that drain. Legacy startup reclaims only one processing member per queue start (every member, to the head of the queue, from Core 0.6.0) and can reclaim another process's work. Follow the [recovery limits and procedure](../best-practices/recovery.md), and use duplicate-safe handlers.
 
 **Next:** [Deploy workers](../production-deployment/deploy-workers.md) and [operate upgrades](../production-deployment/operate-and-upgrade.md).

@@ -4,10 +4,11 @@
 
 JoobQ is an enterprise-grade, high-performance asynchronous job queue system for the Crystal programming language. It processes up to 35,000 jobs/second using Redis-backed persistence and Crystal's fiber-based concurrency.
 
-- **Version:** 0.4.2
+- **Version:** 0.6.0
 - **License:** MIT
 - **Crystal:** 1.22.0+
 - **Dependencies:** redis, cron_parser
+- **Redis:** 6.2+ (FIFO claims use `BLMOVE`/`LMOVE`); CI tests 7.4 and 8.0
 
 ## Architecture Summary
 
@@ -18,7 +19,7 @@ JoobQ is an enterprise-grade, high-performance asynchronous job queue system for
 | Job | `src/joobq/job.cr` | Job module with status tracking, serialization, scheduling |
 | Queue | `src/joobq/queue.cr` | Generic Queue(T) managing job lifecycle and workers |
 | Worker | `src/joobq/worker.cr` | Fiber-based job processors with batch processing |
-| RedisStore | `src/joobq/redis_store.cr` | Redis persistence with BRPOPLPUSH reliability |
+| RedisStore | `src/joobq/redis_store.cr` | Redis persistence, FIFO reliable queue (RPUSH + BLMOVE LEFT LEFT) |
 | Scheduler | `src/joobq/scheduler.cr` | Cron and recurring job scheduling |
 | Configure | `src/joobq/configure.cr` | Central configuration with DSL macros |
 
@@ -95,7 +96,7 @@ JOOBQ_ENV=development crystal run src/joobq.cr
 - `src/joobq/job.cr` (233 lines) - Job module with status enum, enqueue methods
 - `src/joobq/queue.cr` (198 lines) - Queue class, BaseQueue interface
 - `src/joobq/worker.cr` (232 lines) - Worker with batch processing, error handling
-- `src/joobq/redis_store.cr` (708 lines) - Redis operations, BRPOPLPUSH pattern
+- `src/joobq/redis_store.cr` - Redis operations, FIFO claim (BLMOVE/LMOVE, Redis 6.2+) and recovery to the head
 
 ### Configuration
 

@@ -31,7 +31,7 @@ Deliver coordinated core and Pro 1.0.0 releases with:
 6. A reproducible >=35,000 successfully settled jobs/sec benchmark on a declared reference workload/topology with durability and normal telemetry enabled, plus realistic workload and chaos/soak evidence.
 7. No unresolved release-blocking findings, no skipped mandatory integration tests, hosted CI on the release tree, tested schema migration/rollback boundaries and verified release artifacts.
 
-**Scope defaults:** Crystal 1.22.x; Redis 7.4 and 8.0 as the initial test matrix; core and Pro tested as one pinned dependency graph. One primary per namespace is the first supported storage topology. Redis Cluster is explicitly unsupported for v1 unless a separate hash-slot-safe architecture is implemented and tested. Existing LIFO behavior stays in compatibility mode; an explicit FIFO option and fairness policy belong in the v1 API. Pro's advertised features are to be completed, not quietly removed from the acceptance criteria.
+**Scope defaults:** Crystal 1.22.x; Redis 7.4 and 8.0 as the initial test matrix; core and Pro tested as one pinned dependency graph. One primary per namespace is the first supported storage topology. Redis Cluster is explicitly unsupported for v1 unless a separate hash-slot-safe architecture is implemented and tested. Queue order was LIFO; Core 0.6.0 makes it FIFO (the only mode, chosen over a LIFO/FIFO option), and a fairness policy still belongs in the v1 API. Pro's advertised features are to be completed, not quietly removed from the acceptance criteria.
 
 Owner names below are accountable roles, not assignments to specific people. Dates follow design/prototype evidence; the plan uses exit criteria rather than speculative release dates.
 
@@ -149,7 +149,7 @@ Write reviewed ADRs for:
 - Mark a local claim finished only after a confirmed settlement, or an explicitly retained Unknown handed to recovery. Distinguish abandonment requested from requeue confirmed.
 - Preserve PR #19's strict `add_delayed(job, at:)` producer API. Replace public destructive due fetch with a safe claim/promote API; provide deprecation and migration guidance. Preserve full payloads and Int64 values.
 - Use per-queue due indexes or fair paginated scanning. Quarantine malformed entries with bounded reason/payload retention; missing/unserved queues must not starve healthy ones. Define scheduler ownership for recurring/cron jobs so multiple processes follow the documented duplication policy.
-- Apply the same identity/receipt rules to operator retry/redrive/purge. Enforce explicit FIFO/LIFO settings and fairness under continuous producers.
+- Apply the same identity/receipt rules to operator retry/redrive/purge. Enforce FIFO order (Core 0.6.0) and fairness under continuous producers.
 
 **Gate:** interruption at every transition boundary produces no unrecoverable accepted job; multiple schedulers/operators do not create duplicate logical transitions. Test >50 due entries, poisoned prefixes, unserved queues, stale retry locks, large values and write failures in auxiliary stats/streams. Crash after settlement must not rerun a confirmed terminal job merely because an index update was missed.
 
@@ -294,7 +294,7 @@ Rows track residual release obligations. PR #19 implements and locally validates
 | F14 | Payload/history/archive/log secret exposure and retention | P12–P14 | Redaction, access, key rotation and backup tests |
 | F15 | Ineffective pipeline APIs; stats races/invalid averages | P03, P12 | Single-connection batching, concurrent stats invariants |
 | F16 | O(N) scans, JSON/log overhead, fixed sleeps | P05–P07, P15 | Profiles and regression budgets on hardened protocol |
-| F17 | LIFO mislabeled as FIFO; undefined fairness | P01, P06 | Explicit mode contracts and starvation tests |
+| F17 | LIFO mislabeled as FIFO (order fixed to FIFO in Core 0.6.0); undefined fairness | P01, P06 | Explicit mode contracts and starvation tests |
 | F18 | Incomplete batch association, global scope, lost counts/callbacks | P09 | Multi-process example + duplicate completion/crash tests |
 | F19 | Unstable uniqueness key, non-atomic admission, stale unlock | P10 | Canonical keys + ownership/unknown-admission tests |
 | F20 | Rate check/increment race and retry policy | P11 | Multi-process window/deferral accounting |

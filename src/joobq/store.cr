@@ -43,7 +43,8 @@ module JoobQ
   # abstract def move_job_back_to_queue(queue_name : String) : Bool
   # ```
   #
-  # Moves a job back to the queue if it was being processed but not completed.
+  # Moves every job that was being processed but not completed (by a worker that crashed or was killed) back to the
+  # head of the queue, in the order it was claimed.
   #
   # #### `mark_as_failed`
   #

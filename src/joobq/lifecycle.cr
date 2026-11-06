@@ -42,8 +42,9 @@ module JoobQ
   # 2. every scheduler of the configuration, the delayed-job scheduler and the expired-job reaper (no new work)
   # 3. the workers of every queue (they claim nothing more)
   # 4. the jobs claimed or running, waited for until `timeout` minus `SHUTDOWN_RESERVE` (at most half of `timeout`)
-  # 5. the jobs still not finished then: each is put back at the end of its queue in one atomic step
-  #    (`RedisStore#requeue_from_processing`), jobs not yet started are never started, and `abandoned_jobs`
+  # 5. the jobs still not finished then: each is put back at the head of its queue in one atomic step, so they run
+  #    next in the order this process took them (`RedisStore#requeue_many_from_processing`; jobs still settling are
+  #    put back a moment later, in front of them), jobs not yet started are never started, and `abandoned_jobs`
   #    counts them
   # 6. the latency counters (flushed to Redis)
   #
@@ -54,9 +55,9 @@ module JoobQ
   # shutdown has begun.
   #
   # Step 5 is the shutdown's own recovery: it does not rely on the start-up recovery of the next process
-  # (`Queue#start` moves at most one job per queue back, and moves jobs of any process serving the queue). A job
-  # put back this way runs again from the start, possibly in another process while this one winds down: jobs must
-  # be safe to run twice, as they already must be after a crash. A job that crashes the process before step 5
+  # (`Queue#start` moves every job of the queue's processing list back, the jobs of any process serving the queue).
+  # A job put back this way runs again from the start, possibly in another process while this one winds down: jobs
+  # must be safe to run twice, as they already must be after a crash. A job that crashes the process before step 5
   # (SIGKILL) is still left to the start-up recovery.
   #
   # Safe to call from any fiber, any number of times: the first call does the work and returns true, later calls

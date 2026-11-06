@@ -206,14 +206,16 @@ module JoobQ
       end
     end
 
-    # High-performance reliable queue using BRPOPLPUSH
+    # Claims the oldest job: producers RPUSH to the tail, so taking the head (BLMOVE ... LEFT LEFT, Redis 6.2+) gives
+    # first-in-first-out order. The job moves to the head of the processing list in the same atomic step, so a crash
+    # after the claim leaves it there for `move_job_back_to_queue`. Blocks up to BLOCKING_TIMEOUT when the queue is empty.
     def dequeue(queue_name : String, klass : Class) : String?
       processing_key = processing_queue(queue_name)
 
-      # Use BRPOPLPUSH for reliable queue - blocks until job is available
-      if job_data = redis.brpoplpush(queue_name, processing_key, BLOCKING_TIMEOUT)
-        Log.debug &.emit("Job dequeued", queue: queue_name, job_data_length: job_data.to_s.size)
-        return job_data.to_s
+      # The shard has no `blmove`; the raw command is sent as is.
+      if job_data = redis.command(["BLMOVE", queue_name, processing_key, "LEFT", "LEFT", BLOCKING_TIMEOUT.to_s]).as?(String)
+        Log.debug &.emit("Job dequeued", queue: queue_name, job_data_length: job_data.size)
+        return job_data
       end
 
       nil
@@ -222,15 +224,15 @@ module JoobQ
       nil
     end
 
-    # Batch dequeue for high performance - uses non-blocking operations
+    # Claims up to `batch_size` jobs from the head of the queue without blocking, oldest first (the order the replies
+    # come back in). Each LMOVE is atomic on its own, like the single claim; an empty queue answers nil.
     def dequeue_batch(queue_name : String, klass : Class, batch_size : Int32 = 10) : Array(String)
       processing_key = processing_queue(queue_name)
       jobs = [] of String
 
-      # Use pipelined RPOPLPUSH for batch operations
       redis.pipelined do |pipe|
         batch_size.times do
-          pipe.rpoplpush(queue_name, processing_key)
+          pipe.command(["LMOVE", queue_name, processing_key, "LEFT", "LEFT"])
         end
       end.each do |result|
         if result && !result.to_s.empty?
@@ -245,10 +247,49 @@ module JoobQ
       [] of String
     end
 
+    @list_move_checked = Atomic(Bool).new(false)
+
+    # Claims use LMOVE/BLMOVE (Redis 6.2+). On an older server every claim would fail and be logged while the queue
+    # grows, so a queue refuses to start instead. Asks the server itself (LMOVE on a key that does not exist moves
+    # nothing) rather than parsing a version string, so Redis-compatible servers that implement the command pass.
+    def ensure_list_move_support! : Nil
+      return if @list_move_checked.get
+      begin
+        redis.command(["LMOVE", "joobq:lmove-probe", "joobq:lmove-probe", "LEFT", "LEFT"])
+      rescue ex : Redis::Error
+        # anything else (a timeout, NOPERM, READONLY) is not about the version and is raised as it is
+        raise ex unless ex.message.try(&.downcase.includes?("unknown command"))
+        raise ArgumentError.new("JoobQ needs Redis 6.2 or newer (LMOVE/BLMOVE): #{ex.message}")
+      end
+      @list_move_checked.set(true)
+    end
+
+    # Every claim pushes the job onto the head of the processing list, so the list holds the newest claim first.
+    # Moving head to head, one at a time, leaves the oldest claim at the head of the queue: the stranded jobs run
+    # next, in the order they were claimed, ahead of the jobs still waiting. Works on what workers before 0.6 left
+    # behind too (BRPOPLPUSH also pushed onto the head of the processing list).
+    RECOVER_PROCESSING = <<-LUA
+      local n = 0
+      while redis.call('LMOVE', KEYS[1], KEYS[2], 'LEFT', 'LEFT') do
+        n = n + 1
+      end
+      return n
+    LUA
+
+    # Returns every job left in the processing list (by a worker that crashed or was killed) to the head of its
+    # queue, in one atomic script. Only safe when no worker of any process is working on the queue: the jobs they
+    # hold are in the same list. `Queue#start` calls it once per process start.
+    def recover_processing(queue_name : String) : Int64
+      redis.eval(RECOVER_PROCESSING, [processing_queue(queue_name), queue_name]).as(Int64)
+    end
+
+    # True when at least one job was moved; false when there was none, or when Redis failed (logged).
     def move_job_back_to_queue(queue_name : String) : Bool
-      redis.brpoplpush(processing_queue(queue_name), queue_name, BLOCKING_TIMEOUT)
-      true
-    rescue
+      moved = recover_processing(queue_name)
+      Log.info &.emit("Returned stranded jobs to the head of their queue", queue: queue_name, count: moved) if moved > 0
+      moved > 0
+    rescue ex
+      Log.error &.emit("Could not return stranded jobs to their queue", queue: queue_name, error: ex.message)
       false
     end
 
@@ -316,22 +357,24 @@ module JoobQ
       return 0
     LUA
 
-    # Puts a claimed job back at the end of its queue, in one step: it is taken off the processing list and pushed,
-    # or (when it is no longer there, e.g. another process reclaimed it) nothing happens. Not counted as processed.
+    # Puts a claimed job back at the tail of its queue (behind the waiting jobs), in one step: it is taken off the
+    # processing list and pushed, or (when it is no longer there, e.g. another process reclaimed it) nothing happens.
+    # Not counted as processed. Used for a job bounced for missing encryption keys, which should not come straight
+    # back.
     def requeue_from_processing(job_json : String, queue_name : String) : Bool
       redis.eval(REQUEUE, [processing_queue(queue_name), queue_name], [job_json]) == 1
     end
 
-    # Several `requeue_from_processing` in one script: KEYS are processing list and queue per entry, ARGV the jobs.
-    # An entry whose commands fail (a key of the wrong type, say) is skipped inside the script, so one bad entry
-    # neither stops the others nor produces an error reply; a pipeline would raise at the first error reply and
-    # leave the connection with unread replies.
+    # `REQUEUE` to the head of the queue, for many jobs in one script: KEYS are processing list and queue per entry,
+    # ARGV the jobs, each LPUSHed in turn (so the last entry ends up at the head). An entry whose commands fail (a key
+    # of the wrong type, say) is skipped inside the script, so one bad entry neither stops the others nor produces an
+    # error reply; a pipeline would raise at the first error reply and leave the connection with unread replies.
     REQUEUE_MANY = <<-LUA
       local n = 0
       for i = 1, #ARGV do
         local ok, removed = pcall(redis.call, 'LREM', KEYS[2 * i - 1], 1, ARGV[i])
         if ok and removed == 1 then
-          if pcall(redis.call, 'RPUSH', KEYS[2 * i], ARGV[i]) then n = n + 1 end
+          if pcall(redis.call, 'LPUSH', KEYS[2 * i], ARGV[i]) then n = n + 1 end
         end
       end
       return n
@@ -339,19 +382,20 @@ module JoobQ
 
     REQUEUE_BATCH = 100
 
-    # `requeue_from_processing` for many {queue, job} pairs; returns how many were put back. One script per
-    # hundred entries; if a script itself fails, its entries are tried one by one and a failing one is logged and
-    # skipped.
+    # Returns jobs abandoned at shutdown, given as {queue, job} pairs in claim order, to the head of their queues so
+    # they run next, in that order; returns how many were put back. A job no longer in the processing list is
+    # skipped. The entries are pushed last to first (each push goes in front of the one before), one script per
+    # hundred; if a script itself fails, its entries are tried one by one and a failing one is logged and skipped.
     def requeue_many_from_processing(entries : Array({String, String})) : Int32
       put_back = 0
-      entries.each_slice(REQUEUE_BATCH) do |batch|
+      entries.reverse.each_slice(REQUEUE_BATCH) do |batch|
         begin
           keys = batch.flat_map { |(queue_name, _)| [processing_queue(queue_name), queue_name] }
           put_back += redis.eval(REQUEUE_MANY, keys, batch.map(&.last)).as(Int).to_i
         rescue ex
           Log.error &.emit("Batch requeue failed, requeuing one by one", error: ex.message)
           batch.each do |(queue_name, job_json)|
-            put_back += 1 if requeue_from_processing(job_json, queue_name)
+            put_back += 1 if redis.eval(REQUEUE_MANY, [processing_queue(queue_name), queue_name], [job_json]) == 1
           rescue ex2
             Log.error &.emit("Could not requeue a job", queue: queue_name, error: ex2.message)
           end
@@ -360,7 +404,7 @@ module JoobQ
       put_back
     end
 
-    # Simplified job cleanup for BRPOPLPUSH pattern - just remove from processing queue
+    # Removes a finished job from the processing list and counts it as processed
     def cleanup_job(job_json : String, queue_name : String) : Nil
       processing_key = processing_queue(queue_name)
 
@@ -422,6 +466,7 @@ module JoobQ
       "unknown"
     end
 
+    # A page of the waiting jobs, the next to run first (workers claim from the head of the list).
     def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
       start_index = (page_number - 1) * page_size
       end_index = start_index + page_size - 1
@@ -745,24 +790,23 @@ module JoobQ
       move_to_retry(job, queue_name, delay_ms)
     end
 
-    # Implement abstract method - use dequeue with BRPOPLPUSH
+    # Claims the oldest job (see `dequeue`)
     def claim_job(queue_name : String, worker_id : String, klass : Class) : String?
       dequeue(queue_name, klass)
     end
 
-    # Implement abstract method - use batch dequeue
+    # Claims up to `batch_size` jobs, oldest first (see `dequeue_batch`)
     def claim_jobs_batch(queue_name : String, worker_id : String, klass : Class, batch_size : Int32 = 5) : Array(String)
       dequeue_batch(queue_name, klass, batch_size)
     end
 
-    # Implement abstract method - no-op for BRPOPLPUSH pattern
+    # Nothing to release: a claim is the job's place in the processing list, which completion, retry or
+    # dead-lettering removes
     def release_job_claim(queue_name : String, worker_id : String) : Nil
-      # No-op: BRPOPLPUSH pattern doesn't require explicit claim release
     end
 
-    # Implement abstract method - no-op for BRPOPLPUSH pattern
+    # Nothing to release (see `release_job_claim`)
     def release_job_claims_batch(queue_name : String, worker_id : String, job_count : Int32) : Nil
-      # No-op: BRPOPLPUSH pattern doesn't require explicit claim release
     end
 
     # Source membership is the claim: competing schedulers cannot promote the same

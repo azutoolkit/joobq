@@ -6,7 +6,7 @@ Audit date: 2026-10-29. Baselines: core `b38961d` (declares 0.4.2), Pro `5f68249
 
 ## 1. Architecture and delivery contract
 
-Core producers serialize job objects into Redis lists. Workers pipeline `RPOPLPUSH` into a shared `joobq:processing:<queue>` list, execute middleware and job code, then remove payloads with `LREM`. Retries use a sorted set; DLQ storage uses a sorted set plus count hashes. Shutdown tracks claims in a **process-local** `InFlight` registry. The pool dependency is wrapped with a mutex/channel fix for Crystal's parallel execution context.
+Core producers serialize job objects into Redis lists. Workers pipeline `RPOPLPUSH` (from 0.6.0: `LMOVE ... LEFT LEFT`, from the head) into a shared `joobq:processing:<queue>` list, execute middleware and job code, then remove payloads with `LREM`. Retries use a sorted set; DLQ storage uses a sorted set plus count hashes. Shutdown tracks claims in a **process-local** `InFlight` registry. The pool dependency is wrapped with a mutex/channel fix for Crystal's parallel execution context.
 
 Pro workflows are a second state machine: Redis event histories and metadata, sequence-checked Lua appends, leased ready/timer/deadline sets, an orchestrator and reconciler, and ordinary core jobs as activity transport. Pro correctly treats transport as potentially duplicated/lost. Workflow sequence checks protect history transitions; they cannot roll back an activity's external side effects. The reviewed history store is Redis, not PostgreSQL. Archive adapters are a separate concern.
 
@@ -61,7 +61,7 @@ The worker's fixed 10 ms inter-batch delay, 100 ms idle delay, whole-list scans 
 
 Do not optimize away durability to hit a headline rate. At 35,000 jobs/sec and 200 ms average execution time, Little's law requires roughly 7,000 concurrent executions, before overhead. Establish latency, memory, connection and backpressure budgets before choosing that concurrency. The README's 35k and comparison numbers lack a reproducible end-to-end, durable-workload artifact in this audit. The restart probe's enqueue timing is not a worker throughput benchmark.
 
-Core RPUSH/RPOP behavior is LIFO; do not describe it as FIFO or silently change it in a compatibility patch. Specify ordering, fairness and starvation requirements for v1.
+Core RPUSH/RPOP behavior was LIFO. Core 0.6.0 (a minor release, not a compatibility patch) made it FIFO: producers still RPUSH, workers claim from the head with `BLMOVE`/`LMOVE ... LEFT LEFT` (Redis 6.2+), and crash and shutdown recovery return jobs to the head. Fairness across queues and starvation requirements for v1 are still to be specified.
 
 ### Pro feature maturity and history integrity
 

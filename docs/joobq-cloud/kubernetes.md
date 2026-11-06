@@ -88,7 +88,7 @@ kubectl -n orders logs deployment/orders-worker
 
 A running Pod confirms process scheduling, not successful order completion. Submit a representative canary through your application and inspect its result. Add health checks based on the signals your application actually exposes; this example has no HTTP health endpoint.
 
-The initial single replica and `Recreate` strategy avoid automatic overlapping worker processes during rollout and cause a processing pause. Before enabling rolling updates or more replicas, test the installed runtime's processing recovery, duplicate-safe effects, connection budget, and Pro build-pinning policy. Legacy queues, opt-in Delivery, and Pro workflows have different recovery paths. In particular, [legacy startup recovery](../best-practices/recovery.md#know-the-legacy-startup-recovery-limit) can move another consumer's active job and only reclaims one processing entry per start.
+The initial single replica and `Recreate` strategy avoid automatic overlapping worker processes during rollout and cause a processing pause. Before enabling rolling updates or more replicas, test the installed runtime's processing recovery, duplicate-safe effects, connection budget, and Pro build-pinning policy. Legacy queues, opt-in Delivery, and Pro workflows have different recovery paths. In particular, [legacy startup recovery](../best-practices/recovery.md#know-the-legacy-startup-recovery-limit) can move another consumer's active job and, before Core 0.6.0, only reclaims one processing entry per start.
 
 The 45-second grace period leaves margin around the example's 20-second Pro and 10-second Core shutdown budgets. Rehearse termination under load; Kubernetes can force a kill after the grace period.
 

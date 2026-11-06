@@ -37,7 +37,18 @@ when "seed"
   end
 when "verify"
   ready = store.redis.lrange("restart_probe", 0, -1)
-  processing = store.redis.lrange("joobq:processing:restart_probe", 0, -1)
+  # The seed ran in another process, so its claimed jobs are in its own list (joobq:processing:restart_probe:<owner>).
+  processing = [] of Redis::RedisValue
+  cursor = 0_i64
+  loop do
+    result = store.redis.scan(cursor, match: "joobq:processing:restart_probe*", count: 100)
+    cursor = result[0].as(String).to_i64
+    result[1].as(Array).each do |key|
+      key_str = key.as(String)
+      processing.concat(store.redis.lrange(key_str, 0, -1)) if key_str == "joobq:processing:restart_probe" || key_str.starts_with?("joobq:processing:restart_probe:")
+    end
+    break if cursor == 0
+  end
   raise "lost ready jobs" unless ready.size == 990
   raise "lost claimed jobs" unless processing.size == 10
   numbers = (ready + processing).map { |raw| RestartProbeJob.from_json(raw.as(String)).number }.sort

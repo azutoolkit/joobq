@@ -416,9 +416,10 @@ module JoobQ
         end
 
         begin
-          # A Redis failure reaches the 500 answer below instead of reading as "nothing to reprocess"
+          # Reclaims only crashed/stopped processes' jobs; a live worker's in-flight jobs are never taken. A Redis
+          # failure reaches the 500 answer below instead of reading as "nothing to reprocess".
           success = if redis_store = queue.store.as?(RedisStore)
-                      redis_store.recover_processing(queue_name) > 0
+                      redis_store.recover_orphaned_processing(queue_name) > 0
                     else
                       queue.store.move_job_back_to_queue(queue_name)
                     end

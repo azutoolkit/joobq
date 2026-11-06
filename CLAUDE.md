@@ -8,7 +8,7 @@ JoobQ is an enterprise-grade, high-performance asynchronous job queue system for
 - **License:** MIT
 - **Crystal:** 1.22.0+
 - **Dependencies:** redis, cron_parser
-- **Redis:** 6.2+ (FIFO claims use `BLMOVE`/`LMOVE`); CI tests 7.4 and 8.0
+- **Redis:** 6.2+ (FIFO claims use `BLMOVE`/`LMOVE`; per-process recovery uses per-owner processing lists and a heartbeat sorted set); CI tests 7.4 and 8.0
 
 ## Architecture Summary
 
@@ -19,7 +19,7 @@ JoobQ is an enterprise-grade, high-performance asynchronous job queue system for
 | Job | `src/joobq/job.cr` | Job module with status tracking, serialization, scheduling |
 | Queue | `src/joobq/queue.cr` | Generic Queue(T) managing job lifecycle and workers |
 | Worker | `src/joobq/worker.cr` | Fiber-based job processors with batch processing |
-| RedisStore | `src/joobq/redis_store.cr` | Redis persistence, FIFO reliable queue (RPUSH + BLMOVE LEFT LEFT) |
+| RedisStore | `src/joobq/redis_store.cr` | Redis persistence, FIFO reliable queue (RPUSH + BLMOVE LEFT LEFT), per-process recovery |
 | Scheduler | `src/joobq/scheduler.cr` | Cron and recurring job scheduling |
 | Configure | `src/joobq/configure.cr` | Central configuration with DSL macros |
 

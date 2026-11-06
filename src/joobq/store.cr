@@ -40,11 +40,12 @@ module JoobQ
   # #### `move_job_back_to_queue`
   #
   # ```
-  # abstract def move_job_back_to_queue(queue_name : String) : Bool
+  # abstract def move_job_back_to_queue(queue_name : String, include_self : Bool = false) : Bool
   # ```
   #
-  # Moves every job that was being processed but not completed (by a worker that crashed or was killed) back to the
-  # head of the queue, in the order it was claimed.
+  # Returns jobs a crashed or stopped process left in processing to the head of their queue, in claim order. A live
+  # process's in-flight jobs are never moved (heartbeat-gated). `include_self` also reclaims this process's own
+  # leftover list, for a restart.
   #
   # #### `mark_as_failed`
   #
@@ -146,7 +147,7 @@ module JoobQ
     abstract def claim_jobs_batch(queue_name : String, worker_id : String, klass : Class, batch_size : Int32) : Array(String)
     abstract def release_job_claim(queue_name : String, worker_id : String) : Nil
     abstract def release_job_claims_batch(queue_name : String, worker_id : String, job_count : Int32) : Nil
-    abstract def move_job_back_to_queue(queue_name : String) : Bool
+    abstract def move_job_back_to_queue(queue_name : String, include_self : Bool = false) : Bool
     abstract def mark_as_dead(job : JoobQ::Job, expiration_time : Int64) : Nil
     abstract def schedule(job : JoobQ::Job, delay_in_ms : Int64, delay_set : String) : Nil
     abstract def schedule_job(job : String, schedule_time : Int64) : Nil

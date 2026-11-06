@@ -6,7 +6,7 @@ module JoobQ
                                   main : Int32 = 0, processing : Int32 = 0,
                                   delayed : Int32 = 0, dead : Int32 = 0)
     store.queue_size(queue_name).should eq main
-    store.redis.llen("joobq:processing:#{queue_name}").should eq processing
+    store.processing_queue_size(queue_name).should eq processing
     store.set_size(RedisStore::DELAYED_SET).should eq delayed
     store.redis.zcard("joobq:dead_letter").should eq dead
 
@@ -47,7 +47,7 @@ module JoobQ
 
         # Verify it's ONLY in processing queue
         store.queue_size(queue_name).should eq 0
-        store.redis.llen("joobq:processing:#{queue_name}").should eq 1
+        store.processing_queue_size(queue_name).should eq 1
         store.set_size(RedisStore::DELAYED_SET).should eq 0
         store.redis.zcard("joobq:dead_letter").should eq 0
       end
@@ -265,10 +265,10 @@ module JoobQ
 
         # Verify distribution
         store.queue_size(queue_name).should eq 2
-        store.redis.llen("joobq:processing:#{queue_name}").should eq 3
+        store.processing_queue_size(queue_name).should eq 3
 
         # Total should still be 5 unique jobs
-        (store.queue_size(queue_name) + store.redis.llen("joobq:processing:#{queue_name}")).should eq 5
+        (store.queue_size(queue_name) + store.processing_queue_size(queue_name)).should eq 5
       end
     end
 
@@ -365,8 +365,8 @@ module JoobQ
         # Step 6: Dead (no retries left)
         claimed_job2 = ExampleJob.from_json(claimed_job_json2.not_nil!)
         claimed_job2.retries = 0
-        # Remove from processing queue first
-        store.redis.lrem("joobq:processing:#{queue_name}", 0, claimed_job_json2.not_nil!)
+        # Remove from this process's processing list first
+        store.redis.lrem("joobq:processing:#{queue_name}:#{store.owner_id}", 0, claimed_job_json2.not_nil!)
         # Move to dead letter manually
         claimed_job2.dead!
         store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, claimed_job2.to_json)

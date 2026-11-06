@@ -46,7 +46,8 @@ module JoobQ
       queue_names.each_with_index do |queue_name, queue_index|
         base_index = queue_index * 5
         queue_size = results[base_index].as(Int64)
-        processing_size = results[base_index + 1].as(Int64)
+        # Across every owner of the queue, not only this process's list (the pipelined llen above)
+        processing_size = processing_depth(queue_name)
         failed_count = results[base_index + 2].as(Int64)
         dead_letter_count = results[base_index + 3].as(Int64)
         processed_str = results[base_index + 4]
@@ -103,7 +104,7 @@ module JoobQ
       JoobQ.queues.each do |queue_name, _|
         stats["#{queue_name}_size"] = results[result_index].as(Int64)
         result_index += 1
-        stats["#{queue_name}_processing"] = results[result_index].as(Int64)
+        stats["#{queue_name}_processing"] = processing_depth(queue_name) # across every owner, not the legacy llen above
         result_index += 1
       end
 
@@ -137,10 +138,10 @@ module JoobQ
 
         for i = 1, #keys do
           local key = keys[i]
-          -- Only count actual processing queue keys (not worker claim keys)
-          if string.len(key) - string.len(string.gsub(key, ':', '')) == 2 then
-            local count = redis.call('LLEN', key)
-            total_count = total_count + count
+          -- Count the jobs in every processing list (per-owner and legacy); skip the owners sorted set and any
+          -- other non-list key sharing the prefix.
+          if redis.call('TYPE', key).ok == 'list' then
+            total_count = total_count + redis.call('LLEN', key)
           end
         end
 
@@ -285,6 +286,24 @@ module JoobQ
 
     private def processing_queue(name : String)
       "#{PROCESSING_QUEUE}:#{name}"
+    end
+
+    # Jobs in processing for a queue across every process's own list (`...:<queue>:<owner>`) and the legacy shared
+    # list. A prefix SCAN also matches another queue whose name starts with this one, so each key is checked.
+    def processing_depth(queue_name : String) : Int64
+      prefix = "#{PROCESSING_QUEUE}:#{queue_name}"
+      total = 0_i64
+      cursor = 0_i64
+      loop do
+        result = @redis.scan(cursor, match: "#{prefix}*", count: 100)
+        cursor = result[0].as(String).to_i64
+        result[1].as(Array).each do |key|
+          key_str = key.as(String)
+          total += @redis.llen(key_str) if key_str == prefix || key_str.starts_with?("#{prefix}:")
+        end
+        break if cursor == 0
+      end
+      total
     end
   end
 end

@@ -7,6 +7,18 @@ module JoobQ
     private PROCESSING_QUEUE = "joobq:processing"
     private BLOCKING_TIMEOUT = 0.5
 
+    # Each process claims into its own processing list, `joobq:processing:<queue>:<owner>`, and publishes a liveness
+    # heartbeat in the `joobq:processing:owners` sorted set (score = last beat, ms). Recovery returns a processing
+    # list to its queue only when its owner's heartbeat has lapsed, so a live process's in-flight jobs are never
+    # moved out from under it. `joobq:processing:<queue>` with no owner suffix is the shared list older (0.5)
+    # workers claimed into; it is migrated once no live owner remains. The heartbeat is independent of the optional
+    # `WorkerRegistry`, so recovery is correct whether or not a process publishes the richer worker snapshot.
+    # Not under the `joobq:processing:` prefix, so the processing-list SCANs never match it, and a queue
+    # literally named "owners" does not collide with it.
+    OWNERS     = "joobq:processing-owners"
+    private OWNER_TTL  = 30.seconds
+    private OWNER_BEAT = 10.seconds
+
     # The configured store when it is a RedisStore, so classes that default to it talk to the same Redis as the
     # queues. Only before any configuration exists (or for another Store) is a store built from ENV.
     @@instance : RedisStore? = nil
@@ -48,6 +60,21 @@ module JoobQ
     getter health : RedisHealth
     getter pipeline : RedisPipeline
     getter metrics : RedisMetrics
+
+    # Identifies this process's processing lists and heartbeat. Stable for the life of the process; a crashed process
+    # that restarts gets a new pid and so a new id, which leaves its old list orphaned for recovery. Settable so a
+    # spec can act as several processes against one Redis.
+    getter owner_id : String = "#{System.hostname}:#{Process.pid}"
+
+    # Keeps the batch-cleanup pipeline on the same owner id, so a spec that poses as another process cleans up the
+    # list it claimed into.
+    def owner_id=(id : String) : String
+      @pipeline.owner_id = id
+      @owner_id = id
+    end
+
+    @owner_heartbeat = BackgroundLoop.new("processing_owner")
+    @list_move_checked = Atomic(Bool).new(false)
 
     def initialize(@host : String = ENV.fetch("REDIS_HOST", "localhost"),
                    @port : Int32 = ENV.fetch("REDIS_PORT", "6379").to_i,
@@ -139,10 +166,9 @@ module JoobQ
       queue_name = parsed_job["queue"]?.try(&.as_s)
       return unless queue_name
 
-      processing_key = processing_queue(queue_name)
-
-      # Remove job from processing queue (all occurrences)
-      redis.lrem(processing_key, 0, job)
+      # Remove the job from this process's list and the legacy shared list (all occurrences)
+      redis.lrem(processing_queue(queue_name), 0, job)
+      redis.lrem(legacy_processing_queue(queue_name), 0, job)
 
       Log.debug &.emit("Job deleted",
         queue: queue_name,
@@ -247,8 +273,6 @@ module JoobQ
       [] of String
     end
 
-    @list_move_checked = Atomic(Bool).new(false)
-
     # Claims use LMOVE/BLMOVE (Redis 6.2+). On an older server every claim would fail and be logged while the queue
     # grows, so a queue refuses to start instead. Asks the server itself (LMOVE on a key that does not exist moves
     # nothing) rather than parsing a version string, so Redis-compatible servers that implement the command pass.
@@ -264,30 +288,139 @@ module JoobQ
       @list_move_checked.set(true)
     end
 
-    # Every claim pushes the job onto the head of the processing list, so the list holds the newest claim first.
-    # Moving head to head, one at a time, leaves the oldest claim at the head of the queue: the stranded jobs run
-    # next, in the order they were claimed, ahead of the jobs still waiting. Works on what workers before 0.6 left
-    # behind too (BRPOPLPUSH also pushed onto the head of the processing list).
+    # Starts this process's liveness heartbeat (idempotent, process-wide). `Queue#start` calls it before claiming,
+    # so every processing list a 0.6 process owns has a live heartbeat while the process runs.
+    def start_owner_heartbeat : Nil
+      beat_owner
+      @owner_heartbeat.start do
+        beat_owner
+        OWNER_BEAT
+      end
+    end
+
+    # Stops the heartbeat and drops this process's owner entry, so recovery on another process can reclaim this
+    # process's lists at once rather than waiting out the TTL. A crash skips this and the entry lapses after the TTL.
+    def stop_owner_heartbeat : Nil
+      @owner_heartbeat.stop
+      redis.zrem(OWNERS, @owner_id)
+    rescue ex
+      Log.warn &.emit("Could not drop the processing owner entry", owner: @owner_id, error: ex.message)
+    end
+
+    # The Redis server clock, in milliseconds, so every process's heartbeat and every reader's TTL cutoff are on one
+    # clock: a process is never judged dead because another node's wall clock runs ahead of it.
+    def redis_now_ms : Int64
+      parts = redis.command(["TIME"]).as(Array)
+      (parts[0].as(String).to_i64 * 1000) + (parts[1].as(String).to_i64 // 1000)
+    end
+
+    def beat_owner : Nil
+      redis.zadd(OWNERS, redis_now_ms, @owner_id)
+    end
+
+    # Owner ids whose heartbeat is within the TTL. Lapsed entries are pruned as they are read. Liveness is scored by
+    # the Redis clock, so recovery does not depend on the worker and reaper clocks agreeing. A process paused (GC,
+    # starvation) longer than OWNER_TTL can still be judged dead and have its jobs recovered, so jobs stay idempotent.
+    def live_owners : Set(String)
+      cutoff = redis_now_ms - OWNER_TTL.total_milliseconds.to_i64
+      redis.zremrangebyscore(OWNERS, "-inf", cutoff)
+      redis.zrange(OWNERS, 0, -1).map(&.as(String)).to_set
+    end
+
+    # Drains a processing list to the head of its queue, oldest claim first, in one atomic script, and returns the
+    # count. Each claim pushed the job onto the head of its processing list (BLMOVE/LMOVE ... LEFT LEFT, and the old
+    # BRPOPLPUSH too), so moving head to head preserves claim order: the recovered jobs run next, before the jobs
+    # still waiting.
+    # Moves up to ARGV[1] jobs from the head of a (dead owner's) processing list to the head of its queue, and
+    # returns how many it moved. Bounded so a huge leftover list does not block single-threaded Redis in one script;
+    # the caller loops until a short batch signals the list is empty. Nothing else claims from a dead owner's list,
+    # so order is preserved across batches.
     RECOVER_PROCESSING = <<-LUA
       local n = 0
-      while redis.call('LMOVE', KEYS[1], KEYS[2], 'LEFT', 'LEFT') do
+      local limit = tonumber(ARGV[1])
+      while n < limit and redis.call('LMOVE', KEYS[1], KEYS[2], 'LEFT', 'LEFT') do
         n = n + 1
       end
       return n
     LUA
 
-    # Returns every job left in the processing list (by a worker that crashed or was killed) to the head of its
-    # queue, in one atomic script. Only safe when no worker of any process is working on the queue: the jobs they
-    # hold are in the same list. `Queue#start` calls it once per process start.
-    def recover_processing(queue_name : String) : Int64
-      redis.eval(RECOVER_PROCESSING, [processing_queue(queue_name), queue_name]).as(Int64)
+    RECOVER_BATCH = 1000
+
+    def drain_processing_list(list_key : String, queue_name : String) : Int64
+      moved = 0_i64
+      loop do
+        count = redis.eval(RECOVER_PROCESSING, [list_key, queue_name], [RECOVER_BATCH.to_s]).as(Int64)
+        moved += count
+        break if count < RECOVER_BATCH
+      end
+      moved
     end
 
-    # True when at least one job was moved; false when there was none, or when Redis failed (logged).
-    def move_job_back_to_queue(queue_name : String) : Bool
-      moved = recover_processing(queue_name)
+    # The processing-list keys that belong to `queue_name`: one per owner (`...:<queue>:<owner>`) plus the shared
+    # legacy list (`...:<queue>`) older workers used. A SCAN by prefix also matches another queue whose name starts
+    # with this one, so each key is checked against the two exact shapes.
+    def processing_lists(queue_name : String) : Array(String)
+      prefix = "#{PROCESSING_QUEUE}:#{queue_name}"
+      owned_prefix = "#{prefix}:"
+      found = [] of String
+      cursor = 0_i64
+      loop do
+        result = redis.scan(cursor, match: "#{prefix}*", count: 100)
+        cursor = result[0].as(String).to_i64
+        result[1].as(Array).each do |key|
+          key_str = key.as(String)
+          found << key_str if key_str == prefix || key_str.starts_with?(owned_prefix)
+        end
+        break if cursor == 0
+      end
+      found
+    end
+
+    # Returns the jobs of crashed or stopped processes to the head of their queue, in claim order, and deletes the
+    # drained list. A processing list is reclaimed only when its owner's heartbeat has lapsed (`live_owners`), so a
+    # running process's in-flight jobs are never moved. `include_self` drains this process's own list too, which is
+    # safe at start-up (no worker of this process is claiming yet) but never from the periodic reaper, where this
+    # process is live and working. The shared legacy list (no owner) is migrated only when no owner is live at all,
+    # the first 0.6 process into an otherwise-drained cluster; stop 0.5 workers first (see the CHANGELOG). Returns
+    # how many jobs were moved.
+    def recover_orphaned_processing(queue_name : String, include_self : Bool = false) : Int64
+      live = live_owners
+      legacy = "#{PROCESSING_QUEUE}:#{queue_name}"
+      moved = 0_i64
+      processing_lists(queue_name).each do |list_key|
+        if list_key == legacy
+          # Migrate the pre-0.6 shared list only when no OTHER process is live to claim from it (this process does
+          # not claim into the legacy list). Stop 0.5 workers first: they do not register a heartbeat, so a live one
+          # cannot be seen here (see the CHANGELOG upgrade note).
+          others = live.dup
+          others.delete(@owner_id)
+          next unless others.empty?
+        else
+          owner = list_key.lchop("#{legacy}:")
+          if owner == @owner_id
+            # This process's own list: drained only on an explicit restart recovery, never a live reaper pass.
+            next unless include_self
+          else
+            # Another process's list: reclaimed only once its heartbeat has lapsed.
+            next if live.includes?(owner)
+          end
+        end
+        # Drain only; Redis removes a list once it is empty. A separate DEL could destroy a job a (wrongly declared
+        # dead) owner pushed between the drain and the delete, so it is not issued.
+        moved += drain_processing_list(list_key, queue_name)
+      rescue ex
+        Log.error &.emit("Could not recover a processing list", list: list_key, queue: queue_name, error: ex.message)
+      end
       Log.info &.emit("Returned stranded jobs to the head of their queue", queue: queue_name, count: moved) if moved > 0
-      moved > 0
+      moved
+    end
+
+    # Reclaims the queue's orphaned (dead-owner) processing lists; never touches a live process's list. `Queue#start`
+    # passes `include_self: true` to also clear a previous incarnation's leftovers before this process claims. True
+    # when at least one job was moved; false when none, or when Redis failed (logged). Operate this on a live system
+    # only to recover crashed workers: it cannot take a job a live worker still holds.
+    def move_job_back_to_queue(queue_name : String, include_self : Bool = false) : Bool
+      recover_orphaned_processing(queue_name, include_self) > 0
     rescue ex
       Log.error &.emit("Could not return stranded jobs to their queue", queue: queue_name, error: ex.message)
       false
@@ -349,9 +482,16 @@ module JoobQ
       @pipeline.set_sizes_batch(set_names)
     end
 
+    # Takes the job off whichever of this process's processing lists holds it (its own owner list, or the legacy
+    # shared list a seeded or pre-0.6 job sits in) and pushes it to the tail of the queue. KEYS: self list, legacy
+    # list, queue.
     REQUEUE = <<-LUA
       if redis.call('LREM', KEYS[1], 1, ARGV[1]) == 1 then
-        redis.call('RPUSH', KEYS[2], ARGV[1])
+        redis.call('RPUSH', KEYS[3], ARGV[1])
+        return 1
+      end
+      if redis.call('LREM', KEYS[2], 1, ARGV[1]) == 1 then
+        redis.call('RPUSH', KEYS[3], ARGV[1])
         return 1
       end
       return 0
@@ -362,19 +502,23 @@ module JoobQ
     # Not counted as processed. Used for a job bounced for missing encryption keys, which should not come straight
     # back.
     def requeue_from_processing(job_json : String, queue_name : String) : Bool
-      redis.eval(REQUEUE, [processing_queue(queue_name), queue_name], [job_json]) == 1
+      redis.eval(REQUEUE, [processing_queue(queue_name), legacy_processing_queue(queue_name), queue_name], [job_json]) == 1
     end
 
-    # `REQUEUE` to the head of the queue, for many jobs in one script: KEYS are processing list and queue per entry,
-    # ARGV the jobs, each LPUSHed in turn (so the last entry ends up at the head). An entry whose commands fail (a key
-    # of the wrong type, say) is skipped inside the script, so one bad entry neither stops the others nor produces an
-    # error reply; a pipeline would raise at the first error reply and leave the connection with unread replies.
+    # `REQUEUE` to the head of the queue, for many jobs in one script. KEYS are (self list, legacy list, queue) per
+    # entry, ARGV the jobs, each taken off whichever list holds it and LPUSHed in turn (so the last entry ends up at
+    # the head). An entry whose commands fail (a key of the wrong type, say) is skipped inside the script, so one bad
+    # entry neither stops the others nor produces an error reply; a pipeline would raise at the first error reply and
+    # leave the connection with unread replies.
     REQUEUE_MANY = <<-LUA
       local n = 0
       for i = 1, #ARGV do
-        local ok, removed = pcall(redis.call, 'LREM', KEYS[2 * i - 1], 1, ARGV[i])
+        local ok, removed = pcall(redis.call, 'LREM', KEYS[3 * i - 2], 1, ARGV[i])
+        if not (ok and removed == 1) then
+          ok, removed = pcall(redis.call, 'LREM', KEYS[3 * i - 1], 1, ARGV[i])
+        end
         if ok and removed == 1 then
-          if pcall(redis.call, 'LPUSH', KEYS[2 * i], ARGV[i]) then n = n + 1 end
+          if pcall(redis.call, 'LPUSH', KEYS[3 * i], ARGV[i]) then n = n + 1 end
         end
       end
       return n
@@ -382,20 +526,25 @@ module JoobQ
 
     REQUEUE_BATCH = 100
 
+    private def requeue_keys(queue_name : String) : Array(String)
+      [processing_queue(queue_name), legacy_processing_queue(queue_name), queue_name]
+    end
+
     # Returns jobs abandoned at shutdown, given as {queue, job} pairs in claim order, to the head of their queues so
-    # they run next, in that order; returns how many were put back. A job no longer in the processing list is
-    # skipped. The entries are pushed last to first (each push goes in front of the one before), one script per
-    # hundred; if a script itself fails, its entries are tried one by one and a failing one is logged and skipped.
+    # they run next, in that order; returns how many were put back. Each job is taken off this process's own
+    # processing list (or the legacy shared list) and skipped if it is no longer there. The entries are pushed last
+    # to first (each push goes in front of the one before), one script per hundred; if a script itself fails, its
+    # entries are tried one by one and a failing one is logged and skipped.
     def requeue_many_from_processing(entries : Array({String, String})) : Int32
       put_back = 0
       entries.reverse.each_slice(REQUEUE_BATCH) do |batch|
         begin
-          keys = batch.flat_map { |(queue_name, _)| [processing_queue(queue_name), queue_name] }
+          keys = batch.flat_map { |(queue_name, _)| requeue_keys(queue_name) }
           put_back += redis.eval(REQUEUE_MANY, keys, batch.map(&.last)).as(Int).to_i
         rescue ex
           Log.error &.emit("Batch requeue failed, requeuing one by one", error: ex.message)
           batch.each do |(queue_name, job_json)|
-            put_back += 1 if redis.eval(REQUEUE_MANY, [processing_queue(queue_name), queue_name], [job_json]) == 1
+            put_back += 1 if redis.eval(REQUEUE_MANY, requeue_keys(queue_name), [job_json]) == 1
           rescue ex2
             Log.error &.emit("Could not requeue a job", queue: queue_name, error: ex2.message)
           end
@@ -406,11 +555,10 @@ module JoobQ
 
     # Removes a finished job from the processing list and counts it as processed
     def cleanup_job(job_json : String, queue_name : String) : Nil
-      processing_key = processing_queue(queue_name)
-
       redis.pipelined do |pipe|
-        # Remove job from processing queue (all occurrences)
-        pipe.lrem(processing_key, 0, job_json)
+        # Remove the job from this process's list (and the legacy shared list, for a migrated or seeded job)
+        pipe.lrem(processing_queue(queue_name), 0, job_json)
+        pipe.lrem(legacy_processing_queue(queue_name), 0, job_json)
 
         # Update statistics
         pipe.hincrby("joobq:stats:processed", queue_name, 1)
@@ -435,11 +583,10 @@ module JoobQ
 
     # Mark job as completed with statistics
     def mark_job_completed(job_json : String, queue_name : String) : Nil
-      processing_key = processing_queue(queue_name)
-
       redis.pipelined do |pipe|
-        # Remove job from processing queue
-        pipe.lrem(processing_key, 0, job_json)
+        # Remove the job from this process's list (and the legacy shared list, for a migrated or seeded job)
+        pipe.lrem(processing_queue(queue_name), 0, job_json)
+        pipe.lrem(legacy_processing_queue(queue_name), 0, job_json)
 
         # Update completion statistics
         pipe.hincrby("joobq:stats:completed", queue_name, 1)
@@ -517,7 +664,8 @@ module JoobQ
       queue_names.each_with_index do |queue_name, queue_index|
         base_index = queue_index * 5
         queue_size = results[base_index].as(Int64)
-        processing_size = results[base_index + 1].as(Int64)
+        # Across every owner of the queue, not only this process's list (the pipelined llen above)
+        processing_size = processing_queue_size(queue_name)
         failed_count = results[base_index + 2].as(Int64)
         dead_letter_count = results[base_index + 3].as(Int64)
         processed_str = results[base_index + 4]
@@ -570,10 +718,9 @@ module JoobQ
         keys = result[1].as(Array)
 
         keys.each do |key|
-          key_str = key.as(String)
-          if key_str.count(':') == 2
-            processing_keys << key_str
-          end
+          # Every processing list, per-owner (`...:<queue>:<owner>`) and legacy (`...:<queue>`). The owners sorted
+          # set is not under this prefix, so it is not matched; the type check below still keeps only `list` keys.
+          processing_keys << key.as(String)
         end
 
         break if cursor == 0
@@ -624,18 +771,16 @@ module JoobQ
 
     # Verify that a job has been properly removed from processing queue
     def verify_job_removed_from_processing?(job_id : String, queue_name : String) : Bool
-      processing_key = processing_queue(queue_name)
-
-      # Check if job exists in processing queue
-      jobs_in_processing = redis.lrange(processing_key, 0, -1)
-      jobs_in_processing.none? { |job_data|
-        begin
-          parsed_job = JSON.parse(job_data.as(String))
-          parsed_job["jid"]?.try(&.as_s) == job_id
-        rescue
-          false
+      # Across every processing list of the queue (this and other processes, and the legacy shared list)
+      processing_lists(queue_name).all? do |list_key|
+        redis.lrange(list_key, 0, -1).none? do |job_data|
+          begin
+            JSON.parse(job_data.as(String))["jid"]?.try(&.as_s) == job_id
+          rescue
+            false
+          end
         end
-      }
+      end
     rescue ex
       Log.warn &.emit("Error verifying job removal from processing queue",
         job_id: job_id, queue: queue_name, error: ex.message)
@@ -643,9 +788,9 @@ module JoobQ
     end
 
     # Get count of jobs currently in processing queue
+    # The jobs in processing across every owner of the queue, plus the legacy shared list.
     def processing_queue_size(queue_name : String) : Int64
-      processing_key = processing_queue(queue_name)
-      redis.llen(processing_key)
+      processing_lists(queue_name).sum(0_i64) { |list_key| redis.llen(list_key) }
     rescue ex
       Log.warn &.emit("Error getting processing queue size",
         queue: queue_name, error: ex.message)
@@ -654,22 +799,19 @@ module JoobQ
 
     # Remove job from processing queue by job ID (more reliable than JSON match)
     private def remove_job_from_processing_by_id(job_id : String, queue_name : String) : Bool
-      processing_key = processing_queue(queue_name)
-
-      # Get all jobs from processing queue
-      jobs = redis.lrange(processing_key, 0, -1)
-
-      # Find and remove the job with matching ID
-      jobs.each do |job_json|
-        begin
-          job_data = JSON.parse(job_json.to_s)
-          if job_data["jid"]?.to_s == job_id
-            redis.lrem(processing_key, 0, job_json.to_s)
-            return true
+      # A process only retries or dead-letters jobs it claimed, so the job is in this process's own list (or the
+      # legacy shared list, for a seeded or pre-0.6 job). Other owners' lists are not scanned: that would be a
+      # cluster-wide read on a hot failure path.
+      [processing_queue(queue_name), legacy_processing_queue(queue_name)].each do |list_key|
+        redis.lrange(list_key, 0, -1).each do |job_json|
+          begin
+            if JSON.parse(job_json.to_s)["jid"]?.to_s == job_id
+              redis.lrem(list_key, 0, job_json.to_s)
+              return true
+            end
+          rescue
+            next
           end
-        rescue
-          # Skip invalid JSON entries
-          next
         end
       end
 
@@ -869,10 +1011,10 @@ module JoobQ
       main_jobs = redis.lrange(queue_name, 0, -1)
       locations["main_queue"] = main_jobs.count { |j| j.as(String).includes?(job_jid) }
 
-      # Check processing queue
-      processing_key = processing_queue(queue_name)
-      processing_jobs = redis.lrange(processing_key, 0, -1)
-      locations["processing"] = processing_jobs.count { |j| j.as(String).includes?(job_jid) }
+      # Check processing (every owner of the queue, plus the legacy shared list)
+      locations["processing"] = processing_lists(queue_name).sum(0) do |list_key|
+        redis.lrange(list_key, 0, -1).count { |j| j.as(String).includes?(job_jid) }
+      end
 
       # Check delayed queue
       delayed_jobs = redis.zrange(DELAYED_SET, 0, -1)
@@ -907,7 +1049,14 @@ module JoobQ
       locations
     end
 
+    # This process's own processing list for a queue: where it claims into and cleans up from.
     private def processing_queue(name : String)
+      "#{PROCESSING_QUEUE}:#{name}:#{@owner_id}"
+    end
+
+    # The shared list older (0.5) workers claimed into, and the one many specs seed directly. 0.6 claims never land
+    # here, but cleanup and recovery still handle it so a mixed cluster and an upgrade lose nothing.
+    private def legacy_processing_queue(name : String)
       "#{PROCESSING_QUEUE}:#{name}"
     end
 

@@ -55,7 +55,7 @@ module JoobQ
   # shutdown has begun.
   #
   # Step 5 is the shutdown's own recovery: it does not rely on the start-up recovery of the next process
-  # (`Queue#start` moves every job of the queue's processing list back, the jobs of any process serving the queue).
+  # (`Queue#start` and the reaper reclaim the processing lists of crashed or stopped processes, never a live one's).
   # A job put back this way runs again from the start, possibly in another process while this one winds down: jobs
   # must be safe to run twice, as they already must be after a crash. A job that crashes the process before step 5
   # (SIGKILL) is still left to the start-up recovery.
@@ -83,6 +83,11 @@ module JoobQ
         step("requeue", requeue_deadline) { requeue_unfinished(requeue_deadline) }
       end
       step("latency", {deadline, Time.instant + SHUTDOWN_GRACE}.max) { Latency.stop }
+      # Drop this process's liveness last, so any job left in its processing list becomes reclaimable at once by
+      # another process rather than waiting out the heartbeat TTL.
+      step("owner_heartbeat", {deadline, Time.instant + SHUTDOWN_GRACE}.max) do
+        config.store.as?(RedisStore).try(&.stop_owner_heartbeat)
+      end
 
       Log.info &.emit("JoobQ stopped", abandoned_jobs: abandoned_jobs)
       true

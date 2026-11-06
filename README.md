@@ -283,12 +283,16 @@ dead-lettered, counted, announced or removed from the processing list, so the re
 schedules. Workers claim nothing once the shutdown has begun.
 
 Jobs put back run again from the start, possibly in another process while this one winds down, so they must be safe to
-run twice, as they must be after a crash. A process that is killed (`SIGKILL`) cannot do this; its jobs stay in the
-queue's processing list. Start-up recovery (`Queue#start`) moves **every** job in that list back to the head of the
-queue in one atomic step, in the order they were claimed, so they run before newer work. It takes the jobs of any
-process serving the queue: a process that starts while another one is working on the same queue moves that process's
-running jobs back too, so they run twice (and `POST /joobq/queues/:name/reprocess` does the same on a live system).
-Prefer a graceful stop (`SIGTERM`) in rolling deploys.
+run twice, as they must be after a crash. A process that is killed (`SIGKILL`) cannot do this; its jobs stay in its
+own processing list (`joobq:processing:<queue>:<owner>`). Each process claims into its own list and publishes a
+heartbeat (the `joobq:processing:owners` sorted set). Start-up recovery (`Queue#start`), the expired-job reaper and
+`POST /joobq/queues/:name/reprocess` return **every** job a crashed or stopped process left in processing back to the
+head of its queue, in the order it was claimed, so it runs before newer work. Recovery reclaims a process's list only
+once that process's heartbeat has lapsed (`OWNER_TTL`, 30 seconds), so a process that starts beside live workers never
+moves their in-flight jobs and never makes them run twice. Prefer a graceful stop (`SIGTERM`) in rolling deploys so
+jobs come back at once rather than after the heartbeat times out. (Workers from 0.5 share one
+`joobq:processing:<queue>` list and publish no heartbeat; stop them before relying on 0.6 recovery — see the
+CHANGELOG.)
 
 ### Defining Queues
 

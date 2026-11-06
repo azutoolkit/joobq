@@ -46,6 +46,14 @@ This creates a temporary project, generates the JoobQ setup and a typed job, run
 | `core/thin_job.cr` | Business operation check, queued adapter execution, SIGTERM shutdown |
 | `core/scheduled_jobs.cr` | Immediate recurring callback admits a fresh queue job; worker executes it; SIGTERM stops the process |
 | `core/lifecycle.cr` | Reader-only management policy, unenforced DLQ TTL, delayed admission, one retry, selected replay after repair, clean shutdown |
+| `core/invoice_job.cr` | Stored job fields, then the job runs |
+| `core/queue_order.cr` | One worker with a batch of one runs jobs newest first (LIFO) |
+| `core/concurrency.cr` | Peak in-flight jobs equal workers times `worker_batch_size` |
+| `core/retry_backoff.cr` | Four attempts with growing gaps, then a dead letter; `NonRetryableError` dead-letters at once |
+| `core/recurring.cr` | `schedule(every:)` calls `perform` directly: no queue, no retry, no dead letter |
+| `core/throttle.cr` | A queue throttle spaces starts `period / limit` apart |
+| `core/management_api.cr` | Management API: 401 without a token, reader may read, reader and operator refused where a higher role is needed |
+| `core/delivery.cr` | Delivery: the same request admitted twice runs once; clean drain |
 | `pro/first_workflow.cr` | Typed DSL input, blueprint registration, checked workflow result, Pro then Core shutdown |
 | `pro/workflow_dsl.cr` | Explicit result chaining, parallel receipt/timer branches, retry policy, checked result |
 | `pro/approval_workflow.cr` | Signal payload, typed consumer, query, checked final result |
@@ -53,6 +61,7 @@ This creates a temporary project, generates the JoobQ setup and a typed job, run
 | `pro/production_worker.cr` + `pro/worker_probe.cr` | Separate producer completes work, then worker exits on SIGTERM |
 | `pro/coordination.cr` | Sealed batch completion, duplicate rejection, owner-checked release, concurrent rate reservations |
 | `pro/observability.cr` | Completion/busy counters, Redis metrics collection, collector shutdown |
+| `pro/rate_limit.cr` | `RateLimitMiddleware` added by hand: at most two starts per window across four workers |
 
 Fragments marked as illustrative show an integration point; they are not standalone programs. The checker enforces that distinction. No private Pro implementation sources are copied into the public documentation.
 
@@ -71,7 +80,7 @@ These checks do not establish a production throughput guarantee, complete chaos 
 
 ## Workflow DSL release checks
 
-The [DSL guide](tutorials/parallel-workflow-dsl.md) and the workflow fixtures target **Pro v0.2.2**, release commit `92879b94a3be2580e749f3a0acc829b9276040dc`. `examples/docs/pro/workflow_dsl.cr` is checked against the book and Pro's example (apart from the local source require). The private Pro documentation workflow pins this release, compiles all eight Pro fixture programs, and runs them against disposable Redis. The public Core job never needs private Pro access.
+The fixtures are pinned to **Core v0.5.6** and **Pro v0.2.4** (release commit `7e9a0a565f22f35d9fab455becc9dad065a94fa3`, which requires Core `>= 0.5.6, < 0.6.0`); `--pro-source` checks that commit. The records below describe the earlier v0.2.2 baseline. The [DSL guide](tutorials/parallel-workflow-dsl.md) and the workflow fixtures were first written against **Pro v0.2.2**, release commit `92879b94a3be2580e749f3a0acc829b9276040dc`. `examples/docs/pro/workflow_dsl.cr` is checked against the book and Pro's example (apart from the local source require). The private Pro documentation workflow pins this release, compiles all eight Pro fixture programs, and runs them against disposable Redis. The public Core job never needs private Pro access.
 
 Validated locally on **October 30, 2026** with Crystal **1.22.1** and Redis **8.0.2**: all **eleven** fixture programs present at that revision passed (three Core, eight Pro), including approval/query, compensation, a separate producer/worker probe, coordination, observability, retry/DLQ/replay, and SIGTERM shutdown. Dependencies were installed from the frozen Core v0.5.1 and Pro v0.2.2 fixture graphs. The GitBook checker and its five regression tests passed. All 17 Mermaid diagrams rendered in Chromium with Mermaid 11.17.2. The Kubernetes manifest parsed successfully, with matching selectors, volume references, and shutdown budget checks; it was not applied to a cluster. The systemd unit and managed-cloud topology remain deployment recipes to validate in your own environment.
 

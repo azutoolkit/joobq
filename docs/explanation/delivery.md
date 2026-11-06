@@ -1,43 +1,85 @@
 ---
-description: Use explicit admission, leased claims, and receipts without confusing them with legacy queues.
+description: Core's opt-in Delivery runtime, with request identities, leases and receipts, and how it differs from ordinary queues.
 ---
 
-# Opt-in Delivery
+# Delivery
 
-{% hint style="warning" %}
-**Preview:** `JoobQ::Delivery` is present in the documented source baselines but remains a separate opt-in processing path. Its presence does not declare a production migration complete. `Job.enqueue`, ordinary workers, and Core scheduling do not automatically use it.
-{% endhint %}
+*Explanation · Core · Preview*
 
-Delivery assigns a persistent request identity, claims work with an expiring lease, and verifies ownership when settling the outcome. A runtime owns handlers, capacity, renewal, and drain behavior. A ledger stores admission and receipt state; a context exposes cancellation and an idempotency key.
+Delivery is a second, opt-in way for Core to run work: each request has a stable identity, a worker holds it under an expiring lease, and the outcome is settled only by the lease owner. Admitting the same request twice gives one execution, which ordinary `Job.enqueue` cannot promise.
+
+## When to use it
+
+- **Charge an invoice from a producer that may retry.** Admit `invoice-1001` as often as you like; it runs once.
+- **Hand an external API a stable idempotency key.** `context.idempotency_key` stays the same when a crashed attempt is retried.
+- **Build Pro's durable batches and unique jobs.** They need a Delivery runtime.
+
+## How it works
 
 ```mermaid
 flowchart LR
-  Admit[Admit stable request identity] --> Ready[(Ready record)]
-  Ready --> Claim[Claim with lease token]
-  Claim --> Handler[Handler with context]
-  Handler --> Renew[Renew ownership while active]
-  Renew --> Handler
-  Handler --> Settle{Token still owns lease?}
-  Settle -->|yes| Receipt[(Completed or terminal receipt)]
-  Settle -->|no| Reject[Reject stale settlement]
-  Claim -->|lease expires after crash| Recover[Recovery makes work eligible]
-  Recover --> Ready
+  Admit[admit queue, request_id, payload] --> Ready[(ready record)]
+  Ready --> Claim[claim with a lease token]
+  Claim --> Handler[handler, context]
+  Handler --> Settle{token still owns the lease?}
+  Settle -->|yes| Receipt[(receipt)]
+  Settle -->|no| Stale[stale outcome rejected]
+  Claim -->|lease expires after a crash| Ready
 ```
 
-A lease cannot revoke a network request that already reached an external service. Cancellation is cooperative; check the context and pass its stable idempotency key to the effect boundary. Keep receipts long enough to reconcile retries and delayed acknowledgements.
+A runtime owns its handlers, capacity and lease renewal; a ledger in Redis keeps admissions and receipts. When a process dies, its leases expire and the work becomes claimable again, so a handler can still run twice: pass the idempotency key to the system you call.
 
-## Redis durability prerequisites
+## Example
 
-By default, the Delivery runtime checks `appendonly=yes`, `appendfsync=always`, and `maxmemory-policy=noeviction`. Its Redis identity needs permission to inspect those settings. A managed service that denies the configuration query needs an explicit operational design; do not disable the check merely to hide an unsupported deployment. These settings still do not prove a complete failover or backup guarantee.
+<!-- example: core/delivery.cr -->
+```crystal
+require "joobq"
 
-## Plan a cutover
+JoobQ.configure { |config| config.rest_api_enabled = false }
 
-1. Inventory producers, consumers, delayed work, and existing processing lists.
-2. Stop legacy admissions and drain or account for every outstanding legacy job.
-3. Register Delivery handlers in an explicit namespace; confirm stable request IDs and payload compatibility.
-4. Validate crashes, expired leases, reconciliation, and shutdown on an isolated workload.
-5. Switch producers and consumers together. Record rollback boundaries before admitting real work.
+# Checks appendonly=yes, appendfsync=always and maxmemory-policy=noeviction first.
+runtime = JoobQ::Delivery::Runtime.new(JoobQ::RedisStore.instance, "billing", capacity: 2)
+runtime.register("invoices") do |payload, context|
+  puts "Charged invoice #{payload}, idempotency key #{context.idempotency_key}"
+  JoobQ::Delivery::Outcome.new
+end
 
-Do not repoint both engines at the same structures. Core CLI queue metrics describe legacy processing unless an explicit Delivery provider says otherwise. Pro's durable batch/uniqueness services use this separate runtime; see [coordination](distributed-coordination.md).
+first = runtime.admit("invoices", "invoice-1001", "1001")
+again = runtime.admit("invoices", "invoice-1001", "1001")
+puts "First admission: #{first.code}, same request again: #{again.code}, same id: #{first.id == again.id}"
+runtime.start
+sleep 1.second
+puts "Drained cleanly: #{runtime.stop(5.seconds).clean}"
+```
 
-The [Core design notes](https://github.com/azutoolkit/joobq/blob/v0.5.1/design/implementation-status.md) record the architectural boundary. Treat them as engineering context, not an activation command.
+Output of `LOG_LEVEL=fatal crystal run delivery.cr` against a Redis with AOF `always` and `noeviction`:
+
+```
+First admission: Accepted, same request again: Accepted, same id: true
+Charged invoice 1001, idempotency key 4a01e265a7f1c2180ff3afb4115fb3d03bf93c4d7b51bd1d383eee50ddde90e0
+Drained cleanly: true
+```
+
+## Options
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `namespace` | `String` | none | Keeps one runtime's records apart from another's |
+| `capacity` | `Int32` | `8` | Handlers running at once in this runtime, 1 to 1024 |
+| `lease` | `Time::Span` | `30.seconds` | How long a claim is owned without renewal, 100 ms to 24 h |
+| `execution_timeout` | `Time::Span` | `5.minutes` | Cooperative: the context reports cancellation, the fiber is not killed |
+| `production` | `Bool` | `true` | Refuses to start unless Redis has `appendonly yes`, `appendfsync always`, `maxmemory-policy noeviction` |
+
+{% hint style="warning" %}
+**Preview.** `Job.enqueue`, ordinary workers and Core's schedulers do not use Delivery, and Delivery handlers never go through `config.middlewares` (retry, throttle, expiry, Pro's rate limit). Do not point both paths at the same work.
+{% endhint %}
+
+{% hint style="info" %}
+**Production.** The durability check needs `CONFIG GET` on your Redis; a managed service that denies it needs its own review before you turn the check off.
+{% endhint %}
+
+## Next steps
+
+- [Batches and unique jobs](distributed-coordination.md): the Pro services built on Delivery.
+- [Workers and concurrency](workers-and-concurrency.md): the ordinary queue path.
+- [Set up Redis and recovery](../how-to/redis-and-recovery.md): configure AOF and eviction.

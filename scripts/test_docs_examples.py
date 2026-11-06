@@ -21,14 +21,23 @@ CASES = {
     "core": [("first_job", "Processed order 42", True),
              ("thin_job", "Order 42: 2500 cents", True),
              ("scheduled_jobs", "Generated report 42", True),
-             ("lifecycle", "PASS delayed retry DLQ replay shutdown", False)],
+             ("lifecycle", "PASS delayed retry DLQ replay shutdown", False),
+             ("invoice_job", "Sent invoice 1001 to ada@example.com", True),
+             ("queue_order", "Exported report 1", True),
+             ("concurrency", "Peak jobs in flight: 6", False),
+             ("retry_backoff", "Dead letter (payments): card declined", False),
+             ("recurring", "queued: 0, dead letters: 0", False),
+             ("throttle", "throttled: 5 jobs", False),
+             ("management_api", "POST /joobq/pipeline/stats/reset as operator: 403", False),
+             ("delivery", "Drained cleanly: true", False)],
     "pro": [("first_workflow", "Processed order 42", False),
             ("workflow_dsl", "Receipt: Processed order 42", False),
             ("approval_workflow", "Approved order 42", False),
             ("compensation_workflow", "PASS failed payment released its reservation", False),
             ("production_worker", "Worker ready", True),
             ("coordination", "PASS batch uniqueness concurrent rate limit", False),
-            ("observability", "PASS completion metrics collection shutdown", False)],
+            ("observability", "PASS completion metrics collection shutdown", False),
+            ("rate_limit", "PASS 6 requests, at most 2 per second", False)],
 }
 
 
@@ -143,8 +152,8 @@ def main():
         if args.edition != "pro":
             parser.error("--pro-source requires --edition pro")
         commit = subprocess.check_output(["git", "-C", str(args.pro_source), "rev-parse", "HEAD"], text=True).strip()
-        if commit != "92879b94a3be2580e749f3a0acc829b9276040dc":
-            parser.error("--pro-source must be the documented v0.2.2 release")
+        if commit != "7e9a0a565f22f35d9fab455becc9dad065a94fa3":
+            parser.error("--pro-source must be the documented v0.2.4 release")
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("REDIS_", "JOOBQ_")) and key not in ("RACK_ENV", "CRYSTAL_ENV")}
     with tempfile.TemporaryDirectory(prefix="joobq-docs-") as temporary:

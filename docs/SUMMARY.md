@@ -54,20 +54,19 @@
 ## Explanation
 
 * [Explanation](explanation/README.md)
-  * [Pro features](explanation/pro-features.md)
-  * [Job lifecycle](explanation/job-lifecycle.md)
-  * [Queues and workers](explanation/queues-and-workers.md)
-  * [Retries and dead letters](explanation/retries-and-dead-letters.md)
-  * [Delayed and recurring jobs](explanation/delayed-and-recurring-jobs.md)
-  * [Reliability practices](explanation/reliability-practices.md)
-  * [Application architecture](explanation/application-architecture.md)
-  * [Choosing a pattern](explanation/choosing-a-pattern.md)
+  * [Why JoobQ](explanation/why-joobq.md)
+  * [Architecture at a glance](explanation/application-architecture.md)
+  * [Open Source vs Pro vs JoobQUI](explanation/pro-features.md)
+  * [Jobs and payloads](explanation/job-lifecycle.md)
+  * [Queues and priorities](explanation/queues-and-workers.md)
+  * [Workers and concurrency](explanation/workers-and-concurrency.md)
+  * [Retries, backoff and the DLQ](explanation/retries-and-dead-letters.md)
+  * [Cron and recurring jobs](explanation/delayed-and-recurring-jobs.md)
+  * [Rate limiting and throttling](explanation/rate-limiting-and-throttling.md)
+  * [Workflows and sagas](explanation/durable-workflows.md)
+  * [Batches and unique jobs](explanation/distributed-coordination.md)
   * [Delivery](explanation/delivery.md)
-  * [Durable workflows](explanation/durable-workflows.md)
-  * [Distributed coordination](explanation/distributed-coordination.md)
-  * [Production deployment](explanation/production-deployment.md)
-  * [Cloud topologies](explanation/cloud-topologies.md)
-  * [Metrics and observability](explanation/metrics-and-observability.md)
+  * [Live observability and metrics](explanation/metrics-and-observability.md)
 
 ## Maintainers
 

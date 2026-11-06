@@ -4,38 +4,31 @@ description: How JoobQ works and why it is built this way.
 
 # Explanation
 
-Explanation pages give the background behind the tasks: the model, the trade-offs and the limits. The label after each page says which part of JoobQ it covers: Core, Pro or JoobQUI. Pages marked "coming soon" are planned and not written yet.
+Explanation pages give the background behind the tasks: the model, the trade-offs and the limits. Each one shows the idea in a diagram and a small program you can run, and says where JoobQUI fits. The label after each page says which part of JoobQ it covers: Core, Pro or JoobQUI.
 
 ## Getting Started
 
-* Why JoobQ · Core · Pro · JoobQUI · coming soon
-* [Architecture and deployment models](https://joobq-website.onrender.com/docs/explanation/architecture-and-deployment-models) · JoobQUI
-* [Pro features](pro-features.md) · Pro
-* Open Source vs Pro vs JoobQUI · Core · Pro · JoobQUI · coming soon
+* [Why JoobQ](why-joobq.md) · Core · Pro · JoobQUI
+* [Architecture at a glance](application-architecture.md) · Core · Pro · JoobQUI
+* [Open Source vs Pro vs JoobQUI](pro-features.md) · Core · Pro · JoobQUI
 
 ## Core
 
-* [Job lifecycle](job-lifecycle.md) · Core
-* [Queues and workers](queues-and-workers.md) · Core
-* [Retries and dead letters](retries-and-dead-letters.md) · Core
-* [Delayed and recurring jobs](delayed-and-recurring-jobs.md) · Core · Pro
-* [Reliability practices](reliability-practices.md) · Core · Pro
-* [Application architecture](application-architecture.md) · Core
-* [Choosing a pattern](choosing-a-pattern.md) · Core · Pro
-* [How workers run your code](https://joobq-website.onrender.com/docs/explanation/how-workers-run-your-code) · JoobQUI
+* [Jobs and payloads](job-lifecycle.md) · Core
+* [Queues and priorities](queues-and-workers.md) · Core
+* [Workers and concurrency](workers-and-concurrency.md) · Core
+* [Retries, backoff and the DLQ](retries-and-dead-letters.md) · Core
+* [Cron and recurring jobs](delayed-and-recurring-jobs.md) · Core · Pro · JoobQUI
+* [Rate limiting and throttling](rate-limiting-and-throttling.md) · Core · Pro
 
 ## Advanced
 
+* [Workflows and sagas](durable-workflows.md) · Pro
+* [Batches and unique jobs](distributed-coordination.md) · Pro · Preview
 * [Delivery](delivery.md) · Core · Preview
-* [Durable workflows](durable-workflows.md) · Pro
-* [Workflow execution and sagas](https://joobq-website.onrender.com/docs/explanation/workflow-execution-and-sagas) · Pro · JoobQUI
-* [Distributed coordination](distributed-coordination.md) · Pro
-* Rate limiting and throttling · Core · Pro · coming soon
-* Polyglot SDKs and the gateway · JoobQUI · coming soon
+* [Polyglot SDKs and the gateway](https://joobq-website.onrender.com/docs/explanation/how-workers-run-your-code) · JoobQUI
 
 ## Production Ops
 
-* [Production deployment](production-deployment.md) · Core · Pro
-* [Cloud topologies](cloud-topologies.md) · Core · Pro
-* [Metrics and observability](metrics-and-observability.md) · Pro
-* [Security, audit and redaction](https://joobq-website.onrender.com/docs/explanation/security-audit-and-redaction) · JoobQUI
+* [Live observability and metrics](metrics-and-observability.md) · Core · Pro · JoobQUI
+* [Security model](https://joobq-website.onrender.com/docs/explanation/security-audit-and-redaction) · Core · JoobQUI

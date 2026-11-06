@@ -21,7 +21,7 @@ Start with the **[unified JoobQ and JoobQ Pro documentation](docs/README.md)**: 
 
 For workflows, follow the [typed DSL quick start](docs/tutorials/first-pro-workflow.md), available since **JoobQ Pro v0.2.2**, then explore [sequential and parallel flows](docs/tutorials/parallel-workflow-dsl.md). The authoring API remains a preview; existing constructors remain supported.
 
-Explore task-based [Guides](docs/how-to/README.md), reusable [Design Patterns](docs/explanation/choosing-a-pattern.md), [Production Deployment](docs/explanation/production-deployment.md), and [JoobQ Cloud](docs/explanation/cloud-topologies.md) for hosting on your cloud infrastructure.
+Explore task-based [Guides](docs/how-to/README.md), reusable [Design Patterns](docs/explanation/application-architecture.md), [Production Deployment](docs/explanation/application-architecture.md), and [JoobQ Cloud](docs/explanation/application-architecture.md) for hosting on your cloud infrastructure.
 
 > Enterprise v1 remains under review. The opt-in [leased runtime and migration guide](design/durable-runtime-guide.md) describes the new delivery API, management authentication and compatibility changes. See [validation and open release gates](design/implementation-validation.md) before deployment.
 

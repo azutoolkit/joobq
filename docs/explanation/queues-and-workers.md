@@ -1,44 +1,93 @@
 ---
-description: Register the queue you intend to consume and size capacity deliberately.
+description: How JoobQ queues order work, and why priority means separate queues with their own workers.
 ---
 
-# Queues and workers
+# Queues and priorities
 
-The [Quick Start](../tutorials/first-background-job.md) registers `ProcessOrderJob` on `orders` with two workers. The job's queue name must match. A process that boots successfully with no registered queues has nothing to consume.
+*Explanation · Core*
 
-## Registration is part of application boot
+A JoobQ queue is a Redis list for one job type, served by a fixed number of workers. Core has no priority field: urgent work goes on a queue of its own with enough workers, so a backlog of slow jobs never holds it up.
 
-Define job types before configuring their queues. The typed `queue` DSL constructs a queue for that type; generated applications may instead register types with `QueueFactory` and populate `queue_configs`. Use the mechanism generated for your installed version rather than mixing partial examples from older guides.
+## When to use it
 
-Do not infer workers from Redis connectivity. A producer can connect and enqueue while no worker is alive. Inspect configured queues, heartbeat freshness, and completions together.
+- **Keep password-reset emails fast while newsletters pile up.** `emails-urgent` gets four workers, `emails-bulk` one.
+- **Isolate a fragile dependency.** Jobs that call a slow partner API get their own queue, so their backlog does not delay invoices.
+- **Give one tenant or region its own capacity.** A queue per group, with workers sized to each.
 
-## Three different concurrency settings
-
-| Setting | Controls | Does not prove |
-| --- | --- | --- |
-| Queue workers | Local worker loops for a queue | Cluster-wide concurrency |
-| `worker_batch_size` | Maximum in-flight claims per legacy worker loop | A global cap across queues, processes, or fibers spawned by your handler |
-| `CRYSTAL_WORKERS` | Crystal execution threads in a compatible multithreaded build | Number of JoobQ queue workers |
-
-Each legacy worker spawns a fiber per claimed job. Two workers with the default batch size of ten can therefore hold up to twenty jobs in flight in that queue process. Setting two workers does not cap execution at two jobs. Workflow activity queues use this same legacy transport unless you explicitly configure Delivery.
-
-Increase concurrency only while throughput improves without unacceptable latency, connection contention, or memory growth. Database and HTTP client pools must support the workload too. See [tuning](../how-to/tune-concurrency-and-shutdown.md).
-
-## Producer and worker boundaries
-
-Keep enqueueing in application services and execution in a supervised worker process. The shared boot file registers jobs and configuration; it should not start workers merely because a CLI inspector loads it.
+## How it works
 
 ```mermaid
 flowchart LR
-  Web[Web or command producer] -->|typed job payload| Queue[(orders)]
-  Boot[Shared job definitions and configuration] --> Web
-  Boot --> Worker[Separate worker process]
-  Queue --> Worker
-  Worker --> Service[Order service]
+  P[Producer] -->|RPUSH| Q[(Redis list: exports)]
+  Q -->|RPOPLPUSH| Proc[(joobq:processing:exports)]
+  Proc --> W[Worker runs perform]
+  W -->|done| X[Removed from processing]
 ```
 
-**Next:** [Retries and dead letters](retries-and-dead-letters.md).
+`enqueue` appends the job's JSON to the right of the list (`RPUSH`); a worker takes jobs from the right of the same list into a processing list (`RPOPLPUSH`). The newest waiting job therefore comes out first: the order is last in, first out. If order matters to you, put an ordering key in the payload and check it in `perform`.
+
+## Example
+
+<!-- example: core/queue_order.cr -->
+```crystal
+require "joobq"
+
+struct ExportReportJob
+  include JoobQ::Job
+
+  @queue = "exports"
+  getter report_id : Int32
+
+  def initialize(@report_id : Int32)
+  end
+
+  def perform
+    puts "Exported report #{report_id}"
+  end
+end
+
+JoobQ.configure do |config|
+  config.rest_api_enabled = false
+  config.worker_batch_size = 1
+  queue "exports", 1, ExportReportJob
+end
+
+# Enqueued before any worker runs: 1, then 2, then 3.
+(1..3).each { |id| ExportReportJob.enqueue(report_id: id) }
+JoobQ.forge
+```
+
+Output of `crystal run queue_order.cr` (log lines omitted):
+
+```
+Exported report 3
+Exported report 2
+Exported report 1
+```
+
+With one worker that claims one job at a time, the three jobs run newest first. With more workers or a larger batch they run at the same time, and no order holds.
+
+## Options
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `queue name, workers, JobClass` | `queue` macro arguments | none | One queue for one job type; `workers` must be 1 to 1000 |
+| `throttle` | `{limit: Int32, period: Time::Span}` | `nil` | Optional fourth argument: starts spaced at least `period / limit` apart, per queue, in this process |
+| `@queue` | `String` | `"default"` | Set in the job; it must match a configured queue name |
+| `default_queue` | `String` | `"default"` | The queue a job uses when it sets none |
+
+A worker only runs the type its queue was declared with, so one job type per queue. A paused queue keeps its jobs; its workers stop claiming until it is resumed.
 
 {% hint style="info" %}
-The typed queue DSL walkthrough targets standalone Core `v0.5.1`. Pro `v0.2.2` uses an earlier Core revision; register legacy job types with `QueueFactory` and `queue_configs` as shown in the [compatibility notes](../reference/compatibility.md#release-specific-integration-notes).
+**JoobQUI.** The console lists every queue with its size, processing count, dead letters, pause state and worker count, and `/metrics` exports the same numbers per queue (`joobqui_queue_size`, `joobqui_queue_processing`, ...). Watch the urgent queue's size: it is your priority signal.
 {% endhint %}
+
+{% hint style="warning" %}
+The deprecated `POST /joobq/jobs` route validates a `priority` field (0 to 100) but nothing reads it. Do not rely on it.
+{% endhint %}
+
+## Next steps
+
+- [Workers and concurrency](workers-and-concurrency.md): how many jobs a queue runs at once.
+- [Configure queues](../how-to/configure-queues.md): set up the queues for your job types.
+- [Rate limiting and throttling](rate-limiting-and-throttling.md): the `throttle` argument and Pro's rate limiter.

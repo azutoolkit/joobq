@@ -1,61 +1,36 @@
 ---
-description: Background jobs and durable workflows for Crystal applications.
+description: Background jobs, durable workflows and a self-hosted operations console for Crystal applications.
 ---
 
 # Introduction
 
-JoobQ moves work out of your request cycle and into Redis-backed queues. Write a typed Crystal job, enqueue it, and let a worker handle it. JoobQ Pro extends the same foundation with workflows, richer metrics, and explicit coordination services.
+JoobQ runs background jobs for Crystal applications on the Redis you already have. JoobQ Pro adds durable workflows and coordination on top of it, and JoobQUI is a self-hosted console and API that operates both, with workers in eight more languages.
 
-Use Core to send notifications, process orders, and schedule background work. Add Pro when that work needs dependencies, signals, compensation, or more detailed operational visibility. You do not need an Azu web application to use either shard.
+## Who it is for
 
-{% hint style="info" %}
-Start with the [compatibility guide](reference/compatibility.md). These docs teach released APIs first and label experimental paths. Redis persistence and application idempotency remain part of reliable operation.
-{% endhint %}
-
-## Start here
-
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody>
-<tr><td><strong>Quick Start</strong></td><td>Run your first order-processing job.</td><td><a href="tutorials/first-background-job.md">Quick Start</a></td></tr>
-<tr><td><strong>Core Concepts</strong></td><td>Understand queues, workers, retries, and dead letters.</td><td><a href="explanation/job-lifecycle.md">Core Concepts</a></td></tr>
-<tr><td><strong>Pro Features</strong></td><td>Coordinate workflows and inspect their progress.</td><td><a href="explanation/pro-features.md">Pro Features</a></td></tr>
-<tr><td><strong>Configuration</strong></td><td>Connect Redis and size your workers.</td><td><a href="reference/configuration.md">Configuration</a></td></tr>
-<tr><td><strong>Best Practices</strong></td><td>Design repeatable work and rehearse recovery.</td><td><a href="explanation/reliability-practices.md">Best Practices</a></td></tr>
-</tbody></table>
-
-## Build, choose a pattern, deploy
-
-| Your next step | Start here |
-| --- | --- |
-| Build and test real background work | [Guides](how-to/README.md) |
-| Structure concurrency, compensation, and admission | [Design Patterns](explanation/choosing-a-pattern.md) |
-| Run workers and protect Redis state | [Production Deployment](explanation/production-deployment.md) |
-| Host on cloud VMs, containers, or Kubernetes | [JoobQ Cloud](explanation/cloud-topologies.md) |
+Teams that build in Crystal and want typed background jobs, retries and dead letters without running a separate broker. Add Pro when a business process has several steps, signals or compensation; add JoobQUI when people operate the queues in production.
 
 ## How the pieces fit
 
 ```mermaid
 flowchart LR
-  App[Crystal application] -->|enqueue| Redis[(Redis queues)]
-  Redis --> Workers[JoobQ workers]
-  Workers --> Service[Database or external service]
-  Workers -->|completion or retry| Redis
-  Pro[Optional Pro workflow engine] -->|dispatch activities| Redis
-  Pro <-->|workflow history| History[(Redis history)]
+  App[Your Crystal app: Core and Pro] -->|enqueue, run| Redis[(Redis)]
+  UI[JoobQUI, self-hosted] --> Redis
+  UI --> PG[(PostgreSQL)]
+  SDK[Workers in Python, TypeScript, Go, ...] -->|HTTPS| UI
 ```
 
-Crystal compiles job handlers to native code and uses fibers to overlap waiting work. Redis coordinates producers and workers. Actual throughput depends on your jobs, persistence, network, and concurrency; see [capacity planning](how-to/measure-performance.md) for a measurement method rather than a universal speed claim.
+| Part | What it is | Label on pages |
+| --- | --- | --- |
+| JoobQ | The open-source `joobq` shard: jobs, queues, workers, retries, dead letters, scheduling | **Core** |
+| JoobQ Pro | The `joobq_pro` shard: workflows, sagas, rate limits, batches, metrics | **Pro** |
+| JoobQUI | The console, `/api/v1`, `/metrics` and the SDK gateway, run on your servers | **JoobQUI** |
 
-## Core and Pro, together
+Versions are stated once, on the [compatibility page](reference/compatibility.md). Features that are not shipped yet are labelled **Roadmap**, and ones that are shipped but still settling are labelled **Preview**.
 
-| Need | Where to start |
-| --- | --- |
-| Typed jobs, queues, retries, scheduling, and DLQ inspection | [Core](explanation/job-lifecycle.md) |
-| Worker shutdown, TLS connections, and management tokens | [Configuration](reference/configuration.md); these are not Pro-only |
-| Typed sequential/parallel workflows, signals, timers, and compensation | [Pro workflow DSL](tutorials/parallel-workflow-dsl.md), since v0.2.2 |
-| Durable batch membership and unique admission | [Pro coordination](explanation/distributed-coordination.md); uses opt-in Delivery |
-| Percentiles and alert evaluation | [Pro observability](explanation/metrics-and-observability.md) |
-| Terminal queue inspection | [CLI management](reference/azu-cli-and-terminal.md); Core works too |
+## Where to go
 
-[Screenshot: Azu CLI running azu joobq with the orders queue selected, waiting and processing counts, worker heartbeats, and a clearly labeled unavailable workflow provider when Pro is not loaded.]
-
-**Next:** [Run your first job](tutorials/first-background-job.md), or [add Pro to an existing app](how-to/add-pro.md).
+- [Tutorials](tutorials/README.md): run your first job in five minutes, then your first workflow.
+- [How-to Guides](how-to/README.md): one task each, from installing to running in production.
+- [Reference](reference/README.md): configuration, commands, routes and APIs, as the code defines them.
+- [Explanation](explanation/README.md): how JoobQ works and why; start with [Why JoobQ](explanation/why-joobq.md).

@@ -93,6 +93,6 @@ The baseline YAML `setup_schedulers_from_config` path logs scheduling intent ins
 
 ## Use a durable workflow schedule when needed
 
-For persisted workflow starts and explicit overlap/catch-up policy, use [Pro workflow schedules](../explanation/durable-workflows.md#schedules-and-deployments). At least one Pro worker must have its workflow scheduler enabled (`scheduler: true`, the default). The production worker example deliberately disables it; timers and workflow deadlines still work through the reconciler.
+For persisted workflow starts and explicit overlap/catch-up policy, use [Pro workflow schedules](../explanation/delayed-and-recurring-jobs.md). At least one Pro worker must have its workflow scheduler enabled (`scheduler: true`, the default). The production worker example deliberately disables it; timers and workflow deadlines still work through the reconciler.
 
 **Next:** [Worker lifecycle](run-workers.md) and [failure recovery](handle-failures.md).

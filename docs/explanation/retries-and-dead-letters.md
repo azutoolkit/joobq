@@ -1,76 +1,125 @@
 ---
-description: Recover transient failures without turning replay into duplicate side effects.
+description: How JoobQ retries a failed job, how long it waits between attempts, and what the dead letter queue keeps.
 ---
 
-# Retries and dead letters
+# Retries, backoff and the DLQ
 
-A raised exception enters the retry middleware. Core's default budget is **three retries**, allowing the initial attempt plus three further attempts. Backoff starts at one second, doubles by retry attempt, and is capped at one hour in the baseline implementation. It is not a promise that a job starts at exactly that time.
+*Explanation · Core*
 
-The remaining budget is carried with the serialized job. Every failure is either scheduled for retry once or dead-lettered; exhausted jobs move to the DLQ with failure context. A per-job retry lock (`joobq:retry_lock:<jid>`) holds the attempt it scheduled, so a second handler of the same failure backs off while the job's next failure is retried as usual. `dead_letter_ttl` defaults to seven days, but the documented Redis implementation stores entries in a sorted set without applying that TTL or automatically pruning by age. Do not assume records disappear after seven days. Monitor growth and implement a reviewed retention/export policy using the DLQ APIs; the DLQ is not a backup or a permanent audit guarantee.
+A job that raises is retried with exponential backoff until its retry budget runs out; then it moves to the dead letter queue (DLQ) with the error that killed it. Transient failures heal on their own, and permanent ones wait for a person instead of looping.
 
-## Stop retrying a permanent failure
+## When to use it
 
-Raise `JoobQ::NonRetryableError`, or a subclass, when running the job again cannot succeed: a declined card, a deleted record, input that will never validate. The job goes to the DLQ at once, whatever retries it has left, and `perform` is not called again.
+- **Ride out a partner outage.** A CRM that answers 503 for a few seconds gets three more attempts, spaced 1, 2 and 4 seconds apart.
+- **Stop at once on a permanent failure.** A declined card raises `JoobQ::NonRetryableError` and goes straight to the DLQ.
+- **Repair and replay.** Fix the bug, then redrive the dead letters: they run again with a full budget.
 
-<!-- illustrative: a job class with an application-defined declined? check -->
+## How it works
+
+```mermaid
+flowchart LR
+  Run[perform raises] --> Q{retries left and not NonRetryableError?}
+  Q -->|yes| Delay[(joobq:delayed_jobs, due after backoff)]
+  Delay -->|due, checked every second| Queue[(queue)]
+  Queue --> Run
+  Q -->|no| DLQ[(joobq:dead_letter)]
+  DLQ -->|redrive| Queue
+```
+
+The delay before retry *n* (n = 0 for the first failure) is `min(2^n seconds, 1 hour)`, with no jitter; `n` is `max_retries - retries` at the time of the failure. The retry waits in a delayed set that is checked once a second, so an attempt starts up to about a second after its backoff. A retry lock (`joobq:retry_lock:<jid>`) makes sure one failure is scheduled once, even if two handlers see it.
+
+## Example
+
+<!-- example: core/retry_backoff.cr -->
 ```crystal
-class ChargeJob
+require "joobq"
+
+STARTED = Time.instant
+
+struct SyncCrmContactJob
   include JoobQ::Job
+
+  @queue = "crm"
+  getter contact_id : Int64
+
+  def initialize(@contact_id : Int64)
+  end
+
+  def perform
+    puts "Attempt #{max_retries - retries + 1} at #{(Time.instant - STARTED).total_seconds.round(1)}s"
+    raise "CRM answered 503"
+  end
+end
+
+struct ChargeCardJob
+  include JoobQ::Job
+
+  @queue = "payments"
 
   class Declined < JoobQ::NonRetryableError
   end
 
-  property order_id : Int64
-
-  def initialize(@order_id)
+  def initialize
   end
 
   def perform
-    raise Declined.new("card declined for order #{order_id}") if declined?(order_id)
+    puts "ChargeCardJob ran once"
+    raise Declined.new("card declined")
   end
 end
+
+JoobQ.configure do |config|
+  config.rest_api_enabled = false
+  queue "crm", 1, SyncCrmContactJob
+  queue "payments", 1, ChargeCardJob
+end
+
+dlq = JoobQ::DeadLetterQueue.new
+spawn { JoobQ.forge(trap_signals: false) }
+SyncCrmContactJob.enqueue(contact_id: 7_i64)
+ChargeCardJob.enqueue
+until dlq.count("crm") + dlq.count("payments") == 2
+  sleep 100.milliseconds
+end
+JoobQ.shutdown(5.seconds)
+(dlq.page(queue: "crm") + dlq.page(queue: "payments")).each { |entry| puts "Dead letter (#{entry.queue}): #{entry.error}" }
 ```
 
-Other exceptions are retried while budget remains, whatever their class.
+Output of `LOG_LEVEL=fatal crystal run retry_backoff.cr`:
 
-## What a dead letter records
-
-The stored job keeps `"status": "dead"` and an `error` object describing the last failure:
-
-| Field | Content |
-| --- | --- |
-| `error_class` | The exception's class, such as `ChargeJob::Declined` |
-| `error_type` | Its category: `non_retryable_error`, `validation_error`, `connection_error`, `unknown_error`, ... |
-| `message` | The exception's message, at most 4 KiB |
-| `backtrace` | The first 20 lines of the backtrace, newline-separated, at most 8 KiB |
-| `cause` | The message of the exception's cause, or an empty string |
-| `failed_at` | When it failed (RFC 3339) |
-| `retry_count` | The attempt that failed, 0 being the first run |
-| `system_context` | Worker, queue and host details |
-
-Values of `encrypted_property` fields are removed from the message and backtrace. `DeadLetterQueue#page` also returns the message alone as each entry's `error`. Re-driving an entry clears the error and restores the full retry budget.
-
-## Inspect before replaying
-
-Inside an Azu application configured for JoobQ:
-
-```sh
-azu jobs:dlq --queue orders --limit 20 --json
-azu jobs:retry --queue orders --limit 1 --dry-run
+```
+Attempt 1 at 0.5s
+ChargeCardJob ran once
+Attempt 2 at 2.0s
+Attempt 3 at 5.0s
+Attempt 4 at 10.1s
+Dead letter (crm): CRM answered 503
+Dead letter (payments): card declined
 ```
 
-Fix the failure and verify the preview's target before executing a replay. The CLI prompts interactively; its `--force` flag is the explicit automation path. In `azu joobq`, select a DLQ entry and use `r`, then `y`, to confirm that selected replay.
+The gaps are 1.5, 3.0 and 5.1 seconds: the 1, 2 and 4 second backoffs plus the wait for the next check of the delayed set. Four attempts is the first run plus the default three retries.
 
-[Screenshot: The azu joobq dead-letter view with one failed order job selected, showing its ID, queue, failure time, redrive eligibility, and the replay confirmation prompt with sensitive payload values hidden.]
+## Options
 
-## Know what can be replayed
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `retries` | `Int32` | `3` | Retries after the first run, 0 to 100; set per job or with `config.retries` |
+| backoff | fixed | `min(2^n s, 1 h)` | Not configurable in Core |
+| `JoobQ::NonRetryableError` | exception class | none | Raise it, or a subclass, to dead-letter at once |
+| `dead_letter_ttl` | `Time::Span` | `7.days` | Accepted and validated, but the Redis DLQ does not expire entries |
 
-Some malformed or withheld payloads cannot be reconstructed into a job. Honor the native `redrivable` result; do not hand-edit Redis entries to force them through. Keep the job class available and compatible with old payloads during deployments.
-
-An atomic queue transition prevents competing operators from moving the same stored member twice. It does **not** make an external payment or email exactly once. A worker may have completed the side effect before losing its acknowledgement. Use [idempotency](../how-to/write-idempotent-jobs.md) for that boundary.
+A dead letter keeps the job's JSON with an `error` object (a job that ran out of retries or raised `NonRetryableError` also has `"status": "dead"`): `error_class`, `error_type` (`non_retryable_error`, `validation_error`, `connection_error`, `unknown_error`, ...), `message` (at most 4 KiB), `backtrace` (first 20 lines, at most 8 KiB), `cause`, `failed_at`, `retry_count` and `system_context`. Values of `encrypted_property` fields are removed from the message and backtrace. A redrive clears the error and restores the job's `max_retries`.
 
 {% hint style="warning" %}
-A connection error can mean an unknown Redis outcome. Do not blindly enqueue again with a new identity or repeat a bulk replay. Reconcile the original job or receipt first.
+The DLQ is a Redis sorted set that grows until you purge it: `dead_letter_ttl` is not enforced. Watch its size and decide how long you keep entries.
 {% endhint %}
 
-**Next:** [Troubleshooting](../how-to/troubleshoot.md).
+{% hint style="info" %}
+**JoobQUI.** The Dead letters page lists entries with their error, and lets an operator redrive, purge or export them. A redrive in the console uses the same Core redrive, so it also resets the retry budget.
+{% endhint %}
+
+## Next steps
+
+- [Handle failures](../how-to/handle-failures.md): choose what to retry and what to stop.
+- [Triage, redrive and export dead letters](https://joobq-website.onrender.com/docs/how-to/triage-and-redrive-dead-letters): the console workflow.
+- [Jobs and payloads](job-lifecycle.md): the fields a dead letter keeps.

@@ -48,4 +48,4 @@ Keep `rest_api_enabled = false` unless you need the management listener. When en
 
 The configured seven-day `dead_letter_ttl` is not enforced by the released Redis DLQ implementation. Plan retention explicitly. Likewise, `config.timeout` does not kill running job fibers. Treat configuration names as API inputs, not guarantees beyond their implementation.
 
-**Next:** [Worker lifecycle](run-workers.md), [clients](use-clients-and-producers.md), and [production deployment](../explanation/production-deployment.md).
+**Next:** [Worker lifecycle](run-workers.md), [clients](use-clients-and-producers.md), and [architecture at a glance](../explanation/application-architecture.md).

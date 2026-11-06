@@ -40,6 +40,19 @@ module JoobQ
 
     @started = Atomic(Bool).new(false)
 
+    # One dispatcher fiber per queue (RedisStore only) blocks on BLMOVE on a dedicated connection and hands claims to
+    # the worker fibers over this channel, so idle workers never poll Redis and a new job is picked up with no added
+    # latency. Blocking connections are therefore one per active queue, never one per worker.
+    @dispatch : Channel({String, Int64})? = nil
+    @dispatch_stop = Atomic(Bool).new(false)
+    @dispatching = Atomic(Bool).new(false)
+    # Fresh per dispatcher generation, so a stop that timed out can never leave a stale token a later stop reads.
+    @dispatch_done : Channel(Nil)? = nil
+    @dispatch_conn : RedisClient? = nil
+    # Set in the future while the process cannot claim (missing encryption keys); the dispatcher backs off too.
+    @claim_paused_until = Atomic(Int64).new(0_i64)
+    DISPATCH_START = Time.instant
+
     def initialize(@name : String, @total_workers : Int32,
                    @throttle_limit : NamedTuple(limit: Int32, period: Time::Span)? = nil,
                    *, @store : Store = ::JoobQ.config.store, @handler : Proc(T, Nil)? = nil)
@@ -73,7 +86,139 @@ module JoobQ
 
       reprocess_busy_jobs!
       store.as?(RedisStore).try(&.start_owner_heartbeat)
+      start_dispatcher
       worker_manager.start_workers
+    end
+
+    # Starts the per-queue dispatcher. Only with a RedisStore; other stores keep the workers' own (fallback) claim.
+    private def start_dispatcher : Nil
+      redis_store = store.as?(RedisStore)
+      return unless redis_store
+      return if @total_workers <= 0 # nothing would consume what it claims
+      return if @dispatching.swap(true)
+
+      @dispatch_stop.set(false)
+      # One batch of headroom: enough to decouple the dispatcher's batched claim from worker consumption, but small
+      # enough that the claims staged ahead of worker demand (and so requeued, not lost, at shutdown) stay well below
+      # the old design's worst case of one in-flight batch per worker.
+      capacity = {JoobQ.config.worker_batch_size, 1}.max
+      channel = Channel({String, Int64}).new(capacity)
+      done = Channel(Nil).new(1)
+      @dispatch = channel
+      @dispatch_done = done
+
+      spawn(name: "dispatch-#{name}") do
+        connection = redis_store.blocking_connection
+        @dispatch_conn = connection
+        begin
+          dispatch_loop(redis_store, channel, connection)
+        ensure
+          connection.close rescue nil
+          select # non-blocking: never wedge on a full buffer if stop already timed out and moved on
+          when done.send(nil)
+          else
+          end
+        end
+      end
+    end
+
+    # The blocking-claim loop: block for the head job, top up the rest of the batch without blocking, register every
+    # claim in InFlight (so shutdown requeue still owns them), and hand each to a worker. Pause/backoff/shutdown are
+    # re-checked each turn and the 0.5s block bounds how long any of them waits.
+    private def dispatch_loop(redis_store : RedisStore, channel : Channel({String, Int64}), connection : RedisClient) : Nil
+      batch = JoobQ.config.worker_batch_size
+      until @dispatch_stop.get
+        begin
+          if paused? || claim_paused? || JoobQ.shut_down?
+            sleep 100.milliseconds
+            next
+          end
+
+          first = redis_store.blocking_claim(name, connection)
+          next unless first # empty queue: the block timed out, loop again with no extra sleep
+          jobs = [first]
+          jobs.concat(redis_store.claim_jobs_batch(name, "dispatcher", T, batch - 1)) if batch > 1
+
+          tokens = InFlight.claimed(name, jobs)
+          jobs.each_with_index do |job, index|
+            deliver(channel, {job, tokens[index]})
+          end
+        rescue ex
+          break if @dispatch_stop.get
+          Log.error &.emit("Dispatcher error", queue: name, error: ex.message)
+          sleep 100.milliseconds
+        end
+      end
+    end
+
+    # Hands one claim to a worker. A claim is already in Redis processing and registered in InFlight, so if the
+    # dispatcher is stopping and no worker takes it, it is left for shutdown requeue / crash recovery rather than lost.
+    private def deliver(channel : Channel({String, Int64}), claim : {String, Int64}) : Nil
+      until @dispatch_stop.get
+        select
+        when channel.send(claim)
+          return
+        when timeout(100.milliseconds)
+        end
+      end
+    end
+
+    # A worker's claim source in dispatcher mode: wait up to the block timeout for the first claim, then drain up to
+    # `max` total without blocking. Preserves FIFO (the dispatcher claims in order) and batch throughput under load.
+    def take_claims(max : Int32) : Array({String, Int64})
+      channel = @dispatch
+      claims = [] of {String, Int64}
+      return claims unless channel
+
+      select
+      when claim = channel.receive?
+        claims << claim if claim
+      when timeout(0.5.seconds)
+        return claims
+      end
+
+      while claims.size < max
+        select
+        when claim = channel.receive?
+          claim ? (claims << claim) : break
+        else
+          break
+        end
+      end
+      claims
+    end
+
+    def dispatching? : Bool
+      @dispatching.get
+    end
+
+    # Monotonic ms since start, for the claim-pause clock (a wall-clock step must not stretch or cut the pause).
+    private def dispatch_now_ms : Int64
+      (Time.instant - DISPATCH_START).total_milliseconds.to_i64
+    end
+
+    def pause_claiming(duration : Time::Span) : Nil
+      @claim_paused_until.set(dispatch_now_ms + duration.total_milliseconds.to_i64)
+    end
+
+    def claim_paused? : Bool
+      dispatch_now_ms < @claim_paused_until.get
+    end
+
+    private def stop_dispatcher : Nil
+      return unless @dispatching.swap(false)
+      @dispatch_stop.set(true)
+      @dispatch_conn.try(&.close) rescue nil # interrupts a blocked BLMOVE at once
+      if done = @dispatch_done
+        select
+        when done.receive?
+        when timeout(2.seconds)
+          Log.warn &.emit("Dispatcher did not stop within timeout", queue: name)
+        end
+      end
+      @dispatch = nil
+      @dispatch_conn = nil
+      @dispatch_done = nil
     end
 
     # A queue of a job class with encrypted properties does not start without valid keys: better to fail at start-up
@@ -244,6 +389,7 @@ module JoobQ
     end
 
     def stop!
+      stop_dispatcher
       worker_manager.stop_workers
       @started.set(false)
     end

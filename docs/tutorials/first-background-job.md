@@ -1,18 +1,23 @@
 ---
-description: Run a typed order-processing job with Crystal and Redis.
+description: Run your first typed background job with Crystal and Redis, in under five minutes.
 ---
 
-# Quick Start
+# Your first background job
 
-You will enqueue order `42`, see a worker process it, and stop the worker cleanly. Have Crystal **1.22.1**, Shards, and a local Redis instance ready. The short path targets about three minutes with prerequisites installed; dependency downloads and cold compilation vary by machine.
+*Tutorial · Core*
 
-## 1. Create the project
+You will write a job that processes order 42, run a worker that performs it, and stop the worker cleanly. You need Crystal 1.22 or newer, Shards, and a Redis server running on `localhost:6379`.
+
+{% stepper %}
+{% step %}
+## Create the project
 
 ```sh
-mkdir order_worker
+mkdir -p order_worker/src
 cd order_worker
-mkdir src
 ```
+
+Create `shard.yml`:
 
 {% code title="shard.yml" %}
 ```yaml
@@ -22,18 +27,50 @@ version: 0.1.0
 dependencies:
   joobq:
     github: azutoolkit/joobq
-    version: "= 0.5.1"
+    version: "= 0.5.6"
 ```
 {% endcode %}
 
+Install it:
+
 ```sh
 shards install
+```
+
+You should see:
+
+```
+I: Resolving dependencies
+I: Fetching https://github.com/azutoolkit/joobq.git
+I: Fetching https://github.com/stefanwille/crystal-redis.git
+I: Fetching https://github.com/kostya/cron_parser.git
+I: Fetching https://github.com/ysbaddaden/pool.git
+I: Installing pool (0.2.4)
+I: Installing redis (2.9.1)
+I: Installing cron_parser (0.4.0)
+I: Installing joobq (0.5.6)
+I: Writing shard.lock
+```
+{% endstep %}
+
+{% step %}
+## Check that Redis answers
+
+```sh
 redis-cli ping
 ```
 
-Expect `PONG`. This walkthrough uses the default local Redis connection. Use a dedicated development instance; see [Redis configuration](../how-to/connect-to-redis.md) for other endpoints. Commit `shard.lock` with your application.
+You should see:
 
-## 2. Write the job and register its queue
+```
+PONG
+```
+{% endstep %}
+
+{% step %}
+## Write the job
+
+Create `src/worker.cr`:
 
 {% code title="src/worker.cr" %}
 <!-- example: core/first_job.cr -->
@@ -64,26 +101,40 @@ JoobQ.forge
 ```
 {% endcode %}
 
-The queue name on the job matches the registered queue. `enqueue` stores work; `forge` starts workers and waits. The handler prints a message instead of calling a real payment or mail service.
+The job's `@queue` is `orders`, the same name the `queue` line registers with two workers.
+{% endstep %}
 
-## 3. Run it
+{% step %}
+## Run the worker
 
 ```sh
 crystal run src/worker.cr
 ```
 
-Among the startup logs, expect:
+The first build takes a few seconds. Among JoobQ's log lines you should see:
 
-```text
+```
 Processed order 42
 ```
+{% endstep %}
 
-Press **Ctrl-C** after completion. JoobQ stops accepting work and drains its workers. Each launch of this demonstration enqueues a new job; a real producer normally lives separately from worker startup.
+{% step %}
+## Stop the worker
 
-[Screenshot: A terminal showing the Quick Start worker starting the orders queue, printing Processed order 42, and exiting after Ctrl-C without exposing connection credentials.]
+Press **Ctrl-C**. The last log line should be:
 
-{% hint style="info" %}
-The management API is deliberately off. No management token is needed for this example. A job that performs an external effect still needs [idempotency](../how-to/write-idempotent-jobs.md).
-{% endhint %}
+```
+INFO - JoobQ stopped -- abandoned_jobs: 0
+```
 
-**Next:** [Queues and workers](../explanation/queues-and-workers.md), or [integrate an Azu app](../how-to/use-joobq-in-azu.md).
+The worker finished its job before stopping, so nothing was put back on the queue.
+{% endstep %}
+{% endstepper %}
+
+You have run a typed job through Redis and stopped its worker cleanly. On the machine these outputs come from, the whole tutorial took about 17 seconds after Crystal was installed: 2 seconds for `shards install`, 15 for the first build and run.
+
+## Next steps
+
+- [Connect to JoobQUI and recover a failed job](https://joobq-website.onrender.com/docs/tutorials/01-first-10-minutes): see the job in the console.
+- [Jobs and payloads](../explanation/job-lifecycle.md): what the job looks like in Redis.
+- [Write and enqueue jobs](../how-to/write-and-enqueue-jobs.md): enqueue from your application.

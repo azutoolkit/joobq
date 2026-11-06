@@ -4,7 +4,7 @@ description: Lessons that take you from an empty project to a working result, on
 
 # Tutorials
 
-Each tutorial has one outcome and numbered steps. The label after each page says which part of JoobQ it uses: Core, Pro or JoobQUI. Pages marked "coming soon" are planned and not written yet.
+Each tutorial has one outcome and numbered steps, with the output you should see after each one. Start with the first background job; it takes under five minutes. The label after each page says which part of JoobQ it uses: Core, Pro or JoobQUI.
 
 ## Getting Started
 

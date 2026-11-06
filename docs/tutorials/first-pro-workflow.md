@@ -1,10 +1,60 @@
 ---
-description: Run one order-processing activity through the Pro workflow engine.
+description: Run one activity through the Pro workflow engine and read its result.
 ---
 
 # Your first Pro workflow
 
-Install the [Pro dependency setup](../how-to/add-pro.md) first. This example uses the typed DSL in **Pro v0.2.2** and its pinned Core revision, with the management API off. The authoring API remains a preview; existing constructors are still supported. It has no real external side effect.
+*Tutorial · Pro*
+
+You will define a one-step workflow, start a run for order 42, and print the run's result. You need Crystal 1.22 or newer, a Redis server on `localhost:6379`, and read access to the `azutoolkit/joobq-pro` repository.
+
+{% stepper %}
+{% step %}
+## Create the project
+
+```sh
+mkdir -p order_workflow/src
+cd order_workflow
+```
+
+{% code title="shard.yml" %}
+```yaml
+name: order_workflow
+version: 0.1.0
+
+dependencies:
+  joobq_pro:
+    github: azutoolkit/joobq-pro
+    version: "= 0.2.4"
+```
+{% endcode %}
+
+```sh
+shards install
+```
+
+You should see `joobq` installed with it:
+
+```
+I: Resolving dependencies
+I: Fetching https://github.com/azutoolkit/joobq-pro.git
+I: Fetching https://github.com/azutoolkit/joobq.git
+I: Fetching https://github.com/stefanwille/crystal-redis.git
+I: Fetching https://github.com/kostya/cron_parser.git
+I: Fetching https://github.com/ysbaddaden/pool.git
+I: Installing pool (0.2.4)
+I: Installing redis (2.9.1)
+I: Installing cron_parser (0.4.0)
+I: Installing joobq (0.5.6)
+I: Installing joobq_pro (0.2.4)
+I: Writing shard.lock
+```
+{% endstep %}
+
+{% step %}
+## Write the workflow
+
+Create `src/workflow.cr`:
 
 {% code title="src/workflow.cr" %}
 <!-- example: pro/first_workflow.cr -->
@@ -42,32 +92,30 @@ end
 ```
 {% endcode %}
 
+`ProcessOrder` is the activity; the `workflow` block declares one step, `:process`, that runs it with the run's input.
+{% endstep %}
+
+{% step %}
+## Run it
+
 ```sh
 crystal run src/workflow.cr
 ```
 
-Expect `Processed order 42`. A missing or invalid license may also produce startup warnings; see [Pro access](../how-to/secure-management-access.md). This example waits for its result and shuts down. A service normally keeps its worker alive and admits runs from a separate producer.
+Without a `JOOBQ_PRO_LICENSE`, Pro first prints a licence warning. Then you should see:
 
-## What changed from a regular job?
-
-The activity has typed input and an `ActivityContext`. `workflow` returns a validated `Blueprint`; `step` binds the activity class without executing it. Worker registration publishes its definition and installs the handler. The engine records transitions in Redis history and dispatches the work. An activity can run again after a retry, so use `context.dedupe_key` with an external service that supports idempotency.
-
-```mermaid
-sequenceDiagram
-  participant App as Application
-  participant Engine as Workflow engine
-  participant History as Redis history
-  participant Worker as Activity worker
-  App->>Engine: start process-order
-  Engine->>History: append WorkflowStarted
-  Engine->>Worker: dispatch process activity
-  Worker->>History: record activity outcome
-  Engine->>History: record workflow completion
-  App->>Engine: result(run_id)
+```
+Processed order 42
 ```
 
-## Add another step
+The program started the run, waited for its result, and shut down Pro and then Core.
+{% endstep %}
+{% endstepper %}
 
-Steps run from top to bottom. Omitted activity input uses the original workflow input; use `input: output(:process)` to pass a prior result explicitly. Use `parallel` for concurrent branches and `sequence` for an ordered branch. These groups add graph dependencies, not extra jobs.
+You have run an activity through the workflow engine: the run's steps were recorded in Redis, and `result` read the step's output back.
 
-See the [runnable parallel workflow](parallel-workflow-dsl.md), [complete DSL reference](../reference/workflow-dsl.md), and [lifecycle controls](../reference/workflow-lifecycle-controls.md). If you already have constructor-based definitions, follow the [migration guide](../how-to/migrate-to-the-workflow-dsl.md).
+## Next steps
+
+- [Build a parallel workflow with the DSL](parallel-workflow-dsl.md): two branches and a join.
+- [Workflows and sagas](../explanation/durable-workflows.md): history, compensation and scopes.
+- [Build and run workflows](../how-to/build-and-run-workflows.md): run a workflow worker in your application.

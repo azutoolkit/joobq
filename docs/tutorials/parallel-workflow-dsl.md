@@ -1,35 +1,20 @@
 ---
-description: Build durable workflows with sequential steps and explicit parallel branches.
+description: Build a workflow whose receipt step and settlement timer run in parallel after the order step.
 ---
 
-<!-- diataxis: split in tutorials PR -->
+# Build a parallel workflow with the DSL
 
-# Workflow DSL — Preview
+*Tutorial · Pro · Preview*
 
-Write workflow orchestration like ordinary Crystal. Reusable activity classes perform the work; the DSL builds the same persisted definitions used by the existing engine.
+You will build a checkout workflow in which a receipt and a settlement timer run at the same time after the order is processed, and print the receipt. Start from the `order_workflow` project of [Your first Pro workflow](first-pro-workflow.md).
 
-{% hint style="warning" %}
-Available starting with **JoobQ Pro v0.2.2**. The authoring API remains a **Preview**, built on the existing workflow engine. Pro v0.2.0 and v0.2.1 do not include it. Existing constructors remain supported. Start with the [first workflow](first-pro-workflow.md) for the smallest runnable example, or follow this parallel workflow walkthrough.
-{% endhint %}
+{% stepper %}
+{% step %}
+## Write the workflow
 
-With authorized Pro repository access, install the documented release:
+Create `src/checkout.cr`:
 
-{% code title="shard.yml — Pro v0.2.2" %}
-```yaml
-dependencies:
-  joobq_pro:
-    github: azutoolkit/joobq-pro
-    version: "= 0.2.2"
-```
-{% endcode %}
-
-Run `shards install` and retain the resolved `shard.lock`. Use the Core revision required by that Pro manifest; do not independently upgrade it. The [compatibility guide](../reference/compatibility.md) records the exact release commit and dependency pair.
-
-## Your first declarative workflow
-
-This complete program processes an order, passes its result to a receipt activity, and runs that receipt alongside a durable timer. It uses no real payment or email service.
-
-{% code title="src/workflow.cr — Pro v0.2.2" %}
+{% code title="src/checkout.cr" %}
 <!-- example: pro/workflow_dsl.cr -->
 ```crystal
 require "joobq_pro"
@@ -76,12 +61,24 @@ ensure
 end
 ```
 {% endcode %}
+{% endstep %}
 
-Run it with `crystal run src/workflow.cr` against your development Redis. Expect `Receipt: Processed order 42`. The example stops Pro and Core in that order.
+{% step %}
+## Run it
 
-## Read the flow from top to bottom
+```sh
+crystal run src/checkout.cr
+```
 
-Steps run sequentially unless you put them in `parallel`. Every parallel branch starts after the preceding sequence; a following step waits for all branches under the existing engine's completion rules. Use `sequence` inside `parallel` for an ordered branch. Groups add dependency edges, not hidden jobs.
+After the licence warning (if you have no `JOOBQ_PRO_LICENSE`), you should see:
+
+```
+Receipt: Processed order 42
+```
+{% endstep %}
+{% endstepper %}
+
+The run looked like this: `process` first, then `receipt` and the `settle` timer in parallel, and the workflow completed when both had finished.
 
 ```mermaid
 flowchart LR
@@ -91,10 +88,8 @@ flowchart LR
   settle --> completed
 ```
 
-Omitted activity input means the original workflow input. Result chaining is explicit: `input: output(:process)`. Step IDs must be unique across the workflow, including inside groups.
+## Next steps
 
-`Checkout` is a `Blueprint`. Inspect `Checkout.definition.to_json` without connecting to Redis. `worker.register(Checkout)` installs its activity handlers and publishes the definition; a client can publish it without installing handlers. Defining a workflow does not execute activities or start workers.
-
-[Screenshot: The terminal workflow inspector showing checkout with process completed, parallel receipt and settle steps, their real statuses, and the persisted definition hash.]
-
-Continue with the [DSL reference](../reference/workflow-dsl.md), [lifecycle controls](../reference/workflow-lifecycle-controls.md), and [migration guide](../how-to/migrate-to-the-workflow-dsl.md).
+- [Workflow DSL](../reference/workflow-dsl.md): every DSL method.
+- [Fan out and join](../how-to/fan-out-and-join.md): the pattern in your own workflows.
+- [Workflows and sagas](../explanation/durable-workflows.md): why steps are recorded in a history.

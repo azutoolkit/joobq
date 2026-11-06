@@ -12,7 +12,7 @@ FENCE = re.compile(r"^```([^\n]*)\n(.*?)^```[ \t]*$", re.M | re.S)
 LINK = re.compile(r"(?<!!)\[[^\]\n]+\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)|href=\"([^\"]+)\"")
 EXAMPLE = re.compile(r"<!-- example: ([a-z_/]+\.cr) -->\s*```crystal\n(.*?)^```", re.M | re.S)
 ILLUSTRATIVE = re.compile(r"<!-- illustrative: [^\n]+ -->\s*$")
-PAIRS = {"hint": "endhint", "tabs": "endtabs", "tab": "endtab", "code": "endcode"}
+PAIRS = {"hint": "endhint", "tabs": "endtabs", "tab": "endtab", "code": "endcode", "stepper": "endstepper", "step": "endstep"}
 SECTIONS = ("tutorials", "how-to", "reference", "explanation")
 AREAS = ("Getting Started", "Core", "Advanced", "Production Ops")
 # "* [Label](page.md) · Core · Pro" or "* Label · Pro · coming soon"; labels are scopes, then Preview or coming soon.

@@ -61,6 +61,16 @@ class JoobQ::Worker(T)
   end
 end
 
+# A started queue also owns a dispatcher fiber (and its dedicated blocking connection). Stopping only the worker
+# fibers would leave the dispatcher claiming into InFlight, which a later example's `InFlight.count == 0` would see.
+# Register the whole queue for teardown, as `Queue#stop!` stops the dispatcher and the workers together.
+class JoobQ::Queue(T)
+  def start
+    SpecWorkers::STOPPERS << -> { stop! }
+    previous_def
+  end
+end
+
 Spec.before_each do
   # Two queue registries exist (QueueFactory vs. config.queues); stop! blocks
   # until the queue's workers have exited.
@@ -71,7 +81,12 @@ Spec.before_each do
   JoobQ.reset
 end
 
-Spec.after_each { SpecWorkers.stop_all }
+Spec.after_each do
+  SpecWorkers.stop_all
+  # Stopping a queue does not drain the process-global InFlight registry; clear it so no example starts with a
+  # claim another example's worker or dispatcher left behind (JoobQ.reset only flushes Redis).
+  JoobQ::InFlight.clear
+end
 
 # Polls until the block is truthy or the timeout lapses; returns the last result.
 def eventually(timeout : Time::Span = 3.seconds, &) : Bool

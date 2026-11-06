@@ -1,54 +1,41 @@
 ---
-description: Inspect Core and Pro through the same command center.
+description: The JoobQ commands of Azu CLI 0.1.62 and their options, as `azu <command> --help` prints them, and the keys of the terminal dashboard.
 ---
 
-<!-- diataxis: split in reference PR -->
+# Azu CLI and terminal dashboard
 
-# CLI and terminal management
+*Reference · Core · Pro*
 
-Azu CLI is optional and works with Core. Pro adds workflow data when its runtime store is configured; installing the CLI does not enable Pro.
+JoobQ itself ships no command-line tool. These commands come from Azu CLI 0.1.62 and run inside an Azu application. Every `jobs:*` command also takes `--redis URL`, `--boot FILE`, `-e`/`--env NAME`, `-v`/`--verbose` and `-h`/`--help` (`jobs:ui` uses `-h` for `--host`, so its help is `--help` only).
 
-| Command | Purpose | Requirement |
+| Command | Description | Options |
 | --- | --- | --- |
-| `azu jobs:status --json` | Queue statistics and worker-registry data | Application boot and supported Core APIs |
-| `azu jobs:worker` | Start foreground queue workers | Registered queues |
-| `azu joobq` | Standalone terminal dashboard | Application-side provider |
-| `azu dev` | Development HUD with job activity | Running Azu app and its telemetry setup |
-| `azu jobs:ui` | Start the separate web interface | Optional JoobQUI dependency/configuration; not the TUI |
+| `azu jobs:worker` | Start background job workers | `-w N, --workers N` Workers per queue (1..1000); otherwise preserve configuration<br>`-q LIST, --queues LIST` Comma-separated queue selection; otherwise all configured queues<br>`-d, --daemon` Unsupported: use a service supervisor<br>`--release` Compile an optimized worker<br>`--api` Enable management API; requires JoobQ tokens<br>`--shutdown-timeout SECONDS` Graceful drain timeout (1..3600, default 25) |
+| `azu jobs:status` | Show job queue status | `--json` Print machine-readable results<br>`-q NAME, --queue NAME` Queue name (default: default) |
+| `azu jobs:clear` | Clear job queues | `--json` Print machine-readable results<br>`-q NAME, --queue NAME` Queue name (default: default)<br>`-f, --force` Confirm mutation without prompting<br>`--dry-run` Preview without modifying jobs<br>`--all` All configured queues<br>`--failed` Purge DLQ entries instead of waiting jobs |
+| `azu jobs:retry` | Retry failed jobs | `--json` Print machine-readable results<br>`-q NAME, --queue NAME` Queue name (default: default)<br>`-f, --force` Confirm mutation without prompting<br>`--dry-run` Preview without modifying jobs<br>`--all` Retry selected queue's DLQ (maximum 1000)<br>`-l N, --limit N` Maximum jobs (1..1000, default 1) |
+| `azu jobs:ui` | Start JoobQUI web interface | `-p PORT, --port PORT` HTTP port<br>`-h HOST, --host HOST` Bind address<br>`--path DIRECTORY` JoobQUI checkout with installed dependencies |
+| `azu jobs:dlq` | List dead-letter job IDs | `--json` Print machine-readable results<br>`-q NAME, --queue NAME` Queue name (default: default)<br>`--limit N` Page size (1..1000)<br>`--offset N` Zero-based offset |
+| `azu jobs:pause` | Pause queue claims | `--json` Print machine-readable results<br>`-q NAME, --queue NAME` Queue name (default: default)<br>`-f, --force` Confirm mutation without prompting<br>`--dry-run` Preview without modifying jobs |
+| `azu jobs:resume` | Resume queue claims | `--json` Print machine-readable results<br>`-q NAME, --queue NAME` Queue name (default: default)<br>`-f, --force` Confirm mutation without prompting<br>`--dry-run` Preview without modifying jobs |
+| `azu joobq` | Terminal dashboard for queues, workflows and dead letters | `--boot PATH` |
+| `azu generate joobq` | Generate the JoobQ initializer, configuration, example job and worker | `--redis URL`, `--queue NAME`, `--workers N` (1 to 1000), `--no-example`, `--force` |
+| `azu generate job <Name> [field:type ...]` | Generate a job class | `--force` |
 
-## Inspect first
+Mutating commands (`jobs:pause`, `jobs:resume`, `jobs:retry`, `jobs:clear`) take `-f`/`--force` ("Confirm mutation without prompting") and `--dry-run` ("Preview without modifying jobs").
 
-```sh
-azu jobs:status --queue orders --json
-azu jobs:dlq --queue orders --limit 20 --json
-azu joobq
-```
+## `azu joobq` keys
 
-The adapter boots your configured job classes. It must not call `forge` or start another server. A connected Redis indicator is not a healthy-worker indicator. Missing provider data stays unavailable.
-
-## Terminal keys
-
-| Key | Action in standalone `azu joobq` |
+| Key | Action |
 | --- | --- |
 | `1`, `2`, `3` | Queues, workflows, dead letters |
-| `[` / `]` | Previous/next view; also useful inside `azu dev` |
-| Tab / left / right | Change focused pane |
-| Up / down, PgUp / PgDn | Move through the focused viewport |
-| `r`, then `y` | Confirm replay of the selected dead letter |
-| `q` / Ctrl-C | Exit and restore the terminal |
+| `[` / `]` | Previous / next tab |
+| Tab | Switch pane |
+| Arrows, PgUp / PgDn | Scroll the focused pane |
+| `r`, then `y` | Replay the selected dead letter |
+| `q`, Ctrl-C | Quit |
 
-## Changes require review
+## See also
 
-```sh
-azu jobs:retry --queue orders --limit 1 --dry-run
-azu jobs:pause --queue orders
-azu jobs:resume --queue orders
-```
-
-Pause/resume and replay prompt interactively. Use `--force` only when an automation system has already made the intended decision. Pause does not stop a side effect already running. Avoid bulk clearing as a recovery technique.
-
-The development boot adapter is not a production security boundary. Use the CLI's documented read-only remote monitoring for observation, and separately authorized operational tooling for changes. Management API role tokens are described in [Access](../how-to/secure-management-access.md).
-
-[Screenshot: azu joobq with the workflows tab selected, a run and its step tree visible, keyboard hints along the bottom, and any missing provider shown as unavailable rather than zero.]
-
-Full options: [Azu CLI jobs reference](https://azutopia.gitbook.io/azu-cli/command-reference/azu-jobs) and [terminal dashboard](https://azutopia.gitbook.io/azu-cli/command-reference/azu-joobq).
+- [Use JoobQ in an Azu application](../how-to/use-joobq-in-azu.md)
+- [CLI commands and host binaries](https://joobq-website.onrender.com/docs/reference/cli-commands): the JoobQUI binary's tasks.

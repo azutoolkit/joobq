@@ -4,24 +4,25 @@ description: Exact names, defaults, commands, routes and roles, as the code defi
 
 # Reference
 
-Reference pages are tables that mirror the code. The label after each page says which part of JoobQ it describes: Core, Pro or JoobQUI. Pages marked "coming soon" are planned and not written yet.
+Reference pages are tables that mirror the code at the versions on the [compatibility page](compatibility.md). The label after each page says which part of JoobQ it describes: Core, Pro or JoobQUI.
 
 ## Getting Started
 
-* [Compatibility and feature availability](compatibility.md) · Core · Pro
+* [Compatibility](compatibility.md) · Core · Pro · JoobQUI
 * [Install the SDKs](https://joobq-website.onrender.com/docs/reference/sdk-installation) · JoobQUI
+* [Open Source vs Pro vs JoobQUI feature matrix](feature-matrix.md) · Core · Pro · JoobQUI
 
 ## Core
 
-* [Configuration](configuration.md) · Core
+* [Configuration](configuration.md) · Core · Pro
 * [Configuration and environment variables](https://joobq-website.onrender.com/docs/reference/configuration-and-env-vars) · JoobQUI
-* Core API: jobs, queues, workers and dead letters · Core · coming soon
+* [Core API](core-api.md) · Core
 
 ## Advanced
 
+* [Pro API](pro-api.md) · Pro
 * [Workflow DSL](workflow-dsl.md) · Pro · Preview
 * [Workflow lifecycle controls](workflow-lifecycle-controls.md) · Pro · Preview
-* Pro API: rate limiter, schedules and batches · Pro · coming soon
 * [Worker SDKs](https://joobq-website.onrender.com/docs/reference/worker-sdk) · JoobQUI
 
 ## Production Ops
@@ -30,4 +31,3 @@ Reference pages are tables that mirror the code. The label after each page says 
 * [CLI commands and host binaries](https://joobq-website.onrender.com/docs/reference/cli-commands) · JoobQUI
 * [HTTP API, WebSockets, metrics and webhooks](https://joobq-website.onrender.com/docs/reference/api-and-webhooks) · JoobQUI
 * [Console pages and role permissions](https://joobq-website.onrender.com/docs/reference/console-and-rbac-matrix) · JoobQUI
-* Open Source vs Pro vs JoobQUI feature matrix · Core · Pro · JoobQUI · coming soon

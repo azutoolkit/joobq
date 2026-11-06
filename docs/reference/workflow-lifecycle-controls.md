@@ -4,6 +4,8 @@ description: Use existing lifecycle capabilities through declarative Crystal hel
 
 # Lifecycle controls
 
+*Reference · Pro · Preview*
+
 These helpers build the existing `Definition` fields. They do not add a second execution engine or new replay semantics.
 
 ## Scopes and conditions

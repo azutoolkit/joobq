@@ -1,55 +1,44 @@
 ---
-description: Choose a reproducible Core or Pro dependency graph before copying examples.
+description: The versions these docs describe, and the versions each part requires and is tested with.
 ---
 
-<!-- diataxis: split in reference PR -->
+# Compatibility
 
-# Compatibility and feature availability
+*Reference · Core · Pro · JoobQUI*
 
-The two quick starts use different dependency graphs. Keep their lockfiles; do not assume a newer Core revision is interchangeable with Pro's pinned dependency.
+Every page of these docs describes the versions below. A page that says something changed in a version names it.
 
-## Documentation baseline
+## Versions documented
 
-| Component | Baseline | Notes |
+| Component | Version | Source |
 | --- | --- | --- |
-| Crystal | 1.22.1 | Compiler used to compile and execute these examples |
-| JoobQ | Tag `v0.5.1`, commit `b7511747f60df2cafdc8bee53118386b2c47a08e` | Its historical `shard.yml` declares `0.4.2`; identify it by tag and resolved revision, not that field alone |
-| JoobQ Pro | Tag `v0.2.2`, commit `92879b94a3be2580e749f3a0acc829b9276040dc` | Requires authorized access to the private repository |
-| Core used by Pro | `2e5be17d145ead36d2d419c8ba4e4029837dd9c5` | Pro's release pins this revision; do not override it with Core `v0.5.1` |
-| Azu CLI | `v0.1.59` command interfaces | Optional; its operator adapters compile against the application's installed shards |
-| Redis | 7.4.12 and 8.0.6 in the existing integration matrix | TLS, persistence and authentication are deployment settings, not consequences of installing a shard |
+| JoobQ (Core) | 0.5.6, tag `v0.5.6` | `joobq/shard.yml` |
+| JoobQ Pro | 0.2.4, tag `v0.2.4` (commit `7e9a0a5`) | `joobq-pro/shard.yml` |
+| JoobQUI | `master` of `azutoolkit/joobqui` | |
+| Azu CLI | 0.1.62, tag `v0.1.62` | `azu_cli/shard.yml` |
 
-## Release-specific integration notes
+## Requirements
 
-- Core `v0.5.1` includes typed `config.queue` registrations in `forge`. Pro `v0.2.2` pins an earlier Core revision: use `QueueFactory.register_job_type` plus `config.queue_configs` (or the generated YAML registration) for legacy jobs. The [observability fixture](../../examples/docs/pro/observability.cr) demonstrates that compatible path.
-- `WorkerRegistry` is available, but these Core baselines do **not** start it automatically from `forge`. The CLI can show completed jobs while its worker list is empty. A custom worker entry point must own registry startup/shutdown if you need heartbeat data; never start it in an inspection initializer.
+| Component | Requires |
+| --- | --- |
+| JoobQ 0.5.6 | Crystal `>= 1.22.0`; shards `redis` (stefanwille/crystal-redis) and `cron_parser` |
+| JoobQ Pro 0.2.4 | Crystal `>= 1.22.0`; `joobq >= 0.5.6, < 0.6.0`; `redis ~> 2.9.1`; read access to the private `azutoolkit/joobq-pro` repository |
+| JoobQUI self-hosted | PostgreSQL and Redis; a licence key, except with `JOOBQUI_LICENSE_DEV_BYPASS` in development |
+| Redis | One server or a managed equivalent; not Redis Cluster |
+| Opt-in Delivery runtime | Redis with `appendonly yes`, `appendfsync always`, `maxmemory-policy noeviction` (checked at start) |
 
-## Read the labels
+## Tested with
 
-- **Core:** available through the Core baseline.
-- **Pro:** implemented by the Pro baseline; install the Pro shard and configure the feature.
-- **Preview:** opt-in architecture that needs workload and migration validation. Presence in a release does not imply a completed production cutover.
-- **Unavailable:** no provider or supported implementation exists in the selected setup. It does not mean zero activity.
-
-| Capability | Availability | Boundary |
+| What | Crystal | Redis |
 | --- | --- | --- |
-| Queue/Worker jobs, delayed retries, DLQ, Redis TLS | Core | Legacy processing API |
-| Management roles, worker registry, CLI inspection | Core | Metrics depend on the installed API and active workers |
-| Delivery leases, receipts and explicit admission | Core / Preview | Separate namespace and runtime; `Job.enqueue` does not opt in |
-| Typed workflow DSL | Pro / Preview, since v0.2.2 | Sequential steps, explicit parallel groups, typed activity bindings; existing constructors remain supported |
-| Workflow histories, signals, schedules, compensation | Pro | History lives in Redis; PostgreSQL history is not supplied by these versions |
-| Durable batch and uniqueness services | Pro / Preview | Explicit Delivery runtime and reconciliation |
-| Percentile collection and alerting | Pro | Must be configured; no automatic external telemetry export is implied |
-| Reviewed replay and queue compare-and-set APIs | Unreleased relative to these baselines | Added after Core `v0.5.1`; do not use them in release examples |
+| Core CI (`crystal.yml`) | 1.22.1 (`crystallang/crystal:1.22.1`) | 7.4.12 and 8.0.6 |
+| Documentation examples, Core (`docs.yml`) | 1.22.1 | 8.0.6 |
+| Documentation examples, Pro | run locally with `--edition pro`, not in CI | any local `redis-server` |
 
-## Workflow DSL preview
+The example fixtures in `examples/docs/` pin `joobq = 0.5.6` and `joobq_pro = 0.2.4` in their `shard.yml`, with the resolved graphs in `shard.lock`.
 
-The first supporting release is **JoobQ Pro v0.2.2**, commit `92879b94a3be2580e749f3a0acc829b9276040dc`. Its [release](https://github.com/azutoolkit/joobq-pro/releases/tag/v0.2.2) includes the sequential DSL, typed bindings, and lifecycle helpers validated by the [supporting CI run](https://github.com/azutoolkit/joobq-pro/actions/runs/41144481242). The authoring API remains labeled **Preview**; it uses the existing engine and does not establish new durability or throughput guarantees. Pro v0.2.0 and v0.2.1 do not include it.
+## See also
 
-Start with the [DSL quick start](../tutorials/first-pro-workflow.md), then the [complete guide](../tutorials/parallel-workflow-dsl.md). Existing `Definition.new`, `Step.*`, and `register_activity` APIs remain supported without deprecation.
-
-## Upgrade deliberately
-
-Inspect `shard.lock` before and after an upgrade, compile your workers, and rehearse retry/replay behavior in staging. Do not move a legacy queue into Delivery by changing only a configuration flag. Follow the [Delivery guide](../explanation/delivery.md) and [recovery checklist](../how-to/recover-and-migrate.md).
-
-Source evidence: [Core release](https://github.com/azutoolkit/joobq/tree/v0.5.1), [Pro release](https://github.com/azutoolkit/joobq-pro/tree/v0.2.2) (authorized access required), and [CLI release](https://github.com/azutoolkit/azu_cli/tree/v0.1.59). Example validation is recorded in [Validation](../validation.md).
+- [Open Source vs Pro vs JoobQUI feature matrix](feature-matrix.md)
+- [Install JoobQ and its prerequisites](../how-to/install.md)
+- [Documentation validation](../validation.md)

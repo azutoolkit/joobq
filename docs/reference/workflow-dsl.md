@@ -4,6 +4,8 @@ description: The complete preview authoring surface, with explicit ordering and 
 
 # Workflow DSL reference
 
+*Reference · Pro · Preview*
+
 **Available since Pro v0.2.2; authoring API preview.** See [availability](../tutorials/parallel-workflow-dsl.md). Import `JoobQPro::Workflows::DSL` where you declare workflows.
 
 ## Workflows, catalogs, and activities

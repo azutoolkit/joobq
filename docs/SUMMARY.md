@@ -49,8 +49,11 @@
 ## Reference
 
 * [Reference](reference/README.md)
-  * [Compatibility and feature availability](reference/compatibility.md)
+  * [Compatibility](reference/compatibility.md)
+  * [Open Source vs Pro vs JoobQUI feature matrix](reference/feature-matrix.md)
   * [Configuration](reference/configuration.md)
+  * [Core API](reference/core-api.md)
+  * [Pro API](reference/pro-api.md)
   * [Workflow DSL](reference/workflow-dsl.md)
   * [Workflow lifecycle controls](reference/workflow-lifecycle-controls.md)
   * [Azu CLI and terminal dashboard](reference/azu-cli-and-terminal.md)

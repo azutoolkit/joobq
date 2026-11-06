@@ -27,6 +27,9 @@ module JoobQ
       @@stats_lock.synchronize { @@pipeline_stats = PipelineStats.new(0, 0, 0.0, 0, Time.local) }
     end
 
+    # Matches the owning store's id so batch cleanup targets this process's own processing list.
+    property owner_id : String = "#{System.hostname}:#{Process.pid}"
+
     def initialize(@redis : Redis::PooledClient)
     end
 
@@ -147,12 +150,14 @@ module JoobQ
     def cleanup_jobs_batch(job_jsons : Array(String), queue_name : String) : Nil
       return if job_jsons.empty?
 
-      processing_key = "joobq:processing:#{queue_name}"
+      owned_key = "joobq:processing:#{queue_name}:#{@owner_id}"
+      legacy_key = "joobq:processing:#{queue_name}"
 
       @redis.pipelined do |pipe|
-        # Remove all jobs from processing queue
+        # Remove from this process's list and the legacy shared list (a migrated or seeded job)
         job_jsons.each do |job_json|
-          pipe.lrem(processing_key, 0, job_json)
+          pipe.lrem(owned_key, 0, job_json)
+          pipe.lrem(legacy_key, 0, job_json)
         end
 
         # Update statistics

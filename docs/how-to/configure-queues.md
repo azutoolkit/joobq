@@ -24,7 +24,7 @@ description: Give each job type its queue and worker count, and keep urgent work
    end
    ```
 
-2. Give urgent work its own queue and more workers: Core has no priority field, and a queue serves its newest waiting job first.
+2. Give urgent work its own queue and more workers: Core has no priority field, and a queue serves its oldest waiting job first (first in, first out).
 3. Add a fourth argument to space out starts in this process, for example `{limit: 10, period: 1.second}`.
 4. Size `REDIS_POOL_SIZE` (default 500) for the total of all workers in the process.
 

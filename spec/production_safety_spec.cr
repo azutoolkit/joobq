@@ -55,7 +55,7 @@ module JoobQ
       worker.run
       eventually { store.redis.llen("example") == 0 }.should be_true
       eventually { worker.in_progress == 0 }.should be_true
-      store.redis.lrange("joobq:processing:example", 0, -1).should eq([raw])
+      store.redis.lrange("joobq:processing:example:#{store.owner_id}", 0, -1).should eq([raw])
     ensure
       worker.try(&.terminate)
     end

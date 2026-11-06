@@ -23,7 +23,7 @@ CASES = {
              ("scheduled_jobs", "Generated report 42", True),
              ("lifecycle", "PASS delayed retry DLQ replay shutdown", False),
              ("invoice_job", "Sent invoice 1001 to ada@example.com", True),
-             ("queue_order", "Exported report 1", True),
+             ("queue_order", "Exported report 3", True),
              ("concurrency", "Peak jobs in flight: 6", False),
              ("retry_backoff", "Dead letter (payments): card declined", False),
              ("recurring", "queued: 0, dead letters: 0", False),

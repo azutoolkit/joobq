@@ -223,7 +223,7 @@ module JoobQ
       redis_store = queue.store.as(RedisStore)
       retry_lock_key = "joobq:retry_lock:#{job.jid}"
 
-      # Clean up retry lock only (no job locks in BRPOPLPUSH pattern)
+      # Clean up retry lock only (a claim holds no job lock: it is the job's place in the processing list)
       redis_store.redis.del(retry_lock_key)
 
       Log.debug &.emit("Retry lock cleaned up for job",

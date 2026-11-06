@@ -19,12 +19,12 @@ A JoobQ queue is a Redis list for one job type, served by a fixed number of work
 ```mermaid
 flowchart LR
   P[Producer] -->|RPUSH| Q[(Redis list: exports)]
-  Q -->|RPOPLPUSH| Proc[(joobq:processing:exports)]
+  Q -->|BLMOVE head| Proc[(joobq:processing:exports:owner)]
   Proc --> W[Worker runs perform]
   W -->|done| X[Removed from processing]
 ```
 
-`enqueue` appends the job's JSON to the right of the list (`RPUSH`); a worker takes jobs from the right of the same list into a processing list (`RPOPLPUSH`). The newest waiting job therefore comes out first: the order is last in, first out. If order matters to you, put an ordering key in the payload and check it in `perform`.
+`enqueue` appends the job's JSON to the tail of the list (`RPUSH`); a worker claims the job at the head into its own processing list (`BLMOVE … LEFT LEFT`, which needs Redis 6.2 or newer). The oldest waiting job therefore runs first: the order is first in, first out. With several workers, or a batch above one, jobs claimed together run at the same time, so completion order is not guaranteed; if you need a strict sequence, put an ordering key in the payload and check it in `perform`.
 
 ## Example
 
@@ -60,12 +60,12 @@ JoobQ.forge
 Output of `crystal run queue_order.cr` (log lines omitted):
 
 ```
-Exported report 3
-Exported report 2
 Exported report 1
+Exported report 2
+Exported report 3
 ```
 
-With one worker that claims one job at a time, the three jobs run newest first. With more workers or a larger batch they run at the same time, and no order holds.
+With one worker that claims one job at a time, the three jobs run in the order they were enqueued. With more workers or a larger batch they run at the same time, and no order holds.
 
 ## Options
 

@@ -47,7 +47,7 @@ This creates a temporary project, generates the JoobQ setup and a typed job, run
 | `core/scheduled_jobs.cr` | Immediate recurring callback admits a fresh queue job; worker executes it; SIGTERM stops the process |
 | `core/lifecycle.cr` | Reader-only management policy, unenforced DLQ TTL, delayed admission, one retry, selected replay after repair, clean shutdown |
 | `core/invoice_job.cr` | Stored job fields, then the job runs |
-| `core/queue_order.cr` | One worker with a batch of one runs jobs newest first (LIFO) |
+| `core/queue_order.cr` | One worker with a batch of one runs jobs oldest first (FIFO) |
 | `core/concurrency.cr` | Peak in-flight jobs equal workers times `worker_batch_size` |
 | `core/retry_backoff.cr` | Four attempts with growing gaps, then a dead letter; `NonRetryableError` dead-letters at once |
 | `core/recurring.cr` | `schedule(every:)` calls `perform` directly: no queue, no retry, no dead letter |
@@ -111,7 +111,7 @@ This audit uses the exact [documented releases](reference/compatibility.md), not
 | Recurring callbacks call the same instance directly and can overlap; stopping prevents future callbacks | [Core recurring scheduler](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/recurring_job_scheduler.cr#L17) |
 | YAML scheduler setup logs intent instead of dispatching the configured jobs | [Core YAML scheduler setup](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/configure.cr#L288) |
 | Per-worker in-flight capacity depends on batch size; jobs run in separate fibers | [Core worker loop](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/worker.cr) |
-| Startup reclaims at most one processing entry; the Redis DLQ writer does not apply the supplied expiration | [Core store operations](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/redis_store.cr#L248) |
+| Startup returns every stranded job of a crashed process to the head of its queue (heartbeat-gated, per-process processing lists); the Redis DLQ writer does not apply the supplied expiration | [Core store operations](https://github.com/azutoolkit/joobq/blob/master/src/joobq/redis_store.cr) |
 | Core shutdown's Boolean indicates invocation, not clean drain | [Core lifecycle](https://github.com/azutoolkit/joobq/blob/b7511747f60df2cafdc8bee53118386b2c47a08e/src/joobq/lifecycle.cr#L63) |
 | Schedule-to-start expiration redispatches/rearms instead of failing the step | [Pro reconciler](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/reconciler.cr#L60) |
 | Build workers also consume the shared queue; compensations use that shared path | [Pro worker](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/worker.cr), [reconciler](https://github.com/azutoolkit/joobq-pro/blob/92879b94a3be2580e749f3a0acc829b9276040dc/src/workflows/reconciler.cr#L125) |

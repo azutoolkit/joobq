@@ -260,8 +260,8 @@ module JoobQ
       now_ms < @claim_paused_until.get
     end
 
-    # Puts the job back at the end of its queue (one atomic step, not counted as processed); the worker has
-    # stopped claiming for a while, so it does not come straight back.
+    # Puts the job back at the tail of its queue, behind the waiting jobs (one atomic step, not counted as processed);
+    # the worker has stopped claiming for a while too, so it does not come straight back.
     private def requeue_for_missing_keys(job : String) : Nil
       if (store = @queue.store).is_a?(RedisStore)
         store.requeue_from_processing(job, @queue.name)

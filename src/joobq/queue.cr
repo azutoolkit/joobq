@@ -58,11 +58,13 @@ module JoobQ
       end
     end
 
-    # Starting a running queue does nothing: `reprocess_busy_jobs!` would move a job that a worker is
-    # still processing back onto the queue, and it would run twice.
+    # Starting a running queue does nothing. The first start recovers jobs stranded by a crashed process (and this
+    # process's own previous incarnation) back to the head of the queue, then publishes this process's liveness
+    # heartbeat before any worker claims, so another process's recovery can never reclaim a job this process holds.
     def start
       verify_encryption_keys
       if redis_store = store.as?(RedisStore)
+        redis_store.ensure_list_move_support!
         if redis_store.redis.exists("joobq:delivery-bridge:#{name}") > 0
           raise ArgumentError.new("queue is bound to leased delivery; a legacy worker cannot start")
         end
@@ -70,6 +72,7 @@ module JoobQ
       return if @started.swap(true)
 
       reprocess_busy_jobs!
+      store.as?(RedisStore).try(&.start_owner_heartbeat)
       worker_manager.start_workers
     end
 
@@ -360,8 +363,9 @@ module JoobQ
       running? ? "Running" : "Done"
     end
 
+    # At start, reclaim jobs stranded by a crash or a previous incarnation (`include_self`), never a live process's.
     private def reprocess_busy_jobs!
-      store.move_job_back_to_queue(name)
+      store.move_job_back_to_queue(name, include_self: true)
     end
   end
 end

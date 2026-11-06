@@ -84,6 +84,24 @@ def wait_for_files(dir : String, prefix : String, count : Int32) : Nil
 end
 
 module JoobQ
+  # Jobs in processing for a queue across every process's own list (`joobq:processing:<queue>:<owner>`) and the
+  # legacy shared list. The probe runs in another process, so its list key carries a pid this spec does not know.
+  def self.processing_depth(redis, queue : String) : Int64
+    prefix = "joobq:processing:#{queue}"
+    total = 0_i64
+    cursor = 0_i64
+    loop do
+      result = redis.scan(cursor, match: "#{prefix}*", count: 100)
+      cursor = result[0].as(String).to_i64
+      result[1].as(Array).each do |key|
+        key_str = key.as(String)
+        total += redis.llen(key_str) if key_str == prefix || key_str.starts_with?("#{prefix}:")
+      end
+      break if cursor == 0
+    end
+    total
+  end
+
   describe "orderly shutdown" do
     it "compiles forge and signal shutdown without any concrete job or queue types" do
       # Compile in a separate program: spec_helper registers concrete queues,
@@ -542,7 +560,7 @@ module JoobQ
       it "returns ALL stuck jobs to their queue at the deadline, exits 3, and runs none of them twice" do
         with_probe("stuck", {"PROBE_JOBS" => "5", "PROBE_TIMEOUT" => "2"}) do |process, queue, dir, redis|
           wait_for_files(dir, "started-", 5)
-          redis.llen("joobq:processing:#{queue}").should eq(5)
+          JoobQ.processing_depth(redis, queue).should eq(5)
           process.signal(Signal::TERM)
           started = Time.instant
           exit_of(process, 30.seconds).exit_code.should eq(3)

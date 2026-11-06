@@ -20,11 +20,9 @@ end
 
 module JoobQ
   describe "queue execution order" do
-    # Characterization: pins today's behaviour, not the documented intent.
-    # enqueue uses RPUSH (redis_store.cr:84) and dequeue uses BRPOPLPUSH
-    # (redis_store.cr:134), so both act on the right end of the list and the
-    # newest job comes out first: last-in-first-out, despite FIFO comments.
-    it "claims C, B, A when a worker is limited to one active job" do
+    # Producers RPUSH to the tail and workers claim from the head (LMOVE ... LEFT LEFT), so jobs run in the order
+    # they were enqueued.
+    it "runs A, B, C in enqueue order when a worker is limited to one active job" do
       previous_batch_size = JoobQ.config.worker_batch_size
       JoobQ.config.worker_batch_size = 1
       redis = JoobQ.store.as(RedisStore).redis
@@ -39,7 +37,7 @@ module JoobQ
         queue.start
         eventually(10.seconds) { OrderRecordingJob::RAN.size == 3 }.should be_true
 
-        OrderRecordingJob::RAN.should eq(%w[C B A])
+        OrderRecordingJob::RAN.should eq(%w[A B C])
       ensure
         queue.stop!
         JoobQ.config.worker_batch_size = previous_batch_size

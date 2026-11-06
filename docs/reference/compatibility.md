@@ -21,7 +21,7 @@ Every page of these docs describes the versions below. A page that says somethin
 
 | Component | Requires |
 | --- | --- |
-| JoobQ 0.5.6 | Crystal `>= 1.22.0`; shards `redis` (stefanwille/crystal-redis) and `cron_parser` |
+| JoobQ 0.5.6 | Crystal `>= 1.22.0`; shards `redis` (stefanwille/crystal-redis) and `cron_parser`. From 0.6.0, Redis 6.2 or newer (FIFO claims use `BLMOVE`/`LMOVE`) |
 | JoobQ Pro 0.2.4 | Crystal `>= 1.22.0`; `joobq >= 0.5.6, < 0.6.0`; `redis ~> 2.9.1`; read access to the private `azutoolkit/joobq-pro` repository |
 | JoobQUI self-hosted | PostgreSQL and Redis; a licence key, except with `JOOBQUI_LICENSE_DEV_BYPASS` in development |
 | Redis | One server or a managed equivalent; not Redis Cluster |

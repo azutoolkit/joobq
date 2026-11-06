@@ -81,7 +81,7 @@ One committed measurement, with its conditions: a no-op Core worker settled a me
 {% endhint %}
 
 {% hint style="warning" %}
-Know the limits before you choose: jobs come out of a queue newest first, Core has no priority field and no idempotency key, and Core's recurring helpers run in one process without retries. Each page of this section says what the code does today.
+Know the limits before you choose: jobs come out of a queue oldest first (first in, first out), Core has no priority field and no idempotency key, and Core's recurring helpers run in one process without retries. Each page of this section says what the code does today.
 {% endhint %}
 
 ## Next steps

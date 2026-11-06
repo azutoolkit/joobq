@@ -124,7 +124,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 Before you begin, ensure you have the following installed:
 
 - **Crystal** (version 0.34.0 or higher)
-- **Redis** (version 5.0 or higher recommended)
+- **Redis** 6.2 or newer (JoobQ 0.6 claims jobs with `BLMOVE`/`LMOVE`; CI tests 7.4 and 8.0)
 
 ### Quick Installation
 
@@ -271,8 +271,8 @@ JoobQ.shutdown(20.seconds)
 `JoobQ.shutdown(timeout = JoobQ::SHUTDOWN_TIMEOUT)` (15 seconds) stops, in order and within `timeout` in total: the
 REST API started by `forge`, the schedulers (cron, recurring, delayed, the reaper) and the workers of every queue. It
 then waits for the jobs that are running, and at the deadline (one second before `timeout`, which is kept for what
-follows) it puts every job that is still running, and every job that was claimed but had not started, back at the end
-of its queue, one atomic step per job, and flushes the latency counters. `JoobQ.abandoned_jobs` says how many it had
+follows) it puts every job that is still running, and every job that was claimed but had not started, back at the head
+of its queue, so they run next, in the order this process took them, and flushes the latency counters. `JoobQ.abandoned_jobs` says how many it had
 to put back. It is safe to call more than once and from any fiber: the first call does the work and returns `true`,
 later calls (also while the first runs) wait for it and return `false`. After a shutdown the queues of the process
 cannot be started again.
@@ -283,11 +283,16 @@ dead-lettered, counted, announced or removed from the processing list, so the re
 schedules. Workers claim nothing once the shutdown has begun.
 
 Jobs put back run again from the start, possibly in another process while this one winds down, so they must be safe to
-run twice, as they must be after a crash. A process that is killed (`SIGKILL`) cannot do this; its jobs stay in the
-queue's processing list. Start-up recovery (`Queue#start`) moves at most **one** job per queue from that list back to
-the queue, and it takes jobs of any process serving the queue: a process that starts while another one is working on
-the same queue can move that process's running job back, so it runs twice. Prefer a graceful stop (`SIGTERM`) in
-rolling deploys.
+run twice, as they must be after a crash. A process that is killed (`SIGKILL`) cannot do this; its jobs stay in its
+own processing list (`joobq:processing:<queue>:<owner>`). Each process claims into its own list and publishes a
+heartbeat (the `joobq:processing:owners` sorted set). Start-up recovery (`Queue#start`), the expired-job reaper and
+`POST /joobq/queues/:name/reprocess` return **every** job a crashed or stopped process left in processing back to the
+head of its queue, in the order it was claimed, so it runs before newer work. Recovery reclaims a process's list only
+once that process's heartbeat has lapsed (`OWNER_TTL`, 30 seconds), so a process that starts beside live workers never
+moves their in-flight jobs and never makes them run twice. Prefer a graceful stop (`SIGTERM`) in rolling deploys so
+jobs come back at once rather than after the heartbeat times out. (Workers from 0.5 share one
+`joobq:processing:<queue>` list and publish no heartbeat; stop them before relying on 0.6 recovery — see the
+CHANGELOG.)
 
 ### Defining Queues
 
@@ -308,6 +313,14 @@ JoobQ.configure do
   end
 end
 ```
+
+#### Job order
+
+A queue is first in, first out: `enqueue` appends a job to the tail of the queue's Redis list and a worker claims from
+the head (`BLMOVE`/`LMOVE ... LEFT LEFT`), so with one worker claiming one job at a time jobs run in the order they were
+enqueued. With several workers, or a `worker_batch_size` above one, jobs claimed together run at the same time, so they
+can finish in any order. Jobs put back after a crash or at shutdown go to the head and run next; a delayed or retried
+job joins the tail when it is due. Before 0.6 queues were last in, first out.
 
 ### Queue Throttling
 

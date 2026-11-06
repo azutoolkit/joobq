@@ -4,7 +4,6 @@ module JoobQ
 
     PAGE_SIZE   = 100
     DEAD_LETTER = "joobq:dead_letter"
-    PROCESSING  = "joobq:processing"
 
     @loop = BackgroundLoop.new("expired_job_reaper")
 
@@ -45,17 +44,24 @@ module JoobQ
 
       JoobQ.config.queues.each do |queue_name, _|
         begin
+          # Return crashed/stopped processes' in-flight jobs to the head of the queue (never a live process's); any
+          # expired ones are then reaped by the waiting scan below.
+          recovered = redis_store.recover_orphaned_processing(queue_name)
+
           reaped_waiting = scan_and_reap_queue(redis_store, queue_name)
 
-          processing_key = "#{PROCESSING}:#{queue_name}"
-          reaped_processing = scan_and_reap_queue(redis_store, processing_key, stats_queue: queue_name)
+          # Reap expired jobs only from the legacy shared list. A live process's own list is left to that process
+          # (its Timeout middleware), so the reaper never dead-letters a job a worker is still running; a crashed
+          # process's list is emptied by recovery above before this runs.
+          reaped_processing = scan_and_reap_queue(redis_store, "joobq:processing:#{queue_name}", stats_queue: queue_name)
 
           total = reaped_waiting + reaped_processing
-          if total > 0
+          if total > 0 || recovered > 0
             Log.info &.emit("Reaped expired jobs",
               queue: queue_name,
               from_waiting: reaped_waiting,
-              from_processing: reaped_processing
+              from_processing: reaped_processing,
+              recovered: recovered
             )
           end
         rescue ex

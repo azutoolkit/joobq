@@ -35,7 +35,7 @@ Some failures have an unknown outcome: Redis may accept a write and the reply ne
 
 A database commit and a Redis enqueue are two commits. An outbox keeps the intent to enqueue in the same transaction as the change; a dispatcher enqueues it and marks it admitted, and because it can enqueue twice after a crash, the handler still has to deduplicate. JoobQ supplies no outbox dispatcher.
 
-On restart, a Core queue moves **at most one** job from its processing list back to the queue (`Queue#start` calls `move_job_back_to_queue` once), with no check of which process owned it. A clean SIGTERM returns unfinished jobs itself; after a SIGKILL, jobs left in processing need a recovery procedure, and starting another consumer meanwhile can take a job still running elsewhere.
+From 0.6, each process claims into its own processing list (`joobq:processing:<queue>:<owner>`) and publishes a heartbeat. On restart, in the reaper, and on demand (`Queue#start`, the expired-job reaper, `POST /joobq/queues/:name/reprocess`), a Core queue returns **every** job of a crashed or stopped process from its processing list back to the head of the queue, in claim order. A process's list is reclaimed only once its heartbeat has lapsed, so a consumer starting beside live workers never moves their in-flight jobs. A clean SIGTERM still returns its own unfinished jobs to the head first; after a SIGKILL, the heartbeat lapses and recovery reclaims the jobs within the TTL. (Before 0.6, startup moved at most one job, with no owner check.)
 
 Redis persistence (AOF, RDB, replicas, backups) decides how much acknowledged work survives a failure. An eviction policy other than `noeviction` can silently drop queue keys when memory runs out.
 

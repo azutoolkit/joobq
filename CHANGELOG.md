@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.1 (PATCH)
+
+### Changed
+
+- **Workers no longer busy-poll for jobs.** Each queue now runs one dispatcher fiber on a dedicated blocking
+  connection that claims the head job with `BLMOVE` and hands it (plus a pipelined batch top-up) to the worker
+  fibers over an in-process channel. Idle workers block on that channel instead of polling Redis, so idle Redis
+  load and the number of Redis connections no longer grow with the worker count, and a job on an idle queue is
+  picked up in sub-millisecond time (previously up to the 100 ms poll). Claims still land in this process's own
+  processing list, so FIFO order and crash recovery are unchanged; blocking connections are O(active queues). A
+  non-Redis store, or a `Worker` run outside `Queue#start`, keeps the previous self-claiming behaviour.
+
 ## 0.6.0 (MINOR)
 
 ### Changed

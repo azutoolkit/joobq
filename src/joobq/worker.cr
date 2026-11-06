@@ -74,39 +74,32 @@ module JoobQ
               end
               break
             else
-              # Use batch processing for improved performance and minimal connection usage
               available = {JoobQ.config.worker_batch_size - @in_progress.get, 0}.max
               if available == 0 || @queue.paused? || keys_backoff? || JoobQ.shut_down?
+                # Not "queue empty" but "cannot claim right now": a short sleep, as before.
                 sleep WORKER_IDLE_DELAY
                 next
               end
-              jobs = @queue.claim_jobs_batch(@worker_id, batch_size: available)
 
-              unless jobs.empty?
-                # Register every claim before spawning, including jobs waiting for the next slice.
+              if @queue.dispatching?
+                # Consumer path: the queue's dispatcher blocks on BLMOVE and hands claims over a channel, so an idle
+                # worker never polls Redis and a new job is picked up with no added latency. The claims are already
+                # registered in InFlight by the dispatcher; the worker owns them from here (slicing, @in_progress).
+                claims = @queue.take_claims(available)
+                next if claims.empty? # take_claims already waited up to the block timeout; no extra sleep
+                @in_progress.add(claims.size)
+                spawn_claims(claims.map(&.[0]), claims.map(&.[1]))
+              else
+                # Fallback: claim directly from Redis (no dispatcher — a non-Redis store, or a worker started outside
+                # Queue#start, as several specs do). This is the pre-dispatcher behaviour.
+                jobs = @queue.claim_jobs_batch(@worker_id, batch_size: available)
+                if jobs.empty?
+                  sleep WORKER_IDLE_DELAY
+                  next
+                end
                 tokens = InFlight.claimed(@queue.name, jobs)
                 @in_progress.add(tokens.size)
-                spawned = 0
-                begin
-                  while spawned < jobs.size
-                    slice_end = {spawned + WORKER_BATCH_SLICE_SIZE, jobs.size}.min
-                    slice_size = slice_end - spawned
-                    while spawned < slice_end
-                      # The spawn macro captures arguments by value; no shared loop cursor in the fiber.
-                      spawn process_claim(jobs[spawned], tokens[spawned])
-                      spawned += 1
-                    end
-                    sleep WORKER_BATCH_DELAY if slice_size > 1
-                  end
-                rescue ex
-                  # Unspawned claims stay in Redis processing, as after a crash, but cannot hold local drain open.
-                  spawned.upto(tokens.size - 1) { |index| InFlight.finished(tokens[index]) }
-                  @in_progress.sub(tokens.size - spawned)
-                  raise ex
-                end
-              else
-                # Adaptive delay to prevent busy waiting and reduce connection frequency
-                sleep WORKER_IDLE_DELAY
+                spawn_claims(jobs, tokens)
               end
             end
           end
@@ -123,6 +116,28 @@ module JoobQ
             running.set(false)
           end
         end
+      end
+    end
+
+    # Spawns one fiber per claimed job, in slices so a large batch does not spawn all at once. On a spawn failure the
+    # unspawned claims are marked finished (they stay in Redis processing for recovery) and @in_progress is corrected.
+    private def spawn_claims(jobs : Array(String), tokens : Array(Int64)) : Nil
+      spawned = 0
+      begin
+        while spawned < jobs.size
+          slice_end = {spawned + WORKER_BATCH_SLICE_SIZE, jobs.size}.min
+          slice_size = slice_end - spawned
+          while spawned < slice_end
+            # The spawn macro captures arguments by value; no shared loop cursor in the fiber.
+            spawn process_claim(jobs[spawned], tokens[spawned])
+            spawned += 1
+          end
+          sleep WORKER_BATCH_DELAY if slice_size > 1
+        end
+      rescue ex
+        spawned.upto(tokens.size - 1) { |index| InFlight.finished(tokens[index]) }
+        @in_progress.sub(tokens.size - spawned)
+        raise ex
       end
     end
 
@@ -266,6 +281,8 @@ module JoobQ
       if (store = @queue.store).is_a?(RedisStore)
         store.requeue_from_processing(job, @queue.name)
         Encryption.count_bounce
+        # The dispatcher claims for the whole queue, so it must back off too, not only this worker.
+        @queue.pause_claiming(Encryption.key_backoff)
       end
     rescue ex
       Log.error &.emit("Could not return a job to its queue", queue: @queue.name, worker_id: @worker_id, error: ex.message)

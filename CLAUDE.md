@@ -8,7 +8,7 @@ JoobQ is an enterprise-grade, high-performance asynchronous job queue system for
 - **License:** MIT
 - **Crystal:** 1.22.0+
 - **Dependencies:** redis, cron_parser
-- **Redis:** 6.2+ (FIFO claims use `BLMOVE`/`LMOVE`; per-process recovery uses per-owner processing lists and a heartbeat sorted set); CI tests 7.4 and 8.0
+- **Redis:** 6.2+ (FIFO claims use `BLMOVE`/`LMOVE`; per-process recovery uses per-owner processing lists and a heartbeat sorted set); CI tests 8.0
 
 ## Architecture Summary
 

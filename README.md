@@ -124,7 +124,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 Before you begin, ensure you have the following installed:
 
 - **Crystal** (version 0.34.0 or higher)
-- **Redis** 6.2 or newer (JoobQ 0.6 claims jobs with `BLMOVE`/`LMOVE`; CI tests 7.4 and 8.0)
+- **Redis** 6.2 or newer (JoobQ 0.6 claims jobs with `BLMOVE`/`LMOVE`; CI tests 8.0)
 
 ### Quick Installation
 

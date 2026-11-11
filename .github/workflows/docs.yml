@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: ghcr.io/azutoolkit/joobq-ci:1 # .github/ci-image: Crystal 1.22.1 and the system packages, no apt in a run
+      image: ghcr.io/azutoolkit/joobq-ci:2 # .github/ci-image: Crystal 1.22.1 on Alpine, no package installs in a run
       credentials:
         username: ${{ github.actor }}
         password: ${{ github.token }}
@@ -34,7 +34,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/test-redis
-          key: redis-8.0.6-${{ hashFiles('scripts/install_test_redis.py') }}-crystal-1.22.1
+          key: redis-8.0.6-${{ hashFiles('scripts/install_test_redis.py') }}-crystal-1.22.1-alpine
       - name: Build pinned Redis
         if: steps.redis-cache.outputs.cache-hit != 'true'
         run: python3 scripts/install_test_redis.py 8.0.6 /tmp/test-redis

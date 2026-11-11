@@ -5,7 +5,7 @@ name: Crystal CI
 on:
   push:
     branches: [master]
-    paths-ignore: ["docs/**", "examples/docs/**", "scripts/*docs*", "**/*.md", ".gitbook.yaml", "LICENSE"]
+    paths-ignore: ["docs/**", "examples/docs/**", "scripts/*docs*", ".claude/**", ".github/ISSUE_TEMPLATE/**", ".github/*.md", "*.md", ".gitbook.yaml", "LICENSE"]
   workflow_dispatch:
 
 permissions:

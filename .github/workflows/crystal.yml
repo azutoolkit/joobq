@@ -32,7 +32,7 @@ jobs:
         redis: ["8.0.6"]
         connection: [legacy, url]
     container:
-      image: ghcr.io/azutoolkit/joobq-ci:2 # .github/ci-image: Crystal 1.22.1 on Alpine, no package installs in a run
+      image: ghcr.io/azutoolkit/joobq-ci:3 # .github/ci-image: Crystal 1.22.1 on Alpine, no package installs in a run
       credentials:
         username: ${{ github.actor }}
         password: ${{ github.token }}

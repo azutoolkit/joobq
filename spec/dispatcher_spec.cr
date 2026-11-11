@@ -66,15 +66,29 @@ module JoobQ
       end
     end
 
+    # Pick-up latency over several pushes, judged by the median. One sample cannot tell a scheduler or GC stall on a
+    # busy machine (tens of milliseconds, once) from a poll; the median can: a 100ms poll spreads latencies evenly
+    # over 0..100ms (median ~50ms), the blocking dispatcher sits near 1ms and one stall does not move its median.
     it "picks up a job pushed onto an idle queue in well under the old 100ms poll" do
       queue = Queue(DispatchJob).new(DispatchJob::QUEUE, 2)
       begin
         queue.start
         sleep 300.milliseconds # let the dispatcher settle into its blocking BLMOVE
-        started = Time.instant
-        queue.add(DispatchJob.new("now").to_json)
-        DispatchJob::RAN.receive.should eq("now") # blocks only until the job actually runs
-        (Time.instant - started).should be < 50.milliseconds
+        latencies = Array(Time::Span).new(9) do |index|
+          sleep (20 + Random.rand(100)).milliseconds # no fixed rhythm a poll could fall in step with
+          started = Time.instant
+          queue.add(DispatchJob.new("now-#{index}").to_json)
+          select
+          when label = DispatchJob::RAN.receive
+            label.should eq("now-#{index}")
+          when timeout(2.seconds)
+            fail "job #{index} was not picked up within 2 seconds"
+          end
+          Time.instant - started
+        end
+        median = latencies.sort[latencies.size // 2]
+        fail "median pick-up #{median.total_milliseconds.round(1)}ms is not under 25ms; samples (ms): " \
+             "#{latencies.map(&.total_milliseconds.round(1))}" unless median < 25.milliseconds
       ensure
         queue.stop!
       end

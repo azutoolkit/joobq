@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  packages: read # the CI image on ghcr.io
 jobs:
   book:
     runs-on: ubuntu-latest
@@ -18,13 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: crystallang/crystal:1.22.1
+      image: ghcr.io/azutoolkit/joobq-ci:1 # .github/ci-image: Crystal 1.22.1 and the system packages, no apt in a run
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install example tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends python3 curl build-essential ca-certificates libssl-dev
       - name: Install released Core graph
         working-directory: examples/docs/core
         run: shards install --frozen

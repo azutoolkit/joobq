@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  packages: read # the CI image on ghcr.io
 
 # Cancel superseded runs of a branch started by hand, but never on master: a master run must finish
 # its tag-and-release step uninterrupted (a queued master run is replaced by the newest push).
@@ -19,7 +20,7 @@ concurrency:
 
 jobs:
   # One job per Redis version. The four worker-count / connection-style combinations differ only by environment, so
-  # the specs are compiled once and the later combinations reuse Crystal's compile cache; the apt install, the shard
+  # the specs are compiled once and the later combinations reuse Crystal's compile cache; the shard
   # install and the pinned Redis build are paid once per Redis version instead of once per combination.
   build:
     name: specs (Redis ${{ matrix.redis }})
@@ -30,13 +31,12 @@ jobs:
       matrix:
         redis: ["7.4.12", "8.0.6"]
     container:
-      image: crystallang/crystal:1.22.1
+      image: ghcr.io/azutoolkit/joobq-ci:1 # .github/ci-image: Crystal 1.22.1 and the system packages, no apt in a run
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install integration tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends python3 openssl curl libssl-dev build-essential ca-certificates
       - name: Install locked dependencies
         run: shards install --frozen
       - name: Pinned Redis with TLS (cached)

@@ -3,8 +3,6 @@ on:
   push:
     branches: [master]
     paths: ['docs/**', 'examples/docs/**', 'scripts/*docs*', '.gitbook.yaml', '.github/workflows/docs.yml']
-  pull_request:
-    paths: ['docs/**', 'examples/docs/**', 'scripts/*docs*', '.gitbook.yaml', '.github/workflows/docs.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,10 +28,18 @@ jobs:
       - name: Install released Core graph
         working-directory: examples/docs/core
         run: shards install --frozen
+      # The same pinned build (and cache key) as the Redis 8.0.6 job of crystal.yml.
+      - name: Pinned Redis (cached)
+        id: redis-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/test-redis
+          key: redis-8.0.6-${{ hashFiles('scripts/install_test_redis.py') }}-crystal-1.22.1
       - name: Build pinned Redis
-        run: |
-          python3 scripts/install_test_redis.py 8.0.6 /tmp/test-redis
-          echo /tmp/test-redis/bin >> "$GITHUB_PATH"
+        if: steps.redis-cache.outputs.cache-hit != 'true'
+        run: python3 scripts/install_test_redis.py 8.0.6 /tmp/test-redis
+      - name: Put Redis on the PATH
+        run: echo /tmp/test-redis/bin >> "$GITHUB_PATH"
       - name: Check example formatting
         run: crystal tool format --check examples/docs/core/*.cr examples/docs/pro/*.cr
       - name: Run documentation examples against isolated Redis

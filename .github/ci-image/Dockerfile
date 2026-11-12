@@ -4,6 +4,9 @@
 #   python3                            scripts/*.py (integration runner, Redis fixture, docs checks)
 #   curl make gcc g++ musl-dev linux-headers openssl-dev   building the pinned Redis with TLS (scripts/install_test_redis.py; Redis 8 has a C++ part)
 #   git                                shards, actions/checkout
+#   openssl                            the `openssl` command: scripts/run_integration.py makes the test TLS certificates with it,
+#                                      and spec/redis_tls_hostname_spec.cr runs it (without it that spec goes pending and fails the run)
+#                                      (openssl-dev has only the headers and libraries, not the command)
 #   tar zstd                           actions/cache
 #
 # Built and pushed by the `image` job of .github/workflows/ci.yml (when this directory changes) as
@@ -12,4 +15,4 @@
 FROM crystallang/crystal:1.22.1-alpine
 LABEL org.opencontainers.image.source=https://github.com/azutoolkit/joobq
 LABEL org.opencontainers.image.description="JoobQ CI: Crystal 1.22.1 on Alpine with the integration tools"
-RUN apk add --no-cache bash python3 curl git make gcc g++ musl-dev linux-headers openssl-dev tar zstd
+RUN apk add --no-cache bash python3 curl git make gcc g++ musl-dev linux-headers openssl openssl-dev tar zstd

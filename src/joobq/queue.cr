@@ -86,10 +86,10 @@ module JoobQ
 
       begin
         RunningQueues.register(name, self) do |first|
-          if first
+          if first && !InFlight.any?(name)
             reprocess_busy_jobs!
           else
-            Log.warn &.emit("Another instance of this queue is running in this process; recovery skipped to keep its in-flight jobs", queue: name)
+            Log.warn &.emit("Another instance of this queue is running in this process, or this process still has jobs of it in flight; recovery skipped to keep them", queue: name)
           end
         end
         store.as?(RedisStore).try(&.start_owner_heartbeat)

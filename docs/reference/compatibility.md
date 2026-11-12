@@ -31,8 +31,8 @@ Every page of these docs describes the versions below. A page that says somethin
 
 | What | Crystal | Redis |
 | --- | --- | --- |
-| Core CI (`crystal.yml`) | 1.22.1 (`crystallang/crystal:1.22.1`) | 7.4.12 and 8.0.6 |
-| Documentation examples, Core (`docs.yml`) | 1.22.1 | 8.0.6 |
+| Core CI (`ci.yml`) | 1.22.1 (`crystallang/crystal:1.22.1-alpine`) | 8.0.6 |
+| Documentation examples, Core (`ci.yml`) | 1.22.1 | 8.0.6 |
 | Documentation examples, Pro | run locally with `--edition pro`, not in CI | any local `redis-server` |
 
 The example fixtures in `examples/docs/` pin `joobq = 0.5.6` and `joobq_pro = 0.2.4` in their `shard.yml`, with the resolved graphs in `shard.lock`.

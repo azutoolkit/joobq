@@ -1,0 +1,21 @@
+name: Pinned Redis with TLS
+description: Builds Redis (scripts/install_test_redis.py) once per version and script revision, caches it, and puts it on the PATH.
+inputs:
+  version:
+    description: Redis version
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: cache
+      uses: actions/cache@v4
+      with:
+        path: /tmp/test-redis
+        key: redis-${{ inputs.version }}-${{ hashFiles('scripts/install_test_redis.py') }}-crystal-1.22.1-alpine
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        REDIS_VERSION: ${{ inputs.version }}
+      run: python3 scripts/install_test_redis.py "$REDIS_VERSION" /tmp/test-redis
+    - shell: bash
+      run: echo /tmp/test-redis/bin >> "$GITHUB_PATH"

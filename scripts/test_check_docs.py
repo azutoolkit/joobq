@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_docs import anchors, check, landing_errors, markup_errors
+from check_docs import anchors, check, gitbook_errors, landing_errors, markup_errors
 
 
 class DocumentationChecks(unittest.TestCase):
@@ -34,6 +34,33 @@ class DocumentationChecks(unittest.TestCase):
             errors = '\n'.join(check(root))
             for expected in ('page missing from SUMMARY', 'missing target', 'link escapes repository', 'missing anchor', 'example differs'):
                 self.assertIn(expected, errors)
+
+    def test_gitbook_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'docs' / 'how-to').mkdir(parents=True)
+            (root / 'docs' / 'how-to' / 'new.md').write_text('# New\n')
+            (root / 'docs' / 'how-to' / 'live.md').write_text('# Live\n')
+            space = 'root: ./docs/\nstructure:\n  readme: README.md\n  summary: SUMMARY.md\n'
+            site = 'site:\n  structure:\n    - type: space\n      key: space-docs\n      content:\n        directory: ./docs\n'
+            (root / '.gitbook.yaml').write_text(space + 'redirects:\n  old: how-to/new.md\n  # a comment\n  gone: how-to/missing.md\n'
+                                                  '  how-to/live: how-to/new.md\n  old: how-to/live.md\n')
+            (root / 'gitbook-docs.yaml').write_text(site.replace('./docs', './elsewhere'))
+            errors = '\n'.join(gitbook_errors(root))
+            for expected in ('redirect target missing: gone -> how-to/missing.md', 'redirect source is a live page: how-to/live',
+                             'duplicate redirect source: old', 'gitbook-docs.yaml: directory does not exist: ./elsewhere',
+                             'gitbook-docs.yaml: no space maps ./docs/'):
+                self.assertIn(expected, errors)
+            (root / '.gitbook.yaml').write_text(space + 'redirects:\n  old: how-to/new.md\n')
+            (root / 'gitbook-docs.yaml').write_text(site)
+            self.assertEqual([], gitbook_errors(root))
+            (root / '.gitbook.yaml').write_text('redirects:\n  old: ../outside.md\n' + space)
+            (root / 'gitbook-docs.yaml').write_text(site.replace('./docs', '"./docs"'))
+            self.assertEqual(['.gitbook.yaml: redirect target missing: old -> ../outside.md'], gitbook_errors(root))
+            (root / '.gitbook.yaml').write_text(space + 'redirects:\n  old: how-to/new.md\n')
+            self.assertEqual([], gitbook_errors(root))  # a quoted directory is the same directory
+            (root / 'gitbook-docs.yaml').unlink()
+            self.assertEqual(['missing gitbook-docs.yaml'], gitbook_errors(root))
 
     def test_section_landing_lists_each_page_with_scope(self):
         with tempfile.TemporaryDirectory() as directory:

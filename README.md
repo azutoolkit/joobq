@@ -4,7 +4,7 @@
 
 ![JoobQ Logo](./joobq-logo.png)
 
-[![Crystal CI](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml/badge.svg?branch=master)](https://github.com/azutoolkit/joobq/actions/workflows/crystal.yml)
+[![CI](https://github.com/azutoolkit/joobq/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/azutoolkit/joobq/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **A Redis-backed asynchronous job queue system for Crystal**

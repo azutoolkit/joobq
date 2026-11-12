@@ -1,0 +1,190 @@
+name: CI
+
+# One workflow, started by a push to master (a merge) or by hand. The `changes` job reads the files the push changed
+# since the last successful run (.github/scripts/changed_paths.py) and only the jobs that read those files run:
+#
+#   code     src/, spec/, config/, shard files, the integration scripts  ->  specs (2 legs), then the release
+#   book     docs/, examples/docs/, .gitbook.yaml, gitbook-docs.yaml     ->  documentation checks
+#   examples examples/docs/, the docs example runner                     ->  documentation programs on Core
+#   image    .github/ci-image/                                           ->  rebuild the CI image first
+#
+# A push that touches none of them (README, CHANGELOG, design notes, ...) runs `changes` and stops. GitBook itself syncs
+# from master through its GitHub app; this workflow only checks that the files it reads are sound.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      rebuild_image:
+        description: Rebuild and push the CI image (master only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A master run finishes its tag-and-release step uninterrupted; a queued one is replaced by the newest push. Manual runs
+# have their own group so they cannot replace a queued push run.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+env:
+  REDIS_VERSION: "8.0.6"
+
+jobs:
+  changes:
+    name: Changed files
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # the newest successful run of this workflow
+    outputs:
+      code: ${{ steps.paths.outputs.code }}
+      book: ${{ steps.paths.outputs.book }}
+      examples: ${{ steps.paths.outputs.examples }}
+      image: ${{ steps.paths.outputs.image }}
+      image_tag: ${{ steps.paths.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 -m unittest discover -s .github/scripts -p 'test_changed_paths.py'
+      - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AFTER: ${{ github.sha }}
+          REBUILD_IMAGE: ${{ inputs.rebuild_image }}
+        run: python3 .github/scripts/changed_paths.py
+
+  # Only when .github/ci-image changed: the jobs below pull the tag this builds, so it goes first.
+  image:
+    name: CI image
+    needs: changes
+    if: needs.changes.outputs.image == 'true' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .github/ci-image
+          push: true
+          tags: ghcr.io/azutoolkit/joobq-ci:${{ needs.changes.outputs.image_tag }}
+
+  # Redis 8.0.6 with one runtime worker, once per connection style: the two runs of this workflow.
+  specs:
+    name: Specs (connection=${{ matrix.connection }})
+    needs: [changes, image]
+    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read # the CI image on ghcr.io
+    strategy:
+      fail-fast: false
+      matrix:
+        connection: [legacy, url]
+    container:
+      image: ghcr.io/azutoolkit/joobq-ci:${{ needs.changes.outputs.image_tag }} # .github/ci-image: Crystal 1.22.1 on Alpine
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    env:
+      CRYSTAL_WORKERS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: shards install --frozen
+      - uses: ./.github/actions/pinned-redis
+        with:
+          version: ${{ env.REDIS_VERSION }}
+      - name: Format
+        if: matrix.connection == 'legacy' # independent of the connection style
+        run: crystal tool format --check src spec
+      - name: Specs (no skips)
+        run: python3 scripts/run_integration.py ${{ matrix.connection == 'url' && '--url' || '' }}
+      - name: Redis restart smoke
+        run: python3 scripts/redis_restart_smoke.py
+
+  book:
+    name: Documentation book
+    needs: changes
+    if: needs.changes.outputs.book == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check_docs.py
+      - run: python3 -m unittest discover -s scripts -p 'test_check_docs.py'
+
+  examples:
+    name: Documentation examples (Core)
+    needs: [changes, image]
+    if: ${{ !cancelled() && needs.changes.outputs.examples == 'true' && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/azutoolkit/joobq-ci:${{ needs.changes.outputs.image_tag }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install released Core graph
+        working-directory: examples/docs/core
+        run: shards install --frozen
+      - uses: ./.github/actions/pinned-redis
+        with:
+          version: ${{ env.REDIS_VERSION }}
+      - run: crystal tool format --check examples/docs/core/*.cr examples/docs/pro/*.cr
+      - name: Run documentation examples against isolated Redis
+        run: python3 scripts/test_docs_examples.py --edition core
+
+  # The release lifecycle checks (versioning, atomic pushes, recovery with local Git remotes) run first in this job:
+  # they gate the same release without a runner of their own. Only a master push whose specs ran and passed gets here.
+  release:
+    name: Publish release
+    needs: [changes, specs]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' &&
+      needs.changes.outputs.code == 'true' && needs.specs.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify manifest versions, protected branches and recovery with local Git remotes
+        run: python3 .github/scripts/test_release.py
+      - name: Tag the exact tested manifest version
+        id: prepare
+        run: python3 .github/scripts/release.py
+      - name: Publish GitHub release with generated notes
+        if: steps.prepare.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
+          RELEASE_LATEST: ${{ steps.prepare.outputs.latest }}
+        run: python3 .github/scripts/release.py --publish "$RELEASE_TAG" --latest "$RELEASE_LATEST"
+      # master moved on while this run was going, so a newer run must release. This run fails on purpose: a failed run is
+      # never the baseline of changed_paths.py, so that newer run re-runs the specs on this code even if it changed only docs.
+      - name: Release deferred to a newer run
+        if: steps.prepare.outputs.deferred == 'true'
+        run: |
+          echo "::error::master advanced during this run; the next run on master releases. Failing so its changed-files baseline stays before this commit."
+          exit 1

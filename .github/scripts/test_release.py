@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Release lifecycle tests use disposable local Git remotes, never GitHub."""
+import contextlib
 import importlib.util
+import io
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("release", Path(__file__).with_name("release.py"))
@@ -96,8 +100,20 @@ class GitLifecycle(unittest.TestCase):
         source = self.baseline()
         self.change("Newer source")
         release.git("checkout", "--detach", source)
-        self.assertEqual(release.prepare(source)["tag"], "")
+        result = release.prepare(source)
+        self.assertEqual(result["tag"], "")
+        self.assertTrue(result["deferred"])  # CI fails this run so the newer run re-tests and releases (docs/releasing.md)
         self.assertEqual(release.tags(), ["v0.2.0"])
+
+    def test_main_reports_a_deferral_to_the_workflow(self):
+        source = self.baseline()
+        self.change("Newer source")
+        release.git("checkout", "--detach", source)
+        output = self.root / "github_output"
+        with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output), "GITHUB_SHA": source}), \
+                mock.patch.object(sys, "argv", ["release.py"]), contextlib.redirect_stdout(io.StringIO()):
+            release.main()
+        self.assertIn("deferred=true\n", output.read_text())  # ci.yml fails the run on this line
 
     def test_protected_master_needs_no_bypass_for_release(self):
         source = self.baseline()

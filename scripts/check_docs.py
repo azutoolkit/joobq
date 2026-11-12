@@ -56,15 +56,52 @@ def markup_errors(text):
     return errors
 
 
+def gitbook_errors(root):
+    """The two Git Sync files: .gitbook.yaml (docs root, readme/summary, redirects) and gitbook-docs.yaml (site mapping)."""
+    errors = []
+    config = root / ".gitbook.yaml"
+    text = config.read_text() if config.exists() else ""
+    if not re.search(r"^root: \./docs/$", text, re.M):
+        errors.append(".gitbook.yaml must use ./docs/")
+    elif not all(re.search(rf"^  {key}: {value}$", text, re.M) for key, value in (("readme", "README.md"), ("summary", "SUMMARY.md"))):
+        errors.append("GitBook readme/summary configuration is missing")
+    docs = root / "docs"
+    block = re.search(r"^redirects:[ \t]*$", text, re.M)
+    redirects = text[block.end():] if block else ""
+    sources = set()
+    for line in redirects.splitlines():
+        if line and not line[0].isspace() and not line.startswith("#"):
+            break  # the next top-level key
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        entry = re.fullmatch(r"  ([\w/.-]+): ([\w/.-]+\.md)", line)
+        if not entry:
+            errors.append(f".gitbook.yaml: malformed redirect: {line.strip()}")
+            continue
+        source, target = entry.groups()
+        if source in sources:
+            errors.append(f".gitbook.yaml: duplicate redirect source: {source}")
+        sources.add(source)
+        if not (docs / target).resolve().is_relative_to(docs.resolve()) or not (docs / target).is_file():
+            errors.append(f".gitbook.yaml: redirect target missing: {source} -> {target}")
+        if (docs / f"{source}.md").is_file() or (docs / source / "README.md").is_file():
+            errors.append(f".gitbook.yaml: redirect source is a live page: {source}")
+    site = root / "gitbook-docs.yaml"
+    if not site.exists():
+        return errors + ["missing gitbook-docs.yaml"]
+    directories = [name.strip("\"'") for name in re.findall(r"^\s+directory: (\S+)\s*$", site.read_text(), re.M)]
+    for directory in directories:
+        if not (root / directory).is_dir():
+            errors.append(f"gitbook-docs.yaml: directory does not exist: {directory}")
+    if not any((root / directory).resolve() == docs.resolve() for directory in directories):
+        errors.append("gitbook-docs.yaml: no space maps ./docs/")
+    return errors
+
+
 def check(root):
     docs = root / "docs"
     errors = []
-    config = root / ".gitbook.yaml"
-    if not config.exists() or not re.search(r"^root: \./docs/$", config.read_text(), re.M):
-        errors.append(".gitbook.yaml must use ./docs/")
-    elif not all(re.search(rf"^  {key}: {value}$", config.read_text(), re.M)
-                 for key, value in (("readme", "README.md"), ("summary", "SUMMARY.md"))):
-        errors.append("GitBook readme/summary configuration is missing")
+    errors += gitbook_errors(root)
     summary = docs / "SUMMARY.md"
     if not summary.exists():
         return errors + ["missing docs/SUMMARY.md"]

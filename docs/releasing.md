@@ -1,10 +1,18 @@
 # Automatic releases
 
-A push to `master` that passes the Redis/worker/connection matrix and release
-lifecycle tests publishes the **new version already declared in `shard.yml`**.
+A push to `master` that changes code (not only documentation) and passes the
+specs (two legs, one per Redis connection style) and release lifecycle tests publishes the **new version already declared in `shard.yml`**.
 CI tags the exact tested commit and creates a GitHub release with generated notes.
 It never changes the manifest, creates a version-only commit, or pushes `master`.
-Pull requests run the checks but cannot publish.
+CI runs only for pushes to `master` (and by hand), never for pull requests, and
+only the jobs that read the changed files run (see `.github/scripts/changed_paths.py`).
+A push that changes only documentation never reaches the release job.
+"Changed" means changed since the newest fully successful run of the workflow, not
+since the push's parent. A run that failed, was cancelled or was replaced while
+queued therefore never hides its files from the next run: a later documentation-only
+push still runs the specs when earlier code was never verified. With no earlier
+successful run, everything runs. Only runs started by a push count, and a run that
+deferred its release (see below) is made to fail, so it is never that baseline.
 
 This is a source shard release. It does not upload a binary or publish to another
 package registry.
@@ -58,8 +66,10 @@ verify Actions write permission and tag policy. A tag failure never changes
 ## Ordering and recovery
 
 Workflow runs serialize per branch without cancellation. If `master` has already
-advanced before preparation, the stale run skips publication and lets the newer
-run handle the declared version. If it advances during the tag push, the tag can
+advanced before preparation, the stale run skips publication, fails its release
+job on purpose, and lets the newer run handle the declared version: that run
+re-tests the stale run's code (even when its own push changed only documentation)
+and releases at its own head. If it advances during the tag push, the tag can
 still be created on the earlier **tested** commit; the release job never retargets
 it to newer code and never overwrites the branch.
 

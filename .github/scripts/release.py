@@ -87,7 +87,7 @@ def prepare(source, dry_run=False):
             return {"tag": tag, "latest": tag == all_tags[-1], "recovered": True}
 
     if head != source:
-        return {"tag": "", "reason": "master advanced; its newer CI run owns the release"}
+        return {"tag": "", "deferred": True, "reason": "master advanced; its newer CI run owns the release"}
     reachable = [tag for tag in all_tags if ancestor(tag, source)]
     previous = reachable[-1] if reachable else None
     value = manifest(Path("shard.yml").read_text())
@@ -150,7 +150,8 @@ def main():
         output = os.environ.get("GITHUB_OUTPUT")
         if output and not args.dry_run:
             with open(output, "a") as file:
-                file.write(f"tag={result['tag']}\nlatest={str(result.get('latest', False)).lower()}\n")
+                file.write(f"tag={result['tag']}\nlatest={str(result.get('latest', False)).lower()}\n"
+                           f"deferred={str(result.get('deferred', False)).lower()}\n")
 
 
 if __name__ == "__main__":

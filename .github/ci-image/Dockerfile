@@ -6,8 +6,9 @@
 #   git                                shards, actions/checkout
 #   tar zstd                           actions/cache
 #
-# Built and pushed by .github/workflows/ci-image.yml as ghcr.io/azutoolkit/joobq-ci:<TAG>. After changing this file,
-# raise the number in TAG and the image tag in crystal.yml and docs.yml.
+# Built and pushed by the `image` job of .github/workflows/ci.yml (when this directory changes) as
+# ghcr.io/azutoolkit/joobq-ci:<TAG>. After changing this file, raise the number in TAG; ci.yml reads the tag from
+# there, so no workflow needs editing.
 FROM crystallang/crystal:1.22.1-alpine
 LABEL org.opencontainers.image.source=https://github.com/azutoolkit/joobq
 LABEL org.opencontainers.image.description="JoobQ CI: Crystal 1.22.1 on Alpine with the integration tools"

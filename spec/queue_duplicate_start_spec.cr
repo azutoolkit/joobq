@@ -79,5 +79,86 @@ module JoobQ
         b.stop!
       end
     end
+
+    it "runs new jobs on the second instance's workers while the first is busy" do
+      a = Queue(DuplicateStartJob).new(name, 1)
+      b = Queue(DuplicateStartJob).new(name, 1)
+      begin
+        a.add(DuplicateStartJob.new("blocker", name).to_json)
+        a.start
+        eventually { DuplicateStartJob.runs("blocker") == 1 }.should be_true
+
+        b.start
+        # A's one worker is blocked and may have staged a job or two; B's worker must run the rest.
+        labels = (1..8).map { |i| "fast-#{i}" }
+        labels.each { |label| b.add(DuplicateStartJob.new(label, name).to_json) }
+
+        eventually { labels.count { |label| DuplicateStartJob.runs(label) == 1 } >= 5 }.should be_true
+        DuplicateStartJob.runs("blocker").should eq(1)
+
+        DuplicateStartJob::RELEASE.set(true)
+        eventually { labels.all? { |label| DuplicateStartJob.runs(label) == 1 } }.should be_true
+        eventually { redis.llen(owned.call(name)) == 0 }.should be_true
+        DuplicateStartJob.runs("blocker").should eq(1)
+      ensure
+        DuplicateStartJob::RELEASE.set(true)
+        a.stop!
+        b.stop!
+      end
+    end
+
+    it "still recovers a stranded job when no instance of the name is running" do
+      a = Queue(DuplicateStartJob).new(name, 1)
+      b = Queue(DuplicateStartJob).new(name, 1)
+      c = Queue(DuplicateStartJob).new(name, 1)
+      begin
+        a.start
+        b.start
+        a.stop!
+        b.stop!
+
+        redis.lpush(owned.call(name), DuplicateStartJob.new("stranded", name).to_json)
+        redis.llen(owned.call(name)).should eq(1)
+
+        c.start
+
+        eventually { DuplicateStartJob.runs("stranded") == 1 }.should be_true
+        eventually { redis.llen(owned.call(name)) == 0 }.should be_true
+        DuplicateStartJob.runs("stranded").should eq(1)
+      ensure
+        a.stop!
+        b.stop!
+        c.stop!
+      end
+    end
+
+    it "does not recover for a third instance while another is still registered after one stopped" do
+      a = Queue(DuplicateStartJob).new(name, 1)
+      b = Queue(DuplicateStartJob).new(name, 1)
+      c = Queue(DuplicateStartJob).new(name, 1)
+      begin
+        a.start
+        b.start
+        a.stop! # B is still running, so the name is still served by this process
+
+        b.add(DuplicateStartJob.new("blocker", name).to_json)
+        eventually { DuplicateStartJob.runs("blocker") == 1 }.should be_true # only B can have run it
+        redis.llen(owned.call(name)).should eq(1)
+
+        c.start
+
+        eventually(400.milliseconds) { DuplicateStartJob.runs("blocker") > 1 }.should be_false
+        redis.llen(owned.call(name)).should eq(1)
+
+        DuplicateStartJob::RELEASE.set(true)
+        eventually { redis.llen(owned.call(name)) == 0 }.should be_true
+        DuplicateStartJob.runs("blocker").should eq(1)
+      ensure
+        DuplicateStartJob::RELEASE.set(true)
+        a.stop!
+        b.stop!
+        c.stop!
+      end
+    end
   end
 end

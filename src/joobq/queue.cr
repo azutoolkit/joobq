@@ -84,10 +84,23 @@ module JoobQ
       end
       return if @started.swap(true)
 
-      reprocess_busy_jobs!
-      store.as?(RedisStore).try(&.start_owner_heartbeat)
-      start_dispatcher
-      worker_manager.start_workers
+      begin
+        RunningQueues.register(name, self) do |first|
+          if first
+            reprocess_busy_jobs!
+          else
+            Log.warn &.emit("Another instance of this queue is running in this process; recovery skipped to keep its in-flight jobs", queue: name)
+          end
+        end
+        store.as?(RedisStore).try(&.start_owner_heartbeat)
+        start_dispatcher
+        worker_manager.start_workers
+      rescue ex
+        stop_dispatcher
+        @started.set(false)
+        RunningQueues.deregister(name, self)
+        raise ex
+      end
     end
 
     # Starts the per-queue dispatcher. Only with a RedisStore; other stores keep the workers' own (fallback) claim.
@@ -388,9 +401,13 @@ module JoobQ
       store.list_jobs(name, page_number, page_size)
     end
 
+    # Deregisters once the workers were stopped and waited for; if stopping raises, the queue stays registered (and
+    # keeps blocking recovery) until a retried `stop!` completes. The wait is bounded, so a job that outlives it can
+    # still be recovered by a later instance of this name (known limitation).
     def stop!
       stop_dispatcher
       worker_manager.stop_workers
+      RunningQueues.deregister(name, self)
       @started.set(false)
     end
 

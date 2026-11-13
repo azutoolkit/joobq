@@ -29,7 +29,8 @@ description: The public Crystal API of JoobQ Core 0.5.6 (jobs, queues, workers, 
 | `shutdown` | `shutdown(timeout = 15.seconds) : Bool` | Stops the API, schedulers and queues, waits for running jobs, requeues those still running at the deadline; `false` if already shut down |
 | `abandoned_jobs` | `: Int32` | Jobs put back on their queue by the last shutdown |
 | `enqueue` | `enqueue(queue_name : String, json : String) : String` | Enqueues raw JSON on a configured queue; raises `JoobQ::UnknownQueue` |
-| `[]` | `JoobQ[name]` | A queue registered through `QueueFactory` |
+| `queues` | `: Hash(String, BaseQueue)` | The one queue registry, `JoobQ.config.queues`, after creating the YAML-configured queues missing from it. Engines add a queue with `JoobQ.queues[name] = queue`; it is not started for you, and the `Hash` is not synchronized (one writer) |
+| `[]` | `JoobQ[name]` | A registered queue: `JoobQ.queues[name]` |
 | exit codes | `EXIT_CLEAN = 0`, `EXIT_ABANDONED = 3` | Exit status after a signal; `1` on a second signal more than 1 s after the first |
 
 ## Queue (`JoobQ::Queue(T)`)

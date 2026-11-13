@@ -121,8 +121,9 @@ module JoobQ
     store.reset
   end
 
+  # The one queue registry, `config.queues`, after creating the YAML-configured queues missing from it. A queue added
+  # here (`JoobQ.queues[name] = queue`) is served like any other but not started; the Hash is not synchronized.
   def self.queues
-    # Load all queues from QueueFactory
     QueueFactory.queues
   end
 
@@ -143,7 +144,7 @@ module JoobQ
   # payload that does not fit the queue's job type and moves on, this raises: `UnknownQueue` for a queue that is not
   # registered, and the JSON error (`JSON::ParseException`, `JSON::SerializableError`) for a bad payload.
   def self.enqueue(queue_name : String, json : String) : String
-    queue = queues[queue_name]? || config.queues[queue_name]? || raise UnknownQueue.new(queue_name)
+    queue = queues[queue_name]? || raise UnknownQueue.new(queue_name)
     queue.add!(json)
   end
 

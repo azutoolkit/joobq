@@ -38,6 +38,11 @@ module JoobQ
       @@lock.synchronize { @@jobs.count { |_, entry| !entry.state.abandoned? } }
     end
 
+    # True while this process has a claim of *queue* that is claimed, running or settling (abandoned ones do not count).
+    def self.any?(queue : String) : Bool
+      @@lock.synchronize { @@jobs.any? { |_, entry| entry.queue == queue && !entry.state.abandoned? } }
+    end
+
     # Registers freshly claimed jobs, one token each in the order given. Call it as soon as the claim returns.
     def self.claimed(queue : String, jobs : Array(String)) : Array(Int64)
       @@lock.synchronize do

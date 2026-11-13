@@ -72,11 +72,8 @@ class JoobQ::Queue(T)
 end
 
 Spec.before_each do
-  # Two queue registries exist (QueueFactory vs. config.queues); stop! blocks
-  # until the queue's workers have exited.
-  [JoobQ.config.queues, JoobQ.queues].each do |registry|
-    registry.each_value { |queue| queue.stop! if queue.running? }
-  end
+  # stop! blocks until the queue's workers have exited.
+  JoobQ.queues.each_value { |queue| queue.stop! if queue.running? }
 
   JoobQ.reset
 end

@@ -19,17 +19,15 @@ module JoobQ
   #   throttle: {limit: 10, period: 1.minute}
   # )
   #
-  # # 2b. Or get all instantiated queues from configuration (memoized)
-  # all_queues = QueueFactory.queues # Reads from JoobQ.config and caches
+  # # 2b. Or get the process's queue registry, `JoobQ.config.queues`
+  # all_queues = QueueFactory.queues
   # ```
   #
-  # ## Memoization Pattern:
+  # ## The Registry:
   #
-  # The `queues` method integrates with `Configure` and `YamlConfigLoader` to:
-  # - Read queue configurations from `JoobQ.config.queue_configs`
-  # - Instantiate all configured queues on first access
-  # - Cache the queue instances for subsequent calls
-  # - Support cache clearing via `clear_queues_cache` or `clear_registry`
+  # `JoobQ.config.queues` is the one registry of queues. `queues` creates the
+  # entries of `JoobQ.config.queue_configs` missing from it, once, stores them
+  # there and returns that Hash. Reset it with `JoobQ.reset_config`.
   #
   # ## The Crystal Limitation
   #
@@ -49,7 +47,7 @@ module JoobQ
   # 2. The factory uses a hash mapping string names to factory procs
   # 3. Each factory proc creates the correctly-typed queue
   # 4. We return BaseQueue interface to hide the generic type
-  # 5. Queues are instantiated lazily and memoized from configuration
+  # 5. Queues are instantiated lazily into `JoobQ.config.queues`
   class QueueFactory
     # Type alias for the factory function
     alias FactoryProc = Proc(String, Int32, NamedTuple(limit: Int32, period: Time::Span)?, BaseQueue)
@@ -62,8 +60,10 @@ module JoobQ
     # Used to populate JobSchemaRegistry after config reset
     @@schema_registry_procs = {} of String => RegistryProc
 
-    # Memoized queues cache
-    @@queues_cache : Hash(String, BaseQueue)? = nil
+    # YAML queue names `queues` failed to create for the configuration `@@failed_for`; tried again only after a
+    # job type is registered, so a stale entry is not retried and logged on every call.
+    @@failed = Set(String).new
+    @@failed_for : Configure? = nil
 
     # Register a job type for queue creation
     #
@@ -88,17 +88,10 @@ module JoobQ
       )
     end
 
-    # Get all instantiated queues from configuration
-    #
-    # This method instantiates and memoizes all queues based on the queue_configs
-    # defined in the Configure instance. Queues are created lazily on first access
-    # and cached for subsequent calls.
-    #
-    # The method:
-    # 1. Checks if queues are already cached
-    # 2. If not, retrieves queue_configs from JoobQ.config
-    # 3. Creates queue instances using the factory registry
-    # 4. Caches and returns the queue hash indexed by queue name
+    # The queue registry, `JoobQ.config.queues`, with the YAML-configured queues
+    # it lacks created into it. A typed (DSL) queue wins over a YAML entry of the
+    # same name, and a queue is created only once (an entry that fails is tried again
+    # only after a job type is registered).
     #
     # Returns: Hash(String, BaseQueue) - queues indexed by queue name
     #
@@ -114,32 +107,29 @@ module JoobQ
     # email_queue = all_queues["email_queue"]?
     # ```
     def self.queues : Hash(String, BaseQueue)
-      if cached = @@queues_cache
-        return cached
-      end
-
-      # Get queue configurations from Configure instance
       config = JoobQ.config
-      queue_configs = config.queue_configs
+      unless @@failed_for.same?(config)
+        @@failed.clear
+        @@failed_for = config
+      end
+      registry = config.queues
+      return registry unless config.queue_configs.any? { |name, _| pending?(registry, name) }
 
-      # Create queues from configuration
-      # The typed `config.queue` DSL already created these instances. Prefer
-      # them over same-name YAML entries and do not create duplicate workers.
-      created_queues = create_queues_from_config(queue_configs.reject { |name, _| config.queues.has_key?(name) })
-      created_queues.merge!(config.queues)
+      missing = config.queue_configs.select { |name, _| pending?(registry, name) }
+      registry.merge!(create_queues_from_config(missing))
+      missing.each_key { |name| @@failed << name unless registry.has_key?(name) }
+      registry
+    end
 
-      # Cache the queues hash
-      @@queues_cache = created_queues
-
-      Log.info { "Memoized #{created_queues.size} queues from configuration" }
-
-      created_queues
+    private def self.pending?(registry : Hash(String, BaseQueue), name : String) : Bool
+      !registry.has_key?(name) && !@@failed.includes?(name)
     end
 
     # Internal method to add a factory function to the registry
     def self.add_to_registry(job_class_name : String, factory : FactoryProc, schema_proc : RegistryProc)
       @@registry[job_class_name] = factory
       @@schema_registry_procs[job_class_name] = schema_proc
+      @@failed.clear
     end
 
     # Create a queue based on string job class name
@@ -219,17 +209,16 @@ module JoobQ
       @@registry.has_key?(job_class_name)
     end
 
-    # Clear the registry and queues cache (mainly for testing or config reload)
+    # Clear the job type registry (mainly for testing)
     def self.clear_registry
       @@registry.clear
       @@schema_registry_procs.clear
-      @@queues_cache = nil
+      @@failed.clear
     end
 
-    # Clear only the queues cache (forces re-instantiation on next access)
-    def self.clear_queues_cache
-      @@queues_cache = nil
-      Log.debug { "Cleared queues cache - queues will be re-instantiated on next access" }
+    # Does nothing: there is no cache to clear.
+    @[Deprecated("Does nothing: queues live in `JoobQ.config.queues`. To rebuild one after editing `queue_configs`, delete it from `JoobQ.queues` and call `JoobQ.queues` again, or `JoobQ.reset_config`")]
+    def self.clear_queues_cache : Nil
     end
 
     # Populate a JobSchemaRegistry with all registered job types

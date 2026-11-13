@@ -71,7 +71,7 @@ module JoobQ
 
     # Get metrics for all configured queues using pipelining
     def get_all_queue_metrics : Hash(String, QueueMetrics)
-      queue_names = JoobQ.config.queues.keys
+      queue_names = JoobQ.queues.keys
       get_queue_metrics_pipelined(queue_names)
     end
 

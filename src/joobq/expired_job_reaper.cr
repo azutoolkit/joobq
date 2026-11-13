@@ -42,7 +42,7 @@ module JoobQ
 
       redis_store = @store.as(RedisStore)
 
-      JoobQ.config.queues.each do |queue_name, _|
+      JoobQ.queues.each do |queue_name, _|
         begin
           # Return crashed/stopped processes' in-flight jobs to the head of the queue (never a live process's); any
           # expired ones are then reaped by the waiting scan below.

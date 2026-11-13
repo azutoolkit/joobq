@@ -89,7 +89,8 @@ module JoobQ
           if first && !InFlight.any?(name)
             reprocess_busy_jobs!
           else
-            Log.warn &.emit("Another instance of this queue is running in this process, or this process still has jobs of it in flight; recovery skipped to keep them", queue: name)
+            held = first ? "this process still has jobs of this queue in flight" : "another instance of it runs in this process"
+            Log.warn &.emit("Recovery skipped: #{held}", queue: name)
           end
         end
         store.as?(RedisStore).try(&.start_owner_heartbeat)
@@ -112,8 +113,9 @@ module JoobQ
 
       @dispatch_stop.set(false)
       # One batch of headroom: enough to decouple the dispatcher's batched claim from worker consumption, but small
-      # enough that the claims staged ahead of worker demand (and so requeued, not lost, at shutdown) stay well below
-      # the old design's worst case of one in-flight batch per worker.
+      # enough that the claims staged ahead of worker demand (left to `JoobQ.shutdown`'s requeue, or released by a
+      # plain `stop!` for the next start's recovery) stay well below the old design's worst case of one in-flight
+      # batch per worker.
       capacity = {JoobQ.config.worker_batch_size, 1}.max
       channel = Channel({String, Int64}).new(capacity)
       done = Channel(Nil).new(1)
@@ -165,7 +167,9 @@ module JoobQ
     end
 
     # Hands one claim to a worker. A claim is already in Redis processing and registered in InFlight, so if the
-    # dispatcher is stopping and no worker takes it, it is left for shutdown requeue / crash recovery rather than lost.
+    # dispatcher is stopping and no worker takes it, its InFlight entry is released and the job is left in processing
+    # for the next start's recovery (or crash recovery) rather than lost.
+    # During `JoobQ.shutdown` the entry stays claimed: the shutdown's own requeue puts the job back at the head.
     private def deliver(channel : Channel({String, Int64}), claim : {String, Int64}) : Nil
       until @dispatch_stop.get
         select
@@ -174,6 +178,7 @@ module JoobQ
         when timeout(100.milliseconds)
         end
       end
+      InFlight.finished(claim[1]) unless JoobQ.shut_down?
     end
 
     # A worker's claim source in dispatcher mode: wait up to the block timeout for the first claim, then drain up to
@@ -229,9 +234,27 @@ module JoobQ
           Log.warn &.emit("Dispatcher did not stop within timeout", queue: name)
         end
       end
+      release_staged_claims
       @dispatch = nil
       @dispatch_conn = nil
       @dispatch_done = nil
+    end
+
+    # Claims staged in the channel that no worker took: release their InFlight entries (the jobs stay in processing
+    # for recovery), or `InFlight.any?` would keep every later start of this queue from recovering them.
+    # Not during `JoobQ.shutdown`: it owns them and puts them back at the head itself.
+    private def release_staged_claims : Nil
+      return if JoobQ.shut_down?
+      channel = @dispatch || return
+      loop do
+        select
+        when claim = channel.receive?
+          break unless claim
+          InFlight.finished(claim[1])
+        else
+          break
+        end
+      end
     end
 
     # A queue of a job class with encrypted properties does not start without valid keys: better to fail at start-up

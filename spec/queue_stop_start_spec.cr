@@ -94,7 +94,7 @@ module JoobQ
         a.stop!
 
         StopStartJob::RELEASE.set(true)
-        eventually { redis.llen(owned.call(name)) == 0 && InFlight.count == 0 }.should be_true
+        eventually { redis.llen(owned.call(name)) == 0 && !InFlight.any?(name) }.should be_true
         StopStartJob.runs("blocker").should eq(1)
 
         redis.lpush(owned.call(name), StopStartJob.new("stranded", name).to_json)

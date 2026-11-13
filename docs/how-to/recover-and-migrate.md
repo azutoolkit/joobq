@@ -18,7 +18,7 @@ description: Recover deliberately when processes, networks, or storage fail.
 4. If you suspect corruption or a bad rollback, restore into an isolated environment first.
 5. Inspect waiting, processing (`joobq:processing:<queue>`), delayed and dead-letter state; for Delivery also leases and receipts.
 6. Replay one reviewed job, watch it, then the rest. Record every outcome you could not resolve.
-7. Before you start consumers again after a crash, quiesce them: a restarting queue moves only one job back from its processing list.
+7. Before you start consumers again after a crash, stop any process still running the queue: recovery returns every job of a process whose heartbeat has lapsed (30 s), and none of a live one's.
 
 ## Migrate to another processing path
 

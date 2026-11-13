@@ -121,8 +121,9 @@ module JoobQ
     store.reset
   end
 
+  # The one queue registry, `config.queues`, after creating the YAML-configured queues missing from it. A queue added
+  # here (`JoobQ.queues[name] = queue`) is served like any other but not started; the Hash is not synchronized.
   def self.queues
-    # Load all queues from QueueFactory
     QueueFactory.queues
   end
 

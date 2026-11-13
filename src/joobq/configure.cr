@@ -23,6 +23,7 @@ module JoobQ
     Log.setup_from_env(default_level: :info)
 
     # Properties and Getters
+    # The one queue registry, shared with `JoobQ.queues` and `QueueFactory.queues` (the same Hash, not a copy).
     getter queues = {} of String => BaseQueue
     getter queue_configs = {} of String => NamedTuple(job_class_name: String, workers: Int32, throttle: NamedTuple(limit: Int32, period: Time::Span)?)
     getter time_location : Time::Location = Time::Location.load("America/New_York")

@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Starting a second `Queue` of a running queue name no longer runs a job twice** (#36). Restart recovery used to
+  put the first instance's in-flight jobs back on the queue. It now runs only for the first instance of a name in
+  this process, and not while a claim of that queue is still in flight after `stop!`. `stop!` puts back claims no
+  worker had received (a `JoobQ.shutdown` requeues them itself). A second instance still starts its workers.
+
+### Changed
+
+- **`JoobQ.config.queues` is the one queue registry.** `JoobQ.queues` and `QueueFactory.queues` return that same
+  `Hash` after creating the YAML-configured queues missing from it; the memoised copy is gone. A queue added with
+  `JoobQ.queues[name] = queue` (as the joobq-pro engine does) is registered like any other, and the delayed-job
+  scheduler, the expired-job reaper and the queue metrics now serve it and YAML-configured queues. A YAML entry
+  that cannot be created (job type not registered) is logged once and retried only after a job type is registered.
+  A queue added at runtime is not started for you, and the `Hash` is not synchronized: register from one fiber.
+
+### Deprecated
+
+- `QueueFactory.clear_queues_cache` does nothing now and goes in the next minor release. To rebuild a queue after
+  editing `queue_configs`, delete it from `JoobQ.queues` and call `JoobQ.queues` again, or call `JoobQ.reset_config`.
+
 ## 0.6.1 (PATCH)
 
 ### Changed

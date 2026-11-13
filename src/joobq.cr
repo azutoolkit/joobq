@@ -143,7 +143,7 @@ module JoobQ
   # payload that does not fit the queue's job type and moves on, this raises: `UnknownQueue` for a queue that is not
   # registered, and the JSON error (`JSON::ParseException`, `JSON::SerializableError`) for a bad payload.
   def self.enqueue(queue_name : String, json : String) : String
-    queue = queues[queue_name]? || config.queues[queue_name]? || raise UnknownQueue.new(queue_name)
+    queue = queues[queue_name]? || raise UnknownQueue.new(queue_name)
     queue.add!(json)
   end
 

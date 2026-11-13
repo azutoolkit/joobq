@@ -60,6 +60,11 @@ module JoobQ
     # Used to populate JobSchemaRegistry after config reset
     @@schema_registry_procs = {} of String => RegistryProc
 
+    # YAML queue names `queues` failed to create for the configuration `@@failed_for`; tried again only after a
+    # job type is registered, so a stale entry is not retried and logged on every call.
+    @@failed = Set(String).new
+    @@failed_for : Configure? = nil
+
     # Register a job type for queue creation
     #
     # This macro creates a factory function for the given job type and
@@ -85,7 +90,8 @@ module JoobQ
 
     # The queue registry, `JoobQ.config.queues`, with the YAML-configured queues
     # it lacks created into it. A typed (DSL) queue wins over a YAML entry of the
-    # same name, and a queue is created only once.
+    # same name, and a queue is created only once (an entry that fails is tried again
+    # only after a job type is registered).
     #
     # Returns: Hash(String, BaseQueue) - queues indexed by queue name
     #
@@ -101,16 +107,29 @@ module JoobQ
     # email_queue = all_queues["email_queue"]?
     # ```
     def self.queues : Hash(String, BaseQueue)
-      registry = JoobQ.config.queues
-      missing = JoobQ.config.queue_configs.reject { |name, _| registry.has_key?(name) }
-      registry.merge!(create_queues_from_config(missing)) unless missing.empty?
+      config = JoobQ.config
+      unless @@failed_for.same?(config)
+        @@failed.clear
+        @@failed_for = config
+      end
+      registry = config.queues
+      return registry unless config.queue_configs.any? { |name, _| pending?(registry, name) }
+
+      missing = config.queue_configs.select { |name, _| pending?(registry, name) }
+      registry.merge!(create_queues_from_config(missing))
+      missing.each_key { |name| @@failed << name unless registry.has_key?(name) }
       registry
+    end
+
+    private def self.pending?(registry : Hash(String, BaseQueue), name : String) : Bool
+      !registry.has_key?(name) && !@@failed.includes?(name)
     end
 
     # Internal method to add a factory function to the registry
     def self.add_to_registry(job_class_name : String, factory : FactoryProc, schema_proc : RegistryProc)
       @@registry[job_class_name] = factory
       @@schema_registry_procs[job_class_name] = schema_proc
+      @@failed.clear
     end
 
     # Create a queue based on string job class name
@@ -194,10 +213,11 @@ module JoobQ
     def self.clear_registry
       @@registry.clear
       @@schema_registry_procs.clear
+      @@failed.clear
     end
 
     # Does nothing: there is no cache to clear.
-    @[Deprecated("The queue registry is `JoobQ.config.queues`; reset it with `JoobQ.reset_config`")]
+    @[Deprecated("Does nothing: queues live in `JoobQ.config.queues`. To rebuild one after editing `queue_configs`, delete it from `JoobQ.queues` and call `JoobQ.queues` again, or `JoobQ.reset_config`")]
     def self.clear_queues_cache : Nil
     end
 

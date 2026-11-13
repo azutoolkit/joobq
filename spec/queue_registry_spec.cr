@@ -1,5 +1,17 @@
 require "./spec_helper"
 
+# Registered only by the example that checks a late registration.
+class RegistryLateJob
+  include JoobQ::Job
+
+  def initialize
+    @queue = "registry_late"
+  end
+
+  def perform
+  end
+end
+
 # One registry of queues per process: `Configure#queues` is the store, `JoobQ.queues` and `QueueFactory.queues` return
 # that very Hash. Queues here are built but never started.
 module JoobQ
@@ -11,7 +23,6 @@ module JoobQ
 
     before_each do
       QueueFactory.register_job_type(ExampleJob)
-      QueueFactory.clear_queues_cache
     end
 
     after_each do
@@ -22,7 +33,6 @@ module JoobQ
         redis.keys("joobq:*#{name}*").each { |key| redis.del(key.to_s) }
       end
       names.clear
-      QueueFactory.clear_queues_cache
     end
 
     it "is one Hash: JoobQ.queues is JoobQ.config.queues" do
@@ -62,6 +72,21 @@ module JoobQ
       JoobQ.queues[name].should be(typed)
       config.queues[name].should be(typed)
       typed.total_workers.should eq(3)
+    end
+
+    it "tries a YAML entry it cannot create once, until its job type is registered" do
+      name = fresh.call
+      config.queue_configs[name] = {job_class_name: "RegistryLateJob", workers: 1, throttle: nil}
+      logs = Log::MemoryBackend.new
+      Log.builder.bind("*", :error, logs)
+      begin
+        3.times { JoobQ.queues.has_key?(name).should be_false }
+      ensure
+        Log.builder.unbind("*", :error, logs)
+      end
+      logs.entries.count(&.message.includes?("Failed to create queue '#{name}'")).should eq(1)
+      QueueFactory.register_job_type(RegistryLateJob)
+      JoobQ.queues[name].job_type.should eq("RegistryLateJob")
     end
 
     it "survives clear_queues_cache: a registered queue stays the same instance" do

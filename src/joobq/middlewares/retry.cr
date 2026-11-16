@@ -127,6 +127,19 @@ module JoobQ
       return 1
     LUA
 
+    # The exponential delay of a retry attempt: 2^attempt seconds (attempt clamped to 0..22), capped at MAX_DELAY_MS
+    def self.ceiling_ms(attempt : Int32) : Int64
+      Math.min((2_i64 ** attempt.clamp(0, 22)) * 1000_i64, MAX_DELAY_MS)
+    end
+
+    # The delay of a retry attempt: with `retry_jitter?` (full jitter) uniform in 0..ceiling, else the ceiling
+    # (`random` defaults to the process generator: `Random::DEFAULT` is deprecated)
+    def self.delay_ms(attempt : Int32, random : Random? = nil) : Int64
+      ceiling = ceiling_ms(attempt)
+      return ceiling unless JoobQ.config.retry_jitter?
+      random ? random.rand(0_i64..ceiling) : Random.rand(0_i64..ceiling)
+    end
+
     # Idempotent retry: schedules each failure of a job once, however many handlers see that failure
     # Returns a tuple of (success: Bool, modified_job: Job)
     def self.retry_idempotent(job : JoobQ::Job, queue : BaseQueue, retry_attempt : Int32) : {Bool, JoobQ::Job}
@@ -135,13 +148,10 @@ module JoobQ
       retry_lock_key = "#{RETRY_LOCK_PREFIX}:#{job.jid}"
       redis_store = queue.store.as(RedisStore)
 
-      # Calculate delay first so we can set appropriate lock TTL
-      # Clamp retry_attempt to prevent overflow (max 22 gives ~4 million ms before cap)
-      safe_retry_attempt = Math.min(Math.max(0, retry_attempt), 22)
-      delay_ms = Math.min((2_i64 ** safe_retry_attempt) * 1000_i64, MAX_DELAY_MS)
-
-      # Set lock TTL to be delay + buffer to prevent duplicate retries
-      lock_ttl = (delay_ms / 1000).to_i + RETRY_LOCK_BASE_TTL
+      # The lock lasts past the longest delay this attempt could get, so a short jittered delay does not shorten it
+      ceiling_ms = ceiling_ms(retry_attempt)
+      delay_ms = delay_ms(retry_attempt)
+      lock_ttl = (ceiling_ms / 1000).to_i + RETRY_LOCK_BASE_TTL
 
       lock_acquired = redis_store.redis.eval(ACQUIRE_RETRY_LOCK, [retry_lock_key], ["attempt:#{retry_attempt}", lock_ttl.to_s]) == 1
 
@@ -160,6 +170,7 @@ module JoobQ
               queue: queue.name,
               retry_attempt: retry_attempt,
               delay_ms: delay_ms,
+              ceiling_ms: ceiling_ms,
               remaining_retries: job.retries
             )
             return {true, job}

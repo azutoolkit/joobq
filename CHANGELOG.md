@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- **`GET /healthz` and `GET /readyz` on the management API**, answered without a token (GET or HEAD, exact path):
+  `/healthz` is 200 `{"status":"ok"}` without touching Redis; `/readyz` is 200 `ready` when Redis answers PING and
+  JoobQ is not shutting down, else 503 `not_ready`, with `checks: {redis, shutdown}`. Every other route still needs
+  a token.
+
 ### Fixed
 
 - **Starting a second `Queue` of a running queue name no longer runs a job twice** (#36). Restart recovery used to

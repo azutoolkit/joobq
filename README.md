@@ -570,6 +570,10 @@ The complete OpenAPI 3.0 specification is available in the `docs/` directory:
 # Health check
 curl http://localhost:8080/joobq/health/check
 
+# Liveness and readiness probes (no token needed; /readyz is 503 when Redis does not answer or JoobQ shuts down)
+curl http://localhost:8080/healthz
+curl http://localhost:8080/readyz
+
 # Enqueue a job
 curl -X POST http://localhost:8080/joobq/jobs \
   -H "Content-Type: application/json" \

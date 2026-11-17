@@ -26,7 +26,7 @@ flowchart LR
   DLQ -->|redrive| Queue
 ```
 
-The delay before retry *n* (n = 0 for the first failure) is `min(2^n seconds, 1 hour)`, with no jitter; `n` is `max_retries - retries` at the time of the failure. The retry waits in a delayed set that is checked once a second, so an attempt starts up to about a second after its backoff. A retry lock (`joobq:retry_lock:<jid>`) makes sure one failure is scheduled once, even if two handlers see it.
+The delay before retry *n* (n = 0 for the first failure) is drawn uniformly between 1 second and the ceiling `min(2^n seconds, 1 hour)`, so jobs that failed together do not all retry at the same moment; the first retry always waits exactly 1 second. With `config.retry_jitter = false` the delay is the ceiling itself. `n` is `max_retries - retries` at the time of the failure. The delay never goes below 1 second: the retry is added to the delayed set before the failed copy leaves the processing list, and a retry due at once could run while that copy is still there. The retry waits in a delayed set that is checked once a second, so an attempt starts up to about a second after its backoff. A retry lock (`joobq:retry_lock:<jid>`) makes sure one failure is scheduled once, even if two handlers see it.
 
 ## Example
 
@@ -97,14 +97,15 @@ Dead letter (crm): CRM answered 503
 Dead letter (payments): card declined
 ```
 
-The gaps are 1.5, 3.0 and 5.1 seconds: the 1, 2 and 4 second backoffs plus the wait for the next check of the delayed set. Four attempts is the first run plus the default three retries.
+The gaps are 1.5, 3.0 and 5.1 seconds: the 1, 2 and 4 second backoffs plus the wait for the next check of the delayed set. Four attempts is the first run plus the default three retries. The example is checked against Core v0.5.6, whose delays are fixed; with jitter (the default from the release after it) the second and third gaps vary between about 1 and 2 seconds and 1 and 4 seconds, and `config.retry_jitter = false` in the `configure` block gives the output above.
 
 ## Options
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
 | `retries` | `Int32` | `3` | Retries after the first run, 0 to 100; set per job or with `config.retries` |
-| backoff | fixed | `min(2^n s, 1 h)` | Not configurable in Core |
+| backoff | computed | uniform in `1 s..min(2^n s, 1 h)` | The formula is not configurable in Core |
+| `retry_jitter` | `Bool` | `true` | `false`: every delay is the ceiling `min(2^n s, 1 h)`; set with `config.retry_jitter` or `settings.retry_jitter` in YAML |
 | `JoobQ::NonRetryableError` | exception class | none | Raise it, or a subclass, to dead-letter at once |
 | `dead_letter_ttl` | `Time::Span` | `7.days` | Accepted and validated, but the Redis DLQ does not expire entries |
 

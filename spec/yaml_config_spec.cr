@@ -313,6 +313,12 @@ describe "ConfigMapper" do
       config.worker_batch_size.should eq(25)
     end
 
+    it "maps retry_jitter, which defaults to true" do
+      off = JoobQ::ConfigMapper.map_to_configure(YAML.parse("joobq:\n  settings:\n    retry_jitter: false\n"))
+      off.retry_jitter?.should be_false
+      JoobQ::ConfigMapper.map_to_configure(YAML.parse("joobq: {}")).retry_jitter?.should be_true
+    end
+
     it "handles missing sections gracefully" do
       yaml = <<-YAML
         joobq: {}

@@ -49,7 +49,7 @@ This creates a temporary project, generates the JoobQ setup and a typed job, run
 | `core/invoice_job.cr` | Stored job fields, then the job runs |
 | `core/queue_order.cr` | One worker with a batch of one runs jobs oldest first (FIFO) |
 | `core/concurrency.cr` | Peak in-flight jobs equal workers times `worker_batch_size` |
-| `core/retry_backoff.cr` | Four attempts with growing gaps, then a dead letter; `NonRetryableError` dead-letters at once |
+| `core/retry_backoff.cr` | Four attempts with growing gaps (Core v0.5.6: fixed delays, before jitter), then a dead letter; `NonRetryableError` dead-letters at once |
 | `core/recurring.cr` | `schedule(every:)` calls `perform` directly: no queue, no retry, no dead letter |
 | `core/throttle.cr` | A queue throttle spaces starts `period / limit` apart |
 | `core/management_api.cr` | Management API: 401 without a token, reader may read, reader and operator refused where a higher role is needed |

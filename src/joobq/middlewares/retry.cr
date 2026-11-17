@@ -116,6 +116,11 @@ module JoobQ
     private RETRY_LOCK_BASE_TTL = 60
     # Maximum delay in milliseconds (1 hour)
     private MAX_DELAY_MS = 3_600_000_i64
+    # Shortest retry delay, jittered or not. `RedisStore#move_to_retry` adds the retry to the delayed set before it
+    # removes the failed copy from the processing list, and the delayed scheduler promotes due jobs every second:
+    # a retry due almost at once could be promoted while the failed copy is still there and run twice. 1 second
+    # was the smallest delay before jitter.
+    MIN_DELAY_MS = 1000_i64
 
     # Takes the retry lock for one failure of a job: the lock holds the attempt that failed, so a second handler
     # of that same failure finds it and backs off, while the job's next failure (another attempt) replaces it.
@@ -132,12 +137,13 @@ module JoobQ
       Math.min((2_i64 ** attempt.clamp(0, 22)) * 1000_i64, MAX_DELAY_MS)
     end
 
-    # The delay of a retry attempt: with `retry_jitter?` (full jitter) uniform in 0..ceiling, else the ceiling
+    # The delay of a retry attempt: with `retry_jitter?` uniform in MIN_DELAY_MS..ceiling, else the ceiling
     # (`random` defaults to the process generator: `Random::DEFAULT` is deprecated)
     def self.delay_ms(attempt : Int32, random : Random? = nil) : Int64
       ceiling = ceiling_ms(attempt)
       return ceiling unless JoobQ.config.retry_jitter?
-      random ? random.rand(0_i64..ceiling) : Random.rand(0_i64..ceiling)
+      range = MIN_DELAY_MS..ceiling
+      random ? random.rand(range) : Random.rand(range)
     end
 
     # Idempotent retry: schedules each failure of a job once, however many handlers see that failure
@@ -151,7 +157,7 @@ module JoobQ
       # The lock lasts past the longest delay this attempt could get, so a short jittered delay does not shorten it
       ceiling_ms = ceiling_ms(retry_attempt)
       delay_ms = delay_ms(retry_attempt)
-      lock_ttl = (ceiling_ms / 1000).to_i + RETRY_LOCK_BASE_TTL
+      lock_ttl = ceiling_ms // 1000 + RETRY_LOCK_BASE_TTL
 
       lock_acquired = redis_store.redis.eval(ACQUIRE_RETRY_LOCK, [retry_lock_key], ["attempt:#{retry_attempt}", lock_ttl.to_s]) == 1
 

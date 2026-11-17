@@ -11,9 +11,10 @@
 
 ### Changed
 
-- **Retries wait a random time up to the exponential delay** (full jitter), so jobs that failed together no longer
-  retry at the same moment. The retry lock still lasts past the full delay. `JoobQ.config.retry_jitter = false`
-  restores the fixed delays.
+- **Retries wait a random time between 1 second and the exponential ceiling** (`min(2^n s, 1 h)`), so jobs that
+  failed together no longer retry at the same moment; the first retry still waits exactly 1 second, and no retry
+  waits less. The retry lock still lasts past the full ceiling. `JoobQ.config.retry_jitter = false` (or
+  `settings.retry_jitter: false` in YAML) restores the fixed delays.
 - **`JoobQ.config.queues` is the one queue registry.** `JoobQ.queues` and `QueueFactory.queues` return that same
   `Hash` after creating the YAML-configured queues missing from it; the memoised copy is gone. A queue added with
   `JoobQ.queues[name] = queue` (as the joobq-pro engine does) is registered like any other, and the delayed-job

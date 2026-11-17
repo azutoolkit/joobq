@@ -163,19 +163,6 @@ module JoobQ
         copies = redis.lrange("example", 0, -1).count { |raw| JSON.parse(raw.to_s)["jid"] == original.jid.to_s }
         copies.should eq(2)
       end
-
-      pending "returns a claim whose reply was lost (command timeout after BLMOVE/LMOVE ran) while its process lives" do
-        # The job is in this process's own list but in no InFlight entry, and the heartbeat stays live, so neither
-        # the reaper (never this process's list) nor Queue#start (only the first start) returns it: it waits for the
-        # process to restart. Suggested fix: periodically requeue entries of the own list that InFlight does not know.
-      end
-
-      pending "gives two processes that share a host name and a pid (containers with host networking, each PID 1) distinct processing lists" do
-        # owner_id is "#{System.hostname}:#{Process.pid}" (redis_store.cr:67). Two such processes share one list and
-        # one heartbeat: the second one's Queue#start (include_self: true) drains the first one's live claims back
-        # to the queue, and the first one's stop removes the heartbeat both rely on. Suggested fix: add a random
-        # per-process suffix to owner_id.
-      end
     end
 
     describe "B. poison pills" do

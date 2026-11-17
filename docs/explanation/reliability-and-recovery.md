@@ -111,6 +111,17 @@ No shard can make an email or a payment happen exactly once. Retries, leases and
 **JoobQUI.** A redrive from the console runs the job again with the same `jid` and a fresh retry budget: check whether the effect happened before you redrive.
 {% endhint %}
 
+## Known gaps
+
+Two cases are not recovered automatically today:
+
+- **A claim whose Redis reply is lost.** If the command that claims a job times out after Redis ran it, the job sits in
+  that process's processing list while the process stays alive. It is returned to the queue when the process restarts,
+  not before.
+- **Two processes with the same host name and process id.** Containers on host networking that each run as PID 1 share
+  one processing list and one heartbeat, so one process starting can requeue the other's live claims (the job runs
+  twice) and one stopping removes the heartbeat both rely on. Give each container its own host name.
+
 ## Next steps
 
 - [Write idempotent jobs](../how-to/write-idempotent-jobs.md)

@@ -66,10 +66,12 @@ description: The public Crystal API of JoobQ Core 0.5.6 (jobs, queues, workers, 
 
 ## HTTP management API
 
-Off by default (`rest_api_enabled = false`). With it on, `forge` listens on `127.0.0.1:8080`. Every route, the health check included, needs `Authorization: Bearer <token>`: `GET`/`HEAD` need a reader, `DELETE` and paths containing `/reset` or `/config` need an admin, other methods an operator. Missing or unknown token: `401`; role too low: `403`; body over 1 MiB: `413`.
+Off by default (`rest_api_enabled = false`). With it on, `forge` listens on `127.0.0.1:8080`. Every route but the two probes, the health check included, needs `Authorization: Bearer <token>`: `GET`/`HEAD` need a reader, `DELETE` and paths containing `/reset` or `/config` need an admin, other methods an operator. Missing or unknown token: `401`; role too low: `403`; body over 1 MiB: `413`.
 
 | Method | Path | Role |
 | --- | --- | --- |
+| `GET`, `HEAD` | `/healthz` (added in 0.7.0; liveness: 200 `{"status":"ok"}`, never touches Redis) | none |
+| `GET`, `HEAD` | `/readyz` (added in 0.7.0; readiness: 200 `ready` when Redis answers and JoobQ is not shutting down, else 503 `not_ready`; `checks: {redis, shutdown}`; the Redis answer is cached for 1 s) | none |
 | `GET` | `/joobq/health/check` | reader |
 | `GET` | `/joobq/jobs/registry` | reader |
 | `GET` | `/joobq/jobs/retrying`, `/joobq/jobs/dead` | reader |

@@ -9,6 +9,7 @@ require "./joobq/store"
 require "./joobq/error_context"
 require "./joobq/error_monitor"
 require "./joobq/api_validation"
+require "./joobq/error_codes"
 require "./joobq/**"
 
 module JoobQ
@@ -16,6 +17,8 @@ module JoobQ
 
   # Custom exception for configuration errors
   class ConfigNotInitializedError < Exception
+    include Coded
+    joobq_error_code "JQ-101"
   end
 
   # Configuration instance with lazy loading

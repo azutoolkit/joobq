@@ -16,5 +16,7 @@ module JoobQ
   # end
   # ```
   class NonRetryableError < Exception
+    include Coded
+    joobq_error_code "JQ-302"
   end
 end

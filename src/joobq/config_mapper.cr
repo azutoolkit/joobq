@@ -69,6 +69,10 @@ module JoobQ
         config.retries = retries.as_i
       end
 
+      if retry_jitter = settings["retry_jitter"]?
+        config.retry_jitter = retry_jitter.as_bool
+      end
+
       if expires = settings["expires"]?
         config.expires = parse_time_span(expires.as_s)
       end

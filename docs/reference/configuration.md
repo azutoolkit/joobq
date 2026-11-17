@@ -12,6 +12,7 @@ description: Every JoobQ Core setting (JoobQ.configure properties, YAML keys, JO
 | --- | --- | --- | --- |
 | `default_queue` | `String` | `"default"` | |
 | `retries` | `Int32` | `3` | 0 to 100; retries after the first run |
+| `retry_jitter` | `Bool` | `true` | Each retry waits a random time between 1 second and `min(2^n s, 1 h)`; `false` waits the full `min(2^n s, 1 h)` |
 | `expires` | `Time::Span` | `3.days` | From job construction; a job past it is dead-lettered unrun |
 | `timeout` | `Time::Span` | `2.seconds` | Validated (> 0); not enforced on running jobs |
 | `failed_ttl` | `Time::Span` | `7.days` | Validated; unused |
@@ -35,7 +36,7 @@ Searched in order: `./joobq.yml`, `./config/joobq.yml`, `./config/joobq.yaml`, `
 
 | Key under `joobq:` | Contents |
 | --- | --- |
-| `settings` | `default_queue`, `retries`, `expires`, `timeout`, `failed_ttl`, `dead_letter_ttl`, `worker_batch_size`, `timezone` |
+| `settings` | `default_queue`, `retries`, `retry_jitter`, `expires`, `timeout`, `failed_ttl`, `dead_letter_ttl`, `worker_batch_size`, `timezone` |
 | `queues` | `<name>: {job_class, workers, throttle: {limit, period}}` |
 | `redis` | `host`, `port`, `password`, `pool_size`, `pool_timeout`, `url`, `tls_verify`, `ca_file` |
 | `middlewares` | list of `{type: throttle|retry|timeout}` |

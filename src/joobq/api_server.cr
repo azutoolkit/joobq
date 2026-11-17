@@ -19,6 +19,66 @@ module JoobQ
     @@server : HTTP::Server?
     @@server_lock = Sync::Mutex.new
 
+    # Pings the store's Redis for `/readyz`; raises when it does not answer. The ping waits at most REDIS_POOL_TIMEOUT
+    # (default 2 s) for a pooled connection, then REDIS_OPERATION_TIMEOUT (default 5 s) bounds the whole operation and
+    # REDIS_COMMAND_TIMEOUT (default 5 s) each socket read and write (REDIS_CONNECT_TIMEOUT a new connection).
+    @@redis_probe : -> Nil = -> do
+      store = JoobQ.store
+      raise "store has no Redis" unless store.is_a?(RedisStore)
+      store.redis.ping
+      nil
+    end
+
+    # How long a readiness answer is reused: `/readyz` needs no token, so callers must not be able to spend the Redis
+    # pool on it. One probe runs at a time; requests that arrive during it wait for it and share its result.
+    READINESS_TTL = 1.second
+
+    @@readiness_lock = Sync::Mutex.new
+    @@readiness_cache : {String, Time::Instant}? = nil
+
+    def self.redis_probe : -> Nil
+      @@redis_probe
+    end
+
+    # Replaces the probe and forgets the cached answer.
+    def self.redis_probe=(probe : -> Nil) : Nil
+      @@readiness_lock.synchronize do
+        @@redis_probe = probe
+        @@readiness_cache = nil
+      end
+    end
+
+    # Forgets the cached Redis answer, so the next readiness check pings again.
+    def self.reset_readiness_cache : Nil
+      @@readiness_lock.synchronize { @@readiness_cache = nil }
+    end
+
+    # Ready when Redis answers and JoobQ is not shutting down. The Redis answer is cached for READINESS_TTL; the
+    # shutdown flag is read every time.
+    def self.readiness : NamedTuple(ready: Bool, checks: NamedTuple(redis: String, shutdown: Bool))
+      redis = cached_redis_status
+      shutdown = JoobQ.shut_down?
+      {ready: redis == "ok" && !shutdown, checks: {redis: redis, shutdown: shutdown}}
+    end
+
+    # Holding the lock across the ping is the single flight: a request that arrives meanwhile waits for the lock and
+    # then finds the fresh answer.
+    private def self.cached_redis_status : String
+      @@readiness_lock.synchronize do
+        if (cached = @@readiness_cache) && Time.instant - cached[1] < READINESS_TTL
+          next cached[0]
+        end
+        status = begin
+          @@redis_probe.call
+          "ok"
+        rescue
+          "unreachable"
+        end
+        @@readiness_cache = {status, Time.instant}
+        status
+      end
+    end
+
     def self.start(address : String = "127.0.0.1", port : Int32 = 8080, *, policy : ManagementPolicy = ManagementPolicy.from_env)
       new.start(address, port, policy: policy)
     end
@@ -768,6 +828,24 @@ module JoobQ
       end,
     } of NamedTuple(method: String, path: String) => Proc(HTTP::Server::Context, Nil)
 
+    # Liveness and readiness probes, answered without the management policy (see `call`).
+    PROBES = {
+      "/healthz" => ->(context : HTTP::Server::Context) { probe_answer(context, 200, {status: "ok"}.to_json) },
+      "/readyz"  => ->(context : HTTP::Server::Context) do
+        readiness = APIServer.readiness
+        status = readiness[:ready] ? "ready" : "not_ready"
+        probe_answer(context, readiness[:ready] ? 200 : 503, {status: status, checks: readiness[:checks]}.to_json)
+      end,
+    }
+
+    private def self.probe_answer(context : HTTP::Server::Context, status : Int32, body : String) : Nil
+      context.response.status_code = status
+      context.response.headers["Cache-Control"] = "no-store"
+      context.response.content_type = "application/json"
+      context.response.content_length = body.bytesize
+      context.response.print(body) unless context.request.method == "HEAD"
+    end
+
     @@param_routes : Array({String, Array(String), Proc(HTTP::Server::Context, Nil)})?
 
     def self.register_endpoint(method, path, handler)
@@ -787,6 +865,11 @@ module JoobQ
     end
 
     def call(context : HTTP::Server::Context)
+      # Orchestrator probes carry no token, and their answers reveal only liveness, whether Redis answers and
+      # shutdown: exactly these two paths, on GET or HEAD, skip the policy. Every other request is authorized below.
+      if (probe = PROBES[context.request.path]?) && context.request.method.in?("GET", "HEAD")
+        return probe.call(context)
+      end
       return if (policy = @policy) && !policy.authorize(context)
       method = context.request.method
       path = context.request.path

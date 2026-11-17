@@ -1,4 +1,5 @@
 module JoobQ
+  # The same class as in configure.cr, reopened: its code (JQ-104) is declared there.
   class ConfigValidationError < Exception
   end
 
@@ -79,6 +80,10 @@ module JoobQ
       if retries = settings["retries"]?
         retries_value = retries.as_i
         raise ConfigValidationError.new("retries must be >= 0") if retries_value < 0
+      end
+
+      if (retry_jitter = settings["retry_jitter"]?) && !retry_jitter.raw.is_a?(Bool)
+        raise ConfigValidationError.new("retry_jitter must be true or false, got #{retry_jitter.raw.inspect}")
       end
 
       if worker_batch_size = settings["worker_batch_size"]?

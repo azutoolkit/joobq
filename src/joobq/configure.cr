@@ -1,8 +1,10 @@
 module JoobQ
   alias ThrottlerConfig = Hash(String, NamedTuple(limit: Int32, period: Time::Span))
 
-  # Custom exception for configuration validation errors
+  # Custom exception for configuration validation errors (config_validator.cr reopens this same class)
   class ConfigValidationError < Exception
+    include Coded
+    joobq_error_code "JQ-104"
   end
 
   # `Configure` is responsible for managing the settings for the `JoobQ` job queue system.
@@ -36,6 +38,8 @@ module JoobQ
     property? stats_enabled : Bool = true
     property default_queue : String = "default"
     property retries : Int32 = 3
+    # Full jitter on retry delays: jobs that failed together do not all retry at the same moment.
+    property? retry_jitter : Bool = true
     property expires : Time::Span = 3.days
     property timeout : Time::Span = 2.seconds
     property failed_ttl : Time::Span = 7.days

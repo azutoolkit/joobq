@@ -117,7 +117,7 @@ module JoobQ::Delivery
       values = {} of String => String
       config.each_slice(2) { |pair| values[pair[0].as(String)] = pair[1].as(String) }
       unless values["appendonly"]? == "yes" && values["appendfsync"]? == "always" && values["maxmemory-policy"]? == "noeviction"
-        raise ArgumentError.new("durable runtime requires appendonly=yes, appendfsync=always and maxmemory-policy=noeviction")
+        raise ArgumentError.new(ErrorCodes["JQ-201"].tag("durable runtime requires appendonly=yes, appendfsync=always and maxmemory-policy=noeviction"))
       end
     end
 

@@ -95,22 +95,25 @@ describe JoobQ::ErrorCodes do
   end
 end
 
+# JoobQ's own errors. JQ-302 is raised by the user's job, so its message is left as raised (see below).
+private SUFFIXED = CODED.reject { |_, code, _| code == "JQ-302" }
+
 describe JoobQ::Coded do
   it "ends every coded message with its code and URL exactly once" do
-    CODED.each do |build, code, _|
+    SUFFIXED.each do |build, code, _|
       ends_once(build.call("boom").message, code)
       build.call("boom").message.should eq("boom#{suffix(code)}")
     end
   end
 
   it "puts the title before the suffix when the message is nil" do
-    CODED.each do |build, code, _|
+    SUFFIXED.each do |build, code, _|
       build.call(nil).message.should eq("#{JoobQ::ErrorCodes[code].title}#{suffix(code)}")
     end
   end
 
   it "does not repeat the suffix when a coded message is rebuilt or re-raised" do
-    CODED.each do |build, code, _|
+    SUFFIXED.each do |build, code, _|
       first = build.call("boom")
       rebuilt = build.call("#{first.message} in config/joobq.yml")
       rebuilt.message.should eq("boom in config/joobq.yml#{suffix(code)}")
@@ -136,18 +139,19 @@ describe JoobQ::Coded do
     ends_once(error.message, "JQ-401")
   end
 
-  it "keeps a user subclass of NonRetryableError coded" do
+  it "keeps a user subclass of NonRetryableError coded, and its message exactly as raised" do
     error = ErrorCodesSpec::Declined.new("card declined")
-    ends_once(error.message, "JQ-302")
-    error.message.to_s.should start_with("card declined")
+    error.joobq_error_code.code.should eq("JQ-302")
+    error.message.should eq("card declined")
+    JoobQ::NonRetryableError.new("declined").message.should eq("declined")
+    JoobQ::NonRetryableError.new.message.should be_nil
   end
 
   it "leaves `error_code` to a user subclass that defines its own" do
     error = ErrorCodesSpec::WithOwnCode.new("card declined", "card_declined")
     error.error_code.should eq("card_declined")
     error.joobq_error_code.code.should eq("JQ-302")
-    error.message.should eq("card declined#{suffix("JQ-302")}")
-    ends_once(error.message, "JQ-302")
+    error.message.should eq("card declined")
   end
 end
 

@@ -123,12 +123,15 @@ module JoobQ
     # Raised for anything wrong with a sealed value or the keys. It is a `JSON::Error` so a worker that fails to
     # load a job treats it like any unreadable payload (dead letter), but its message never has a value in it.
     class Error < JSON::Error
+      include Coded
+      error_code "JQ-401"
     end
 
     # The keys are missing or malformed: a problem with this process's configuration, not with the job. A worker
     # leaves such a job in the queue (and backs off) instead of dead-lettering it, and a queue of a job class with
     # encrypted properties refuses to start without valid keys.
     class ConfigurationError < Error
+      error_code "JQ-402"
     end
 
     # `allow_plaintext_payloads` is false and a worker met a value that is not sealed. The payload holds plain

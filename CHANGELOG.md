@@ -4,6 +4,9 @@
 
 ### Added
 
+- **Diagnostic error codes**: JoobQ's own errors (configuration, Redis durability, jobs and queues, payload
+  encryption) end their message with ` [JQ-<n>] https://joobq.io/errors/JQ-<n>`; `JoobQ::ErrorCodes` is the catalog
+  (`[]`, `all`, `to_json`) and `docs/reference/error-codes.md` lists every code.
 - **`GET /healthz` and `GET /readyz` on the management API**, answered without a token (GET or HEAD, exact path):
   `/healthz` is 200 `{"status":"ok"}` without touching Redis; `/readyz` is 200 `ready` when Redis answers PING and
   JoobQ is not shutting down, else 503 `not_ready`, with `checks: {redis, shutdown}`. Every other route still needs

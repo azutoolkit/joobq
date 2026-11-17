@@ -3,12 +3,18 @@ require "yaml"
 module JoobQ
   # Custom exception classes for YAML configuration
   class ConfigFileNotFoundError < Exception
+    include Coded
+    error_code "JQ-102"
   end
 
   class ConfigParseError < Exception
+    include Coded
+    error_code "JQ-103"
   end
 
   class ConfigLoadError < Exception
+    include Coded
+    error_code "JQ-105"
   end
 
   # YAML configuration loader for JoobQ

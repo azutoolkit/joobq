@@ -1,4 +1,5 @@
 module JoobQ
+  # The same class as in configure.cr, reopened: its code (JQ-104) is declared there.
   class ConfigValidationError < Exception
   end
 

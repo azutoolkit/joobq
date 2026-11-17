@@ -1,8 +1,10 @@
 module JoobQ
   alias ThrottlerConfig = Hash(String, NamedTuple(limit: Int32, period: Time::Span))
 
-  # Custom exception for configuration validation errors
+  # Custom exception for configuration validation errors (config_validator.cr reopens this same class)
   class ConfigValidationError < Exception
+    include Coded
+    error_code "JQ-104"
   end
 
   # `Configure` is responsible for managing the settings for the `JoobQ` job queue system.

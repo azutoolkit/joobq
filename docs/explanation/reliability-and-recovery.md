@@ -122,6 +122,10 @@ Two cases are not recovered automatically today:
   one processing list and one heartbeat, so one process starting can requeue the other's live claims (the job runs
   twice) and one stopping removes the heartbeat both rely on. Give each container its own host name.
 
+- **Queue names that extend another queue's name, during an upgrade from 0.5.** From 0.7.2 the processing lists of
+  `default:x` are never mistaken for lists of `default`. One case remains: the shared list 0.5 workers used for a
+  queue named `a:b:c` looks like an owner list of queue `a`. Stop every 0.5 worker before starting newer ones.
+
 ## Next steps
 
 - [Write idempotent jobs](../how-to/write-idempotent-jobs.md)

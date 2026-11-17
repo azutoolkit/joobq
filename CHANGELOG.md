@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.2
+
+### Fixed
+
+- **Crash recovery no longer takes the in-flight jobs of a queue whose name extends another's.** With queues `default`
+  and `default:x`, recovery on `default` read the processing lists of `default:x`
+  (`joobq:processing:default:x:<host>:<pid>`) as lists of a dead owner `x:<host>:<pid>` of `default` and moved their
+  jobs into `default` while a live worker still held them: the job ran on the wrong queue, and twice.
+  `processing_queue_size("default")` counted them too. A key now belongs to a queue only when what follows the
+  queue name has the shape of an owner id, `<host>:<pid>` with exactly one colon; `RedisStore#owner_id=` refuses any
+  other shape. Glob characters in a queue name (`* ? [ ]`) are matched literally. Remaining case: the pre-0.6 shared
+  list of a queue named `a:b:c` still looks like an owner list of queue `a`; it exists only while 0.5 workers run.
+
 ## 0.7.1
 
 ### Fixed

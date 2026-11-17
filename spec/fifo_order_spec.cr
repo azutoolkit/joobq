@@ -69,6 +69,34 @@ module JoobQ
         redis.exists(owned.call("host:1")).should eq(0)
       end
 
+      it "leaves alone the lists of a queue whose name extends this one (default and default:x)" do
+        longer = "#{name}:x"
+        other = "joobq:processing:#{longer}:host:7" # host:7 is LIVE and holds a job of the longer queue
+        redis.lpush(other, "THEIRS")
+        live.call("host:7")
+        begin
+          store.recover_orphaned_processing(name).should eq(0)
+          redis.lrange(other, 0, -1).should eq(["THEIRS"])
+          redis.llen(name).should eq(0)
+          store.processing_queue_size(name).should eq(0)
+          store.processing_queue_size(longer).should eq(1)
+        ensure
+          redis.del(other)
+        end
+      end
+
+      it "does not treat glob characters in a queue name as a pattern" do
+        other = "joobq:processing:#{name}zz:host:8"
+        redis.lpush(other, "THEIRS")
+        dead.call("host:8")
+        begin
+          store.recover_orphaned_processing("#{name}*").should eq(0)
+          redis.lrange(other, 0, -1).should eq(["THEIRS"])
+        ensure
+          redis.del(other)
+        end
+      end
+
       it "never moves a live process's in-flight jobs" do
         seed_claims.call("host:1", ["L1", "L2"])
         live.call("host:1")

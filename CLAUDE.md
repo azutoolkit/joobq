@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-JoobQ is an enterprise-grade, high-performance asynchronous job queue system for the Crystal programming language. It processes up to 35,000 jobs/second using Redis-backed persistence and Crystal's fiber-based concurrency.
+JoobQ is an enterprise-grade, high-performance asynchronous job queue system for the Crystal programming language. It uses Redis-backed persistence and Crystal's fiber-based concurrency.
 
 - **Version:** 0.7.0
 - **License:** MIT

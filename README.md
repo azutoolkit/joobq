@@ -41,7 +41,8 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 
 - Automatic retry mechanisms with exponential backoff
 - Dead letter queue for failed job analysis
-- Job expiration and timeout handling
+- Job expiration: a job past its `expires` deadline is dead-lettered instead of started (there is no execution timeout: a running job is not stopped)
+- At-least-once delivery: a job can run more than once, and enqueues are not deduplicated
 - Graceful draining and best-effort requeue; jobs must tolerate redelivery
 
 **Developer Experience**
@@ -217,7 +218,7 @@ The `JoobQ::Configure` struct provides several properties that can be customized
 - `default_queue`: The name of the default queue. Defaults to `"default"`.
 - `retries`: The number of retries for a job. Defaults to `3`.
 - `expires`: The expiration time for a job. Defaults to `3.days`.
-- `timeout`: The maximum execution time allowed for a job. Defaults to `2.seconds`.
+- `timeout`: Stored and read from YAML, but not enforced: JoobQ does not stop a job that runs longer. Defaults to `2.seconds`.
 - `failed_ttl`: The time-to-live for failed jobs. Defaults to `3.milliseconds`.
 - `dead_letter_ttl`: The time-to-live for jobs in the dead letter queue. Defaults to `7.days`.
 - `job_registry`: An instance of `JobSchemaRegistry` for managing job schemas.
@@ -417,7 +418,7 @@ When defining jobs in JoobQ, it's important to follow certain best practices to 
 Jobs must be idempotent. This means that running the same job multiple times should produce the same result. Idempotency is crucial for ensuring that jobs can be retried safely without causing unintended side effects. To achieve idempotency:
 
 - Avoid modifying external state directly within the job.
-- Use unique identifiers to track job execution and prevent duplicate processing.
+- Use unique identifiers (an idempotency key of your own) so that a second run of the same job is detected and does nothing: JoobQ itself does not deduplicate jobs.
 - Ensure that any side effects (e.g., database updates, API calls) are safe to repeat.
 
 ##### Simple Primitive Types for Arguments

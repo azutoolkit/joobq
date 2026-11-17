@@ -24,7 +24,7 @@ private CODED = coded(
 )
 
 private def code_of(error : Exception) : JoobQ::ErrorCode
-  error.as(JoobQ::Coded).error_code
+  error.as(JoobQ::Coded).joobq_error_code
 end
 
 private def suffix(code : String) : String
@@ -38,13 +38,13 @@ private def ends_once(message : String?, code : String) : Nil
   message.scan("https://joobq.io/errors/#{code}").size.should eq(1)
 end
 
-# `error_code "JQ-n"` declarations and `ErrorCodes["JQ-n"]` raise sites in src, outside the catalog itself.
+# `joobq_error_code "JQ-n"` declarations and `ErrorCodes["JQ-n"]` raise sites in src, outside the catalog itself.
 private def codes_used_in_src : Set(String)
   used = Set(String).new
   Dir.glob("#{SRC}/**/*.cr").each do |path|
     next if path.ends_with?("/error_codes.cr")
     text = File.read(path)
-    text.scan(/error_code "(JQ-\d+)"/) { |m| used << m[1] }
+    text.scan(/joobq_error_code "(JQ-\d+)"/) { |m| used << m[1] }
     text.scan(/ErrorCodes\["(JQ-\d+)"\]/) { |m| used << m[1] }
   end
   used
@@ -132,7 +132,7 @@ describe JoobQ::Coded do
 
   it "is inherited by a subclass that declares no code" do
     error = JoobQ::Encryption::PlaintextRefused.new("refused")
-    error.error_code.code.should eq("JQ-401")
+    error.joobq_error_code.code.should eq("JQ-401")
     ends_once(error.message, "JQ-401")
   end
 
@@ -141,10 +141,27 @@ describe JoobQ::Coded do
     ends_once(error.message, "JQ-302")
     error.message.to_s.should start_with("card declined")
   end
+
+  it "leaves `error_code` to a user subclass that defines its own" do
+    error = ErrorCodesSpec::WithOwnCode.new("card declined", "card_declined")
+    error.error_code.should eq("card_declined")
+    error.joobq_error_code.code.should eq("JQ-302")
+    error.message.should eq("card declined#{suffix("JQ-302")}")
+    ends_once(error.message, "JQ-302")
+  end
 end
 
 module ErrorCodesSpec
   class Declined < JoobQ::NonRetryableError
+  end
+
+  # A user's error with a field of its own named `error_code`: it must compile and keep its value.
+  class WithOwnCode < JoobQ::NonRetryableError
+    getter error_code : String
+
+    def initialize(message : String, @error_code : String)
+      super(message)
+    end
   end
 end
 

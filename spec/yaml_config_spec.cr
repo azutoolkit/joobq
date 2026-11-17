@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "file_utils"
 
 describe "YamlConfigLoader" do
   describe ".load_from_string" do
@@ -158,6 +159,26 @@ describe "YamlConfigLoader" do
     end
   end
 
+  describe ".load_with_env_overrides" do
+    it "applies JOOBQ_RETRY_JITTER like the other scalar overrides" do
+      dir = File.tempname("joobq-jitter")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "joobq.yml")
+      File.write(path, "joobq:\n  settings:\n    retry_jitter: true\n    retries: 2\n")
+      saved = ENV["JOOBQ_RETRY_JITTER"]?
+      begin
+        JoobQ::YamlConfigLoader.load_with_env_overrides(path, "none").retry_jitter?.should be_true
+        ENV["JOOBQ_RETRY_JITTER"] = "false"
+        config = JoobQ::YamlConfigLoader.load_with_env_overrides(path, "none")
+        config.retry_jitter?.should be_false
+        config.retries.should eq(2)
+      ensure
+        saved ? (ENV["JOOBQ_RETRY_JITTER"] = saved) : ENV.delete("JOOBQ_RETRY_JITTER")
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   describe "error handling" do
     it "raises ConfigFileNotFoundError for missing files" do
       expect_raises(JoobQ::ConfigLoadError, "Configuration file not found") do
@@ -273,6 +294,17 @@ describe "ConfigValidator" do
       expect_raises(JoobQ::ConfigValidationError, "retries must be >= 0") do
         JoobQ::ConfigValidator.validate(data)
       end
+    end
+
+    it "refuses a retry_jitter that is not a boolean, naming the key" do
+      ["\"false\"", "1", "no-thanks"].each do |value|
+        data = YAML.parse("joobq:\n  settings:\n    retry_jitter: #{value}\n")
+        error = expect_raises(JoobQ::ConfigValidationError, /retry_jitter must be true or false/) do
+          JoobQ::ConfigValidator.validate(data)
+        end
+        error.message.to_s.should contain("[JQ-104]")
+      end
+      JoobQ::ConfigValidator.validate(YAML.parse("joobq:\n  settings:\n    retry_jitter: false\n"))
     end
 
     it "validates Redis port range" do

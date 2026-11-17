@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 (MINOR)
 
 ### Added
 
@@ -10,7 +10,10 @@
 - **`GET /healthz` and `GET /readyz` on the management API**, answered without a token (GET or HEAD, exact path):
   `/healthz` is 200 `{"status":"ok"}` without touching Redis; `/readyz` is 200 `ready` when Redis answers PING and
   JoobQ is not shutting down, else 503 `not_ready`, with `checks: {redis, shutdown}`. Every other route still needs
-  a token.
+  a token. The Redis answer of `/readyz` is cached for 1 second and one probe runs at a time, so unauthenticated
+  requests cannot exhaust the Redis pool; both answers carry `Cache-Control: no-store`.
+- **`retry_jitter` is validated in YAML** (a value that is not a boolean is a JQ-104 validation error) and can be
+  overridden with `JOOBQ_RETRY_JITTER`.
 
 ### Fixed
 
@@ -21,6 +24,11 @@
 
 ### Changed
 
+- **Messages of coded errors end with their code and URL**: every error that carries a code, including your own
+  subclasses of `NonRetryableError`, now has a message ending in ` [JQ-<n>] https://joobq.io/errors/JQ-<n>`, so
+  dead-letter entries and logs show it (for example `card declined [JQ-302] https://joobq.io/errors/JQ-302`). A
+  coded error raised without a message shows the catalog title instead of an empty message. The library's hooks are
+  `joobq_error_code` (class-level declaration and instance accessor), so a subclass keeps any `error_code` of its own.
 - **Retries wait a random time between 1 second and the exponential ceiling** (`min(2^n s, 1 h)`), so jobs that
   failed together no longer retry at the same moment; the first retry still waits exactly 1 second, and no retry
   waits less. The retry lock still lasts past the full ceiling. `JoobQ.config.retry_jitter = false` (or

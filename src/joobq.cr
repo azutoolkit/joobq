@@ -18,7 +18,7 @@ module JoobQ
   # Custom exception for configuration errors
   class ConfigNotInitializedError < Exception
     include Coded
-    error_code "JQ-101"
+    joobq_error_code "JQ-101"
   end
 
   # Configuration instance with lazy loading

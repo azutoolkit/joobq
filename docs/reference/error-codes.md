@@ -10,7 +10,7 @@ JoobQ's own errors end their message with a code and the address of its page, fo
 `Configuration file not found: /app/joobq.yml [JQ-102] https://joobq.io/errors/JQ-102`. A message that wraps another
 error keeps the inner code too: the code at the end is the error raised, the one inside is its cause. Codes are
 permanent: a code is never renumbered or reused. `JoobQ::ErrorCodes.all` (and `.to_json`) is the catalog this page
-is copied from, and `error.as(JoobQ::Coded).error_code` gives the entry of a raised error.
+is copied from, and `error.as(JoobQ::Coded).joobq_error_code` gives the entry of a raised error.
 
 Ranges: JQ-1xx configuration, JQ-2xx Redis and storage, JQ-3xx jobs and queues, JQ-4xx payload encryption, JQ-5xx
 management API (no codes yet).

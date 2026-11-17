@@ -4,17 +4,17 @@ module JoobQ
   # Custom exception classes for YAML configuration
   class ConfigFileNotFoundError < Exception
     include Coded
-    error_code "JQ-102"
+    joobq_error_code "JQ-102"
   end
 
   class ConfigParseError < Exception
     include Coded
-    error_code "JQ-103"
+    joobq_error_code "JQ-103"
   end
 
   class ConfigLoadError < Exception
     include Coded
-    error_code "JQ-105"
+    joobq_error_code "JQ-105"
   end
 
   # YAML configuration loader for JoobQ
@@ -187,6 +187,8 @@ module JoobQ
           config.default_queue = value
         when "retries"
           config.retries = value.to_i
+        when "retry_jitter"
+          config.retry_jitter = ["true", "1", "yes", "on"].includes?(value.downcase)
         when "expires"
           config.expires = parse_time_span(value)
         when "timeout"
@@ -223,6 +225,7 @@ module JoobQ
       # Apply base configuration
       merged.default_queue = base.default_queue
       merged.retries = base.retries
+      merged.retry_jitter = base.retry_jitter?
       merged.expires = base.expires
       merged.timeout = base.timeout
       merged.failed_ttl = base.failed_ttl

@@ -70,8 +70,8 @@ Off by default (`rest_api_enabled = false`). With it on, `forge` listens on `127
 
 | Method | Path | Role |
 | --- | --- | --- |
-| `GET`, `HEAD` | `/healthz` (liveness: 200 `{"status":"ok"}`, never touches Redis) | none |
-| `GET`, `HEAD` | `/readyz` (readiness: 200 `ready` when Redis answers and JoobQ is not shutting down, else 503 `not_ready`; `checks: {redis, shutdown}`) | none |
+| `GET`, `HEAD` | `/healthz` (added in 0.7.0; liveness: 200 `{"status":"ok"}`, never touches Redis) | none |
+| `GET`, `HEAD` | `/readyz` (added in 0.7.0; readiness: 200 `ready` when Redis answers and JoobQ is not shutting down, else 503 `not_ready`; `checks: {redis, shutdown}`; the Redis answer is cached for 1 s) | none |
 | `GET` | `/joobq/health/check` | reader |
 | `GET` | `/joobq/jobs/registry` | reader |
 | `GET` | `/joobq/jobs/retrying`, `/joobq/jobs/dead` | reader |

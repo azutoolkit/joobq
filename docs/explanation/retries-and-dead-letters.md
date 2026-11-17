@@ -97,7 +97,7 @@ Dead letter (crm): CRM answered 503
 Dead letter (payments): card declined
 ```
 
-The gaps are 1.5, 3.0 and 5.1 seconds: the 1, 2 and 4 second backoffs plus the wait for the next check of the delayed set. Four attempts is the first run plus the default three retries. The example is checked against Core v0.5.6, whose delays are fixed; with jitter (the default from the release after it) the second and third gaps vary between about 1 and 2 seconds and 1 and 4 seconds, and `config.retry_jitter = false` in the `configure` block gives the output above.
+The gaps are 1.5, 3.0 and 5.1 seconds: the 1, 2 and 4 second backoffs plus the wait for the next check of the delayed set. Four attempts is the first run plus the default three retries. The example is checked against Core v0.5.6, whose delays are fixed; with jitter, the default from the next release (0.7.0), the second and third gaps vary between about 1 and 2 seconds and 1 and 4 seconds, and `config.retry_jitter = false` in the `configure` block gives the output above. From 0.7.0 the last dead-letter line also ends with the error code: `Dead letter (payments): card declined [JQ-302] https://joobq.io/errors/JQ-302`.
 
 ## Options
 

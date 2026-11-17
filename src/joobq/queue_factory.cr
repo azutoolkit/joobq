@@ -233,6 +233,6 @@ module JoobQ
   # Exception raised when a job class is not registered in the factory
   class QueueFactoryError < Exception
     include Coded
-    error_code "JQ-301"
+    joobq_error_code "JQ-301"
   end
 end

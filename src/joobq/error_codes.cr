@@ -106,20 +106,25 @@ module JoobQ
     end
   end
 
-  # Gives an exception class a diagnostic code: `error_code "JQ-101"` in the class body. The message then ends
+  # Gives an exception class a diagnostic code: `joobq_error_code "JQ-101"` in the class body. The message then ends
   # with ` [JQ-101] https://joobq.io/errors/JQ-101` exactly once; a subclass inherits the code unless it declares
-  # its own. Constructors are untouched.
+  # its own. Constructors are untouched. The hooks are named `joobq_error_code` (not `error_code`) so that a user's
+  # subclass of `NonRetryableError` can keep an `error_code` of its own.
   module Coded
-    macro error_code(code)
-      def error_code : ::JoobQ::ErrorCode
+    macro joobq_error_code(code)
+      # A class method by another name: one named like the macro would shadow it in a subclass's body.
+      def self.joobq_error_code_entry : ::JoobQ::ErrorCode
         ::JoobQ::ErrorCodes[{{ code }}]
       end
     end
 
-    abstract def error_code : ::JoobQ::ErrorCode
+    # The catalog entry of this error's class.
+    def joobq_error_code : ::JoobQ::ErrorCode
+      self.class.joobq_error_code_entry
+    end
 
     def message : String?
-      self.error_code.tag(super)
+      self.class.joobq_error_code_entry.tag(super)
     end
   end
 end

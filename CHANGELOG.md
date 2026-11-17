@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1
+
+### Fixed
+
+- **A `NonRetryableError` keeps its message exactly as raised.** 0.7.0 appended ` [JQ-302] https://joobq.io/errors/JQ-302`
+  to the message of `NonRetryableError` and of your own subclasses, which changed what dead-letter entries,
+  workflow failures and anything matching the message saw. The message is yours again; the code is still on the
+  error (`joobq_error_code`). Errors JoobQ raises itself keep the suffix.
+
 ## 0.7.0 (MINOR)
 
 ### Added

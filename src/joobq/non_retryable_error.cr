@@ -18,5 +18,11 @@ module JoobQ
   class NonRetryableError < Exception
     include Coded
     joobq_error_code "JQ-302"
+
+    # The message is yours, so it stays exactly as raised: nothing is appended to it (other coded errors, which
+    # JoobQ raises itself, end with their code and URL). The code is still on the error: `joobq_error_code`.
+    def message : String?
+      @message
+    end
   end
 end

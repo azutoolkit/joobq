@@ -37,6 +37,6 @@ management API (no codes yet).
 | JQ-105 | `JoobQ::ConfigLoadError` |
 | JQ-201 | `ArgumentError` from `JoobQ::Delivery::Runtime.new` (`production: true`) |
 | JQ-301 | `JoobQ::QueueFactoryError` |
-| JQ-302 | `JoobQ::NonRetryableError` and its subclasses |
+| JQ-302 | `JoobQ::NonRetryableError` and its subclasses (the message is yours and is left as raised; read the code with `joobq_error_code`) |
 | JQ-401 | `JoobQ::Encryption::Error` and `Encryption::PlaintextRefused` |
 | JQ-402 | `JoobQ::Encryption::ConfigurationError` |

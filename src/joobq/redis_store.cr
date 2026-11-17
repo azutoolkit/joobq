@@ -934,8 +934,15 @@ module JoobQ
         pipe.hincrby("joobq:stats:total_retries", "global", 1)
       end
 
-      # Remove job by ID from processing queue (more reliable than JSON match)
-      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
+      # Remove job by ID from processing queue (more reliable than JSON match). The retry is stored by now, so a
+      # failure here must not report the retry as failed: the caller would dead-letter the job as well, leaving it
+      # both scheduled and dead. The copy left in processing is removed by the worker's cleanup, or recovered.
+      begin
+        remove_job_from_processing_by_id(job.jid.to_s, queue_name)
+      rescue ex
+        Log.warn &.emit("Retry stored, but the failed copy could not be taken off the processing list",
+          job_id: job.jid.to_s, queue: queue_name, error: ex.message)
+      end
 
       Events.emit("job.retrying") { {jid: job.jid.to_s, queue: queue_name, delay_ms: delay_ms} }
       Log.debug &.emit("Job moved to retry queue",

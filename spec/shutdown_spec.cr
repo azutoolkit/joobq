@@ -587,6 +587,39 @@ module JoobQ
         end
       end
 
+      # SIGKILL (and the second signal, which exits at once) skip both the requeue and the heartbeat removal: the job
+      # waits in the dead process's own list until its heartbeat is older than 30 s, then any process's recovery
+      # (start-up or reaper, every 30 s) returns it to the head of the queue.
+      {"SIGKILL" => [Signal::KILL], "a second signal" => [Signal::TERM, Signal::TERM]}.each do |how, signals|
+        it "leaves the running job in the process's own list after #{how}, recoverable only once its heartbeat lapsed" do
+          with_probe("stuck", {"PROBE_JOBS" => "1", "PROBE_TIMEOUT" => "30"}) do |process, queue, dir, redis|
+            wait_for_files(dir, "started-", 1)
+            owner = "#{System.hostname}:#{process.pid}"
+            list = "joobq:processing:#{queue}:#{owner}"
+            begin
+              signals.each_with_index do |signal, index|
+                sleep 1.5.seconds if index > 0
+                process.signal(signal)
+              end
+              exit_of(process, 10.seconds)
+
+              redis.llen(list).should eq(1)
+              redis.llen(queue).should eq(0)
+              redis.zscore(RedisStore::OWNERS, owner).should_not be_nil
+              store = JoobQ.store.as(RedisStore)
+              store.recover_orphaned_processing(queue).should eq(0)
+              redis.zadd(RedisStore::OWNERS, store.redis_now_ms - 31_000, owner) # as if 31 s had passed
+              store.recover_orphaned_processing(queue).should eq(1)
+              redis.llen(queue).should eq(1)
+              redis.exists(list).should eq(0)
+            ensure
+              redis.del(list)
+              redis.zrem(RedisStore::OWNERS, owner)
+            end
+          end
+        end
+      end
+
       it "does not schedule a requeued job a second time when its abandoned execution fails afterwards" do
         with_probe("failing", {"PROBE_TIMEOUT" => "1"}) do |process, queue, dir, redis|
           exit_of(process, 30.seconds).exit_code.should eq(0)

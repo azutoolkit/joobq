@@ -15,7 +15,10 @@ module JoobQ
     # `WorkerRegistry`, so recovery is correct whether or not a process publishes the richer worker snapshot.
     # Not under the `joobq:processing:` prefix, so the processing-list SCANs never match it, and a queue
     # literally named "owners" does not collide with it.
-    OWNERS     = "joobq:processing-owners"
+    OWNERS = "joobq:processing-owners"
+    # The shape of an owner id: `<host>:<pid>`, exactly one colon. Recovery tells a queue's own processing lists
+    # from those of a queue whose name merely starts with it by this shape.
+    OWNER_ID   = /\A[^:]+:[^:]+\z/
     private OWNER_TTL  = 30.seconds
     private OWNER_BEAT = 10.seconds
 
@@ -69,6 +72,7 @@ module JoobQ
     # Keeps the batch-cleanup pipeline on the same owner id, so a spec that poses as another process cleans up the
     # list it claimed into.
     def owner_id=(id : String) : String
+      raise ArgumentError.new("owner id must look like host:pid (one colon), got #{id.inspect}") unless OWNER_ID.matches?(id)
       @pipeline.owner_id = id
       @owner_id = id
     end
@@ -386,18 +390,23 @@ module JoobQ
 
     # The processing-list keys that belong to `queue_name`: one per owner (`...:<queue>:<owner>`) plus the shared
     # legacy list (`...:<queue>`) older workers used. A SCAN by prefix also matches another queue whose name starts
-    # with this one, so each key is checked against the two exact shapes.
+    # with this one (`default` and `default:x`), so a key counts only when it is the legacy list or when what follows
+    # the queue name has the shape of an owner id (`OWNER_ID`). The list `...:default:x:<host>:<pid>` of queue
+    # `default:x` is then not read as owner `x:<host>:<pid>` of `default`.
     def processing_lists(queue_name : String) : Array(String)
       prefix = "#{PROCESSING_QUEUE}:#{queue_name}"
       owned_prefix = "#{prefix}:"
+      # SCAN MATCH is a glob: a queue name is matched literally.
+      pattern = "#{prefix.gsub(/[\\*?\[\]]/) { |char| "\\#{char}" }}*"
       found = [] of String
       cursor = 0_i64
       loop do
-        result = redis.scan(cursor, match: "#{prefix}*", count: 100)
+        result = redis.scan(cursor, match: pattern, count: 100)
         cursor = result[0].as(String).to_i64
         result[1].as(Array).each do |key|
           key_str = key.as(String)
-          found << key_str if key_str == prefix || key_str.starts_with?(owned_prefix)
+          owned = key_str.starts_with?(owned_prefix) && OWNER_ID.matches?(key_str.lchop(owned_prefix))
+          found << key_str if key_str == prefix || owned
         end
         break if cursor == 0
       end

@@ -84,6 +84,8 @@ Off by default (`rest_api_enabled = false`). With it on, `forge` listens on `127
 
 The list routes (`/joobq/jobs/retrying`, `/joobq/jobs/dead`, `/joobq/errors/recent`) take `?limit=N`, an integer from 1 to 100 (default 50, 20 for errors). Anything else, a non-integer, zero, a negative or more than 100, answers `400` with `validation_errors` naming `limit`; nothing is read from Redis. `/joobq/jobs/retrying` looks for retrying jobs in the first 1000 entries of the delayed set and `/joobq/jobs/dead` in the 100 newest dead letters, whatever the limit. There is no offset: with `?queue=X`, dead jobs of `X` older than those 100 entries are not listed (`JoobQ::DeadLetterQueue.new.page(offset: 0, limit: 50, queue: "X")` pages through all of them).
 
+Job arguments in those answers are redacted by name: the value of any argument whose name matches `config.redacted_payload_keys` (default `password`, `secret`, `token`, `api_key`, ...; see [Configuration](configuration.md)) is `[REDACTED]`, in the job listings and in the `job_data` of the error records, whatever the reader's role. The stored job is unchanged, so a retry carries the real arguments. Values of `encrypted_property` are sealed in Redis and the API never opens them. `config.redact_api_payloads = false` shows every plain argument; do that only when every token holder may see them.
+
 JoobQ ships no OpenAPI file for these routes. Pro adds routes to the same API when its metrics middleware starts: see [Pro API](pro-api.md).
 
 ## See also

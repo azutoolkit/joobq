@@ -79,7 +79,7 @@ module JoobQ
   #   (`Queue#start` raises) without valid keys, and enqueuing raises to the caller.
   #
   # Payloads written before the property was encrypted (plain values) are read as they are, and written sealed the
-  # next time the job is stored. `JoobQ.config.allow_plaintext_payloads = false` makes the *worker* refuse them
+  # next time the job is stored. `JoobQ.config.allow_plaintext_payloads` is `false` by default, which makes the *worker* refuse them
   # (`Queue#add` and the HTTP API still accept them: they are about to be sealed). While it is true, anyone who can
   # write to Redis can put an unsealed value in a job and it will run: sealing gives confidentiality, and integrity
   # only against tampering with a sealed value.
@@ -93,8 +93,8 @@ module JoobQ
   #   collapsing (a sorted set member, a LREM by value) must not re-serialise a job to find it again.
   # * Strings shorter than `MIN_SCRUB` (4) characters and numbers of fewer than `MIN_NUMBER` (6) digits are not
   #   scrubbed from recorded errors, booleans never: they would match everywhere.
-  # * With `allow_plaintext_payloads = false` a worker that meets a plain value dead-letters the job *without* its
-  #   payload (it holds the plain values); that legacy job is gone, so drain old jobs before flipping the flag.
+  # * With `allow_plaintext_payloads = false` (the default) a worker that meets a plain value dead-letters the job *without* its
+  #   payload (it holds the plain values); that legacy job is gone, so set the flag to true until old jobs are drained.
   #
   # ## Format
   #

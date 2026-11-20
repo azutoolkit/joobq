@@ -393,7 +393,7 @@ module JoobQ
 
         # Get recent errors directly from error monitor
         recent_errors = JoobQ.error_monitor.get_recent_errors(limit)
-        context.response.print(recent_errors.to_json)
+        context.response.print(recent_errors.map { |error| PayloadRedaction.redact(error) }.to_json)
       end,
       {method: "GET", path: "/joobq/errors/by-type"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
@@ -427,7 +427,7 @@ module JoobQ
         end
 
         errors = JoobQ.error_monitor.get_errors_by_type(error_type)
-        context.response.print(errors.to_json)
+        context.response.print(errors.map { |error| PayloadRedaction.redact(error) }.to_json)
       end,
       {method: "GET", path: "/joobq/errors/by-queue"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
@@ -461,7 +461,7 @@ module JoobQ
         end
 
         errors = JoobQ.error_monitor.get_errors_by_queue(queue_name)
-        context.response.print(errors.to_json)
+        context.response.print(errors.map { |error| PayloadRedaction.redact(error) }.to_json)
       end,
       {method: "POST", path: "/joobq/queues/:queue_name/reprocess"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
@@ -712,7 +712,7 @@ module JoobQ
               job_queue = parsed["queue"]?.try(&.as_s)
 
               # Check if status is Retrying and optionally filter by queue
-              is_retrying = status == "Retrying"
+              is_retrying = status.try(&.downcase) == "retrying"
               matches_queue = queue_name.nil? || job_queue == queue_name
 
               is_retrying && matches_queue
@@ -723,7 +723,7 @@ module JoobQ
 
           response = {
             status:    "success",
-            jobs:      retrying_jobs.map { |j| JSON.parse(j) },
+            jobs:      retrying_jobs.map { |j| PayloadRedaction.redact(JSON.parse(j)) },
             count:     retrying_jobs.size,
             timestamp: Time.local.to_rfc3339,
           }
@@ -778,7 +778,7 @@ module JoobQ
 
           response = {
             status:    "success",
-            jobs:      dead_jobs.map { |j| JSON.parse(j) },
+            jobs:      dead_jobs.map { |j| PayloadRedaction.redact(JSON.parse(j)) },
             count:     dead_jobs.size,
             timestamp: Time.local.to_rfc3339,
           }

@@ -53,8 +53,16 @@ module JoobQ
 
     # Keys for `encrypted_property` (see `JoobQ::Encryption`); when nil, `JOOBQ_PAYLOAD_KEYS` / `JOOBQ_PAYLOAD_KEY`.
     property payload_keys : Encryption::Keys? = nil
-    # Whether a payload property that is not sealed (written before it was encrypted) is read as it is.
-    property? allow_plaintext_payloads : Bool = true
+    # Whether a worker reads a payload property that is not sealed (written before it was encrypted). False by
+    # default: anyone who can write to Redis could otherwise replace a sealed value with a plain one and it would
+    # run. Set it to true only while draining jobs stored before the property was encrypted.
+    property? allow_plaintext_payloads : Bool = false
+
+    # Whether the management API hides the value of any job argument whose name matches `redacted_payload_keys`
+    # (see `JoobQ::PayloadRedaction`). On by default; false shows plain arguments to every API role.
+    property? redact_api_payloads : Bool = true
+    # Name fragments (case-insensitive, `-` and spaces count as `_`) that mark an argument as secret.
+    property redacted_payload_keys : Array(String) = PayloadRedaction::DEFAULT_KEYS.dup
 
     # Sets the payload encryption keys: `current` seals and opens, each of `previous` only opens. Entries are
     # `id:key` (32 bytes as 64 hex digits or base64).

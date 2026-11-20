@@ -26,7 +26,9 @@ description: Every JoobQ Core setting (JoobQ.configure properties, YAML keys, JO
 | `middlewares` | `Array(Middleware)` | `[Throttle, Retry, Timeout]` | Add Pro middleware here |
 | `store` | `Store` | `RedisStore.from_env` | |
 | `payload_encryption(current, previous)` | method | none | Keys for `encrypted_property`; otherwise read from `JOOBQ_PAYLOAD_KEYS` |
-| `allow_plaintext_payloads` | `Bool` | `true` | |
+| `allow_plaintext_payloads` | `Bool` | `false` | A worker refuses an `encrypted_property` value that is not sealed (the job is dead-lettered without its payload). Changed from `true` in this release; set `true` only while draining jobs stored before the property was encrypted |
+| `redact_api_payloads` | `Bool` | `true` | The management API replaces the value of an argument whose name matches `redacted_payload_keys` with `[REDACTED]` (`/joobq/jobs/retrying`, `/joobq/jobs/dead`, `/joobq/errors/*`) |
+| `redacted_payload_keys` | `Array(String)` | `password`, `passwd`, `secret`, `token`, `api_key`, `apikey`, `authorization`, `credential`, `private_key`, `cookie`, `card_number` | Name fragments, matched case-insensitively with `-` and spaces as `_`, at any depth |
 
 Inside the block: `queue name, workers, JobClass, throttle = nil` (workers 1 to 1000), `scheduler(tz) { every ...; cron "..." { } }`, `register_job JobClass`, `error_monitoring(...)`.
 

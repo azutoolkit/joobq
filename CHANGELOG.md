@@ -26,7 +26,27 @@
   `JoobQ::UnsupportedJobVersion` (a `JSON::ParseException`, so the worker dead-letters the payload unread and whole, and logs a
   message naming the version; redrive it after upgrading). A job without `v` is a 0.6 job and is read as before.
 
+### Changed (breaking: two safer defaults, #55)
+
+- **`allow_plaintext_payloads` now defaults to `false`.** It was `true`, so anyone with Redis write access could replace a
+  sealed value of an `encrypted_property` with a plain one and the worker ran it. Now a worker that meets an unsealed
+  value in such a property dead-letters the job without its payload. The flag only
+  matters for job classes that use `encrypted_property`. **Upgrade note:** if you turned a property into an
+  `encrypted_property` and jobs written before that are still in Redis, set `config.allow_plaintext_payloads = true` until they are
+  drained, then remove it. The decision for 1.0 is `false`; a spec pins it.
+- **The management API redacts secret-named job arguments (#55).** `GET /joobq/jobs/retrying`, `/joobq/jobs/dead` and the
+  `job_data` of `/joobq/errors/recent`, `/by-type` and `/by-queue` returned every plain argument to the reader role. The
+  value of an argument whose name contains one of `config.redacted_payload_keys` (default `password`, `passwd`, `secret`,
+  `token`, `api_key`, `apikey`, `authorization`, `credential`, `private_key`, `cookie`, `card_number`; case-insensitive,
+  `-` and spaces as `_`, any depth) is now `[REDACTED]` in the answer, for every role. Stored jobs are untouched, so retries
+  keep the real arguments. **A client that read those arguments through the API sees `[REDACTED]`.** Opt out with
+  `config.redact_api_payloads = false`. Redaction goes by name: a secret under another name stays visible, so seal it
+  with `encrypted_property` (the API never opens a sealed value).
+
 ### Fixed
+
+- **`GET /joobq/jobs/retrying` listed nothing (#55).** It compared the job status with `"Retrying"`, but jobs serialize it as
+  `"retrying"`, so the route always answered an empty list. The comparison now ignores case.
 
 - **`Configure#setup_schedulers_from_config` is removed (refs #42).** It was public and documented with an example, but
   its cron and recurring blocks only logged "Would enqueue ..." at debug level, so a YAML `schedulers:` entry never ran

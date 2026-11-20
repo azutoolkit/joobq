@@ -31,6 +31,16 @@ description: Turn on Core's HTTP management API with bearer tokens for the roles
 3. Start the worker. `forge` serves the API on `127.0.0.1:8080`; keep it on loopback, or put it behind a TLS proxy that passes the `Authorization` header through.
 4. Give clients only the token for their role. A reader may `GET`; an operator may also make other changes; only an admin may `DELETE` or call paths containing `/reset` or `/config`.
 
+5. Decide what a reader may see of job arguments. By default the API shows `[REDACTED]` for any argument named like a secret (`password`, `token`, `api_key`, ...) in `/joobq/jobs/retrying`, `/joobq/jobs/dead` and `/joobq/errors/*`. Add your own names, or switch it off:
+
+   <!-- illustrative: inside the worker's JoobQ.configure block -->
+   ```crystal
+   config.redacted_payload_keys = JoobQ::PayloadRedaction::DEFAULT_KEYS + ["iban", "ssn"]
+   # config.redact_api_payloads = false   readers then see every plain argument
+   ```
+
+   Redaction goes by name, so a secret under an innocent name is shown: seal it with `encrypted_property` instead (see [Encrypt job payloads](../../README.md)).
+
 ## Verify
 
 Against a worker started with a reader and an operator token:

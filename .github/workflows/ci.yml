@@ -3,7 +3,8 @@ name: CI
 # One workflow, started by a push to master (a merge) or by hand. The `changes` job reads the files the push changed
 # since the last successful run (.github/scripts/changed_paths.py) and only the jobs that read those files run:
 #
-#   code     src/, spec/, config/, shard files, the integration scripts  ->  specs (2 legs), then the release
+#   code     src/, spec/, config/, shard files, the integration scripts  ->  specs (5 Redis legs) and the Crystal floor and
+#                                                                           latest (2 legs), then the release
 #   book     docs/, examples/docs/, .gitbook.yaml, gitbook-docs.yaml     ->  documentation checks
 #   examples examples/docs/, the docs example runner                     ->  documentation programs on Core
 #   image    .github/ci-image/                                           ->  rebuild the CI image first
@@ -29,8 +30,11 @@ concurrency:
   group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
+# What CI covers is what docs/reference/compatibility.md, README.md and CLAUDE.md claim (.github/scripts/test_ci_matrix.py
+# fails when they disagree). Redis: 6.2 (the floor: LMOVE/BLMOVE), 7.4 and 8.0, on Crystal 1.22.1 (the CI image). Crystal:
+# 1.22.0 (the floor, shard.yml) and `latest` on Redis 8.0. Not tested: glibc, ARM, macOS, Crystal nightly, Redis Cluster.
 env:
-  REDIS_VERSION: "8.0.6"
+  REDIS_VERSION: "8.0.6" # the newest Redis; the examples job and the format check run on it
 
 jobs:
   changes:
@@ -51,6 +55,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: python3 -m unittest discover -s .github/scripts -p 'test_changed_paths.py'
+      - run: python3 -m unittest discover -s .github/scripts -p 'test_ci_matrix.py'
       - id: paths
         env:
           GH_TOKEN: ${{ github.token }}
@@ -81,9 +86,11 @@ jobs:
           push: true
           tags: ghcr.io/azutoolkit/joobq-ci:${{ needs.changes.outputs.image_tag }}
 
-  # Redis 8.0.6 with one runtime worker, once per connection style: the two runs of this workflow.
+  # One runtime worker per leg. Crystal 1.22.1 (the CI image) against the Redis floor, a 7.x and the newest, each once
+  # per connection style where it matters: the two runs of this workflow on 8.0.6, the floor on both too (the oldest
+  # server is the one the connection code is most likely to meet a difference on), 7.4 on the legacy one.
   specs:
-    name: Specs (connection=${{ matrix.connection }})
+    name: Specs (Redis ${{ matrix.redis }}, ${{ matrix.connection }})
     needs: [changes, image]
     if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
     runs-on: ubuntu-latest
@@ -94,7 +101,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        connection: [legacy, url]
+        include:
+          - {redis: "8.0.6", connection: legacy}
+          - {redis: "8.0.6", connection: url}
+          - {redis: "7.4.12", connection: legacy}
+          - {redis: "6.2.24", connection: legacy}
+          - {redis: "6.2.24", connection: url}
     container:
       image: ghcr.io/azutoolkit/joobq-ci:${{ needs.changes.outputs.image_tag }} # .github/ci-image: Crystal 1.22.1 on Alpine
       credentials:
@@ -104,19 +116,45 @@ jobs:
       CRYSTAL_WORKERS: "1"
     steps:
       - uses: actions/checkout@v4
-      - run: shards install --frozen
-      - uses: ./.github/actions/pinned-redis
-        with:
-          version: ${{ env.REDIS_VERSION }}
       - name: Format
-        if: matrix.connection == 'legacy' # independent of the connection style
+        if: matrix.connection == 'legacy' && matrix.redis == env.REDIS_VERSION # independent of the connection style and the server
         run: crystal tool format --check src spec
-      - name: Specs (no skips)
-        run: python3 scripts/run_integration.py ${{ matrix.connection == 'url' && '--url' || '' }}
-      - name: Redis restart smoke
-        run: python3 scripts/redis_restart_smoke.py
-      - name: Redis outage smoke (a live process re-drives retained copies)
-        run: python3 scripts/redis_outage_smoke.py
+      - uses: ./.github/actions/run-specs
+        with:
+          redis: ${{ matrix.redis }}
+          connection: ${{ matrix.connection }}
+
+  # The Crystal range: the declared floor (shard.yml `crystal: ">= 1.22.0"`) and the newest release, on the official
+  # Alpine images (the CI image is pinned to 1.22.1), against the newest Redis. `latest` floats on purpose: a Crystal
+  # release that breaks JoobQ fails this leg, and with it the claim ">= 1.22.0", so it blocks the release too. Not
+  # formatted here: the formatter is checked once, by the leg on the CI image.
+  crystal:
+    name: Specs (Crystal ${{ matrix.crystal }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        crystal: ["1.22.0", latest]
+    container:
+      image: crystallang/crystal:${{ matrix.crystal }}-alpine
+    env:
+      CRYSTAL_WORKERS: "1"
+    steps:
+      # The same packages as .github/ci-image/Dockerfile (a spec checks the lists agree); the official image lacks some.
+      - name: System packages
+        shell: sh
+        run: |
+          packages="bash python3 curl git make gcc g++ musl-dev linux-headers openssl openssl-dev tar zstd"
+          apk add --no-cache $packages || { sleep 15; apk add --no-cache $packages; }
+      - uses: actions/checkout@v4
+      - run: crystal --version
+      - uses: ./.github/actions/run-specs
+        with:
+          redis: ${{ env.REDIS_VERSION }}
+          connection: legacy
 
   book:
     name: Documentation book
@@ -159,10 +197,10 @@ jobs:
   # they gate the same release without a runner of their own. Only a master push whose specs ran and passed gets here.
   release:
     name: Publish release
-    needs: [changes, specs]
+    needs: [changes, specs, crystal]
     if: >-
       ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' &&
-      needs.changes.outputs.code == 'true' && needs.specs.result == 'success' }}
+      needs.changes.outputs.code == 'true' && needs.specs.result == 'success' && needs.crystal.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

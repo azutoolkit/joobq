@@ -32,6 +32,9 @@ class ChangedPaths(unittest.TestCase):
         self.assertEqual(["code", "examples", "image"], groups(".github/ci-image/TAG"))
         self.assertEqual(["book", "code", "examples"], groups(".github/workflows/ci.yml"))
         self.assertEqual(["code", "examples"], groups("scripts/install_test_redis.py"))
+        self.assertEqual(["code", "examples"], groups(".github/actions/pinned-redis/action.yml"))
+        self.assertEqual(["code"], groups(".github/actions/run-specs/action.yml"))  # the matrix's shared steps
+        self.assertEqual(["code"], groups(".github/scripts/test_ci_matrix.py"))
 
     def test_mixed_push_runs_each_group_once(self):
         self.assertEqual(["book", "code"], groups("src/joobq.cr", "docs/README.md"))

@@ -13,11 +13,12 @@ import sys
 
 WORKFLOW = ".github/workflows/ci.yml"
 REDIS = ["scripts/install_test_redis.py", ".github/actions/pinned-redis/*"]
+SPECS = [".github/actions/run-specs/*"]  # the steps every specs leg shares
 IMAGE = [".github/ci-image/*"]
 GROUPS = {
-    # specs, format check, Redis smoke and the release that follows them
+    # specs on the Redis and Crystal matrix, format check, Redis smoke and the release that follows them
     "code": ["src/*", "spec/*", "config/*", "shard.yml", "shard.lock", ".tool-versions", "scripts/run_integration.py",
-             "scripts/redis_restart_smoke.py", "scripts/redis_outage_smoke.py", "scripts/leased_process_probe.py", ".github/scripts/*", WORKFLOW] + REDIS + IMAGE,
+             "scripts/redis_restart_smoke.py", "scripts/redis_outage_smoke.py", "scripts/leased_process_probe.py", ".github/scripts/*", WORKFLOW] + REDIS + SPECS + IMAGE,
     # docs/ navigation, links, markup, Git Sync files, and that the docs quote the examples verbatim
     "book": ["docs/*", "examples/docs/*", "scripts/check_docs.py", "scripts/test_check_docs.py", ".gitbook.yaml", "gitbook-docs.yaml", WORKFLOW],
     # the documentation programs, run against the released Core graph

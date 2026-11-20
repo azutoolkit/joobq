@@ -7,11 +7,18 @@ inputs:
 runs:
   using: composite
   steps:
+    # The binary links the image's OpenSSL, so it is cached per Alpine release and OpenSSL, not per Crystal version: the
+    # legs on other images (the Crystal floor, `latest`) must not take a Redis built against another libssl.
+    - id: abi
+      shell: bash
+      run: |
+        . /etc/os-release
+        echo "value=alpine-${VERSION_ID}-$(openssl version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
     - id: cache
       uses: actions/cache@v4
       with:
         path: /tmp/test-redis
-        key: redis-${{ inputs.version }}-${{ hashFiles('scripts/install_test_redis.py') }}-crystal-1.22.1-alpine
+        key: redis-${{ inputs.version }}-${{ hashFiles('scripts/install_test_redis.py') }}-${{ steps.abi.outputs.value }}
     - if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:

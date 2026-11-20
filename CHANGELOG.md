@@ -8,7 +8,7 @@
   smokes ran on Redis 8.0.6 and Crystal 1.22.1 only, although the README, `shard.yml` and the 0.6.0 notes name Redis 6.2
   and Crystal 1.22.0 as the floors (and the 0.6.0 note that "CI tests Redis 7.4 and 8.0" had stopped being true). They now
   run on Redis 6.2.24 (the floor, `REDIS_HOST` and `REDIS_URL`), 7.4.12 and 8.0.6 on Crystal 1.22.1, and on Crystal 1.22.0
-  (the floor) and `latest` on Redis 8.0.6. The release waits for all of them. `scripts/run_integration.py` no longer passes
+  (the floor) and `latest` on Redis 8.0.6. The release waits for all of them except `latest`, which is reported but not gating (a new Crystal release or a registry failure must not stop releases). `scripts/run_integration.py` no longer passes
   `--enable-debug-command` to a server older than 7 (6.2 does not know it). `.github/scripts/test_ci_matrix.py` fails when the
   matrix, `shard.yml`, the README, CLAUDE.md and `docs/reference/compatibility.md` disagree about the floors. Not tested, and
   not claimed: glibc, ARM, macOS, Crystal nightly, Redis 7.0 to 7.2, Redis Cluster and Sentinel. The README's stale
@@ -43,7 +43,7 @@
 - **The durable (Delivery) runtime starts on Redis 6.2.** Its durability check sent one `CONFIG GET` with three
   names, which only Redis 7.0 and later accept, so on 6.2 (the stated floor) `Delivery::Runtime.new` failed with
   "ERR Unknown subcommand or wrong number of arguments for 'GET'" instead of checking. It asks for each setting in its own
-  call. The new Redis 6.2 CI legs found this (eleven delivery and error-code specs failed on 6.2.24).
+  call. Found by running the suite on Redis 6.2.24 (eleven delivery and error-code specs failed in a local run); the new 6.2 CI legs keep it covered.
 - **`Configure#setup_schedulers_from_config` is removed (refs #42).** It was public and documented with an example, but
   its cron and recurring blocks only logged "Would enqueue ..." at debug level, so a YAML `schedulers:` entry never ran
   and nothing said so. JoobQ Core still parses the section into `config.scheduler_configs` (JoobQUI's schedule catalog

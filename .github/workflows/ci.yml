@@ -4,7 +4,7 @@ name: CI
 # since the last successful run (.github/scripts/changed_paths.py) and only the jobs that read those files run:
 #
 #   code     src/, spec/, config/, shard files, the integration scripts  ->  specs (5 Redis legs) and the Crystal floor and
-#                                                                           latest (2 legs), then the release
+#                                                                           latest (2 legs; latest is not gating), then the release
 #   book     docs/, examples/docs/, .gitbook.yaml, gitbook-docs.yaml     ->  documentation checks
 #   examples examples/docs/, the docs example runner                     ->  documentation programs on Core
 #   image    .github/ci-image/                                           ->  rebuild the CI image first
@@ -32,7 +32,7 @@ concurrency:
 
 # What CI covers is what docs/reference/compatibility.md, README.md and CLAUDE.md claim (.github/scripts/test_ci_matrix.py
 # fails when they disagree). Redis: 6.2 (the floor: LMOVE/BLMOVE), 7.4 and 8.0, on Crystal 1.22.1 (the CI image). Crystal:
-# 1.22.0 (the floor, shard.yml) and `latest` on Redis 8.0. Not tested: glibc, ARM, macOS, Crystal nightly, Redis Cluster.
+# 1.22.0 (the floor, shard.yml; gates the release) and `latest` (reported, not gating) on Redis 8.0. Not tested: glibc, ARM, macOS, Crystal nightly, Redis Cluster.
 env:
   REDIS_VERSION: "8.0.6" # the newest Redis; the examples job and the format check run on it
 
@@ -125,15 +125,18 @@ jobs:
           connection: ${{ matrix.connection }}
 
   # The Crystal range: the declared floor (shard.yml `crystal: ">= 1.22.0"`) and the newest release, on the official
-  # Alpine images (the CI image is pinned to 1.22.1), against the newest Redis. `latest` floats on purpose: a Crystal
-  # release that breaks JoobQ fails this leg, and with it the claim ">= 1.22.0", so it blocks the release too. Not
-  # formatted here: the formatter is checked once, by the leg on the CI image.
+  # Alpine images (the CI image is pinned to 1.22.1), against the newest Redis. Only the floor gates the release:
+  # `latest` floats, so a new Crystal release, a mirror failure or a Docker Hub limit must not stop every release
+  # (nor make the run a failed baseline for changed_paths.py). A red `latest` leg is reported (the leg and its
+  # annotation show red, the run stays green): read it. Not formatted here: the formatter is checked once, by the
+  # leg on the CI image.
   crystal:
     name: Specs (Crystal ${{ matrix.crystal }})
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    continue-on-error: ${{ matrix.crystal == 'latest' }}
     strategy:
       fail-fast: false
       matrix:

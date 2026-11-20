@@ -145,7 +145,7 @@ module JoobQ
         entry = @@jobs[token]? || next true
         next false if entry.state.abandoned?
 
-        @@jobs[token] = Entry.new(entry.queue, entry.job, State::Settling, entry.fiber)
+        @@jobs[token] = Entry.new(entry.queue, entry.job, State::Settling, entry.fiber, entry.applied)
         true
       end
       after_settle.try(&.call) if allowed
@@ -173,6 +173,14 @@ module JoobQ
       end
     end
 
+    # Whether the current fiber's claim has its outcome applied (see `applied`).
+    def self.current_applied? : Bool
+      @@lock.synchronize do
+        token = @@fibers[Fiber.current.object_id]? || next false
+        @@jobs[token]?.try(&.applied) || false
+      end
+    end
+
     def self.applied?(token : Int64) : Bool
       @@lock.synchronize { @@jobs[token]?.try(&.applied) || false }
     end
@@ -186,7 +194,7 @@ module JoobQ
         entry = @@jobs[token]? || next
         next if entry.state.retained?
 
-        @@jobs[token] = Entry.new(entry.queue, entry.job, State::Abandoned, entry.fiber)
+        @@jobs[token] = Entry.new(entry.queue, entry.job, State::Abandoned, entry.fiber, entry.applied)
         @@any_abandoned.set(true)
       end
     end
@@ -213,7 +221,7 @@ module JoobQ
           next if (entry.state.settling? || entry.state.finishing?) && !settling
 
           abandoned << {entry.queue, entry.job}
-          @@jobs[token] = Entry.new(entry.queue, entry.job, State::Abandoned, entry.fiber)
+          @@jobs[token] = Entry.new(entry.queue, entry.job, State::Abandoned, entry.fiber, entry.applied)
         end
         @@any_abandoned.set(true) unless abandoned.empty?
         abandoned

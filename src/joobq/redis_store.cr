@@ -1084,12 +1084,15 @@ module JoobQ
 
       true
     rescue ex
-      Log.error &.emit("Failed to move job to retry queue",
+      # The retry is stored once the claim is applied: an exception after it (a sink, a log line) must not make the
+      # caller dead-letter the job as well.
+      applied = InFlight.current_applied?
+      Log.error &.emit(applied ? "Retry stored, but its follow-up failed" : "Failed to move job to retry queue",
         job_id: job.jid.to_s,
         queue: queue_name,
         error: ex.message
       )
-      false
+      applied
     end
 
     # Schedules a retry and takes the claimed copy off this process's processing list, in one step, only while the copy

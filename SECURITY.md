@@ -30,7 +30,8 @@ describe where it is and we will rotate it.
 ## Supported versions
 
 Only the latest release receives security fixes; fixes ship in new releases only, and are announced with their release
-in the [changelog](CHANGELOG.md). Please check a report against the latest release and the `master` branch before
+in the [changelog](CHANGELOG.md); the [compatibility and support policy](docs/reference/compatibility.md) states what a
+version number promises and how long a deprecated member stays. Please check a report against the latest release and the `master` branch before
 sending it.
 
 JoobQUI, the console built on JoobQ, and its hosted portal are covered by their own

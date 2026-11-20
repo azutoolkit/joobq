@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+This section holds breaking changes (the keyspace move, the `allow_plaintext_payloads` default, redacted API payloads, the
+removal of `JoobQ.scheduler`), so the next release is **0.8.0**, not a patch. Before it ships, JoobQ Pro's
+`joobq >= 0.7.2, < 0.8.0` constraint must be widened and the Core row of
+[docs/reference/compatibility.md](docs/reference/compatibility.md) changed to 0.8.0 (the docs check enforces the second).
+
 ### Changed (upgrade note: the keyspace moved)
 
 - **Every Redis key is under `joobq:v1:`.** 0.6 stored a queue's waiting jobs under the bare queue name (a queue
@@ -49,7 +54,61 @@
   processing list (`joobq:v1:processing:<queue>`, which 0.6 never writes to) in the shutdown and race specs now read
   `processing_depth`, so they can fail.
 
+### Changed (breaking: two safer defaults, #55)
+
+- **`allow_plaintext_payloads` now defaults to `false`.** It was `true`, so anyone with Redis write access could replace a
+  sealed value of an `encrypted_property` with a plain one and the worker ran it. Now a worker that meets an unsealed
+  value in such a property dead-letters the job without its payload. The flag only
+  matters for job classes that use `encrypted_property`. **Upgrade note:** if you turned a property into an
+  `encrypted_property` and jobs written before that are still in Redis, set `config.allow_plaintext_payloads = true` until they are
+  drained, then remove it. The decision for 1.0 is `false`; a spec pins it.
+- **The management API redacts secret-named job arguments (#55).** `GET /joobq/jobs/retrying`, `/joobq/jobs/dead` and the
+  `job_data` of `/joobq/errors/recent`, `/by-type` and `/by-queue` returned every plain argument to the reader role. The
+  value of an argument whose name contains one of `config.redacted_payload_keys` (default `password`, `passwd`, `pwd`,
+  `passphrase`, `secret`, `token`, `api_key`, `authorization`, `bearer`, `jwt`, `credential`, `private_key`, `cookie`,
+  `card_number`; case-insensitive, only letters and digits compared, so `privateKey` and `private.key` match, any depth) is now `[REDACTED]` in
+  the answer, for every role. `auth` and `pass` are not in the list: they would hide `author` and `passenger_count`. The
+  raw `original_job_data` of an unparseable job's dead-letter stub is always withheld, and text that cannot be parsed
+  is withheld rather than shown. Stored jobs are untouched, so retries
+  keep the real arguments. **A client that read those arguments through the API sees `[REDACTED]`.** Opt out with
+  `config.redact_api_payloads = false`. Redaction goes by name: a secret under another name stays visible, so seal it
+  with `encrypted_property` (the API never opens a sealed value). **Known limit: only argument values are redacted.** The
+  error text the library records (`error_message`, `backtrace`, `error_cause` of `/joobq/errors/*`, and the job's `error` in
+  the job listings) is shown as it is, so a secret an exception message quotes is visible to a reader; keep secrets out
+  of exception messages (the library scrubs only the values of `encrypted_property` from error text).
+
+### Changed (public API for 1.0, #43)
+
+- **The frozen public API is listed** on [docs/reference/public-api.md](docs/reference/public-api.md), and
+  `spec/public_surface_spec.cr` reads that page and fails when a listed member does not exist.
+- **`JoobQ.enqueue(job)` is the way to enqueue a job instance** (`JoobQ.enqueue(queue_name, json)` is unchanged).
+  `JoobQ.add(job)` is deprecated (`@[Deprecated]`, still works); it now takes a `JoobQ::Job` (it took any value).
+  `Job.enqueue_at(span, ...)` is deprecated in favour of `Job.delay(for: span, ...)` (same result, it now calls it).
+  The nine `JoobQ.load_*` wrappers and `JoobQ.find_config_file` are deprecated. They return a `Configure` and install
+  nothing, so they are not the same as `JoobQ.initialize_config` and `JoobQ.initialize_config_with(:file | :yaml | :string |
+  :sources | :cli_args | :env_overrides | :hybrid)`, which load **and install** the configuration, return `nil` and do nothing
+  once a configuration is set. A caller that uses the returned object calls the frozen `JoobQ::Configure.load_from_yaml`, `.load_hybrid`,
+  `.load_from_yaml_sources` or `.load_from_cli_args` and passes the result to `JoobQ.set_config` (`load_from_string` and
+  `find_config_file` have no such replacement). They are
+  removed no sooner than two minor releases and 90 days after the release that deprecates them (the deprecation rule of the
+  [compatibility page](docs/reference/compatibility.md)).
+  Known callers outside this repository: `JoobQ.add` is called by joobqui's `examples/conformance/crystal/worker.cr` (line 500) and
+  `bench/sdk-gateway/crystal/bench.cr` (line 48), which only get a compile warning until they move to `JoobQ.enqueue`; the azu docs
+  (`docs/how-to/jobs/background-jobs.md`) mention `enqueue_at`. Nothing in joobqui, joobq-pro or `azu_cli`'s `src` calls the other deprecated members; `azu_cli`'s joobq initializer uses
+  `initialize_config_with(:file, ...)`, which stays.
+- **Internal helpers are marked `:nodoc:`:** `JoobQ.reset_config` (JoobQUI calls it), `JoobQ::RedisStore#redis` (JoobQ Pro and
+  JoobQUI call it), `JoobQ::MiddlewarePipeline`, `Configure#middleware_pipeline`, `JoobQ::YamlConfigLoader`
+  and `Job#__secret_values`. They keep working; they are not part of the frozen API.
+- **`JoobQ.scheduler` is removed.** It called `Scheduler.instance`, which does not exist, and compiled only because nothing called
+  it; a caller now fails to compile instead of at the first call. Build schedulers with `config.scheduler { ... }`.
+
 ### Fixed
+
+- **`register_job` outside the `JoobQ` namespace compiled to an unknown constant** (`QueueFactory`); it now names
+  `::JoobQ::QueueFactory`, so `JoobQ.configure { register_job MyJob }` works from application code (#43).
+
+- **`GET /joobq/jobs/retrying` listed nothing (#55).** It compared the job status with `"Retrying"`, but jobs serialize it as
+  `"retrying"`, so the route always answered an empty list. The comparison now ignores case.
 
 - **`Configure#setup_schedulers_from_config` is removed (refs #42).** It was public and documented with an example, but
   its cron and recurring blocks only logged "Would enqueue ..." at debug level, so a YAML `schedulers:` entry never ran
@@ -130,7 +189,7 @@
   workflow failures and anything matching the message saw. The message is yours again; the code is still on the
   error (`joobq_error_code`). Errors JoobQ raises itself keep the suffix.
 
-## 0.7.0 (MINOR)
+## 0.7.0
 
 ### Added
 
@@ -175,7 +234,7 @@
 - `QueueFactory.clear_queues_cache` does nothing now and goes in the next minor release. To rebuild a queue after
   editing `queue_configs`, delete it from `JoobQ.queues` and call `JoobQ.queues` again, or call `JoobQ.reset_config`.
 
-## 0.6.1 (PATCH)
+## 0.6.1
 
 ### Changed
 
@@ -187,7 +246,7 @@
   processing list, so FIFO order and crash recovery are unchanged; blocking connections are O(active queues). A
   non-Redis store, or a `Worker` run outside `Queue#start`, keeps the previous self-claiming behaviour.
 
-## 0.6.0 (MINOR)
+## 0.6.0
 
 ### Changed
 

@@ -15,7 +15,7 @@ description: Which feature is in the open-source core, in the Pro shard and in t
 | Typed jobs, Redis queues, per-queue worker counts | yes | yes | pause, resume, clear, set concurrency |
 | Retries with exponential backoff, `NonRetryableError` | yes | yes | |
 | Dead letters and redrive | yes | yes | list, redrive, purge, export (CSV, JSON) |
-| Delayed jobs (`delay`, `enqueue_at`) | yes | yes | |
+| Delayed jobs (`delay`) | yes | yes | |
 | Interval and cron loops in one process | yes | yes | |
 | YAML `schedulers:` that fire | no (loaded, never fired) | no | yes, for job classes built into JoobQUI |
 | Per-queue throttle, in one process | yes | yes | |

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check GitBook navigation, relative links, markup, and executable examples."""
 import argparse
+import os
 from collections import Counter
 from pathlib import Path
 import re
@@ -98,10 +99,63 @@ def gitbook_errors(root):
     return errors
 
 
+def nodoc_errors(root):
+    """`:nodoc:` hides a member from `crystal docs` only as the first line of its comment block."""
+    errors = []
+    source = root / "src"
+    for path in sorted(source.rglob("*.cr")) if source.is_dir() else []:
+        previous_comment = False
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            comment = line.lstrip().startswith("#")
+            if comment and line.lstrip().startswith("# :nodoc:") and previous_comment:
+                errors.append(f"{path.relative_to(root)}:{number}: `:nodoc:` must be the first line of its comment")
+            previous_comment = comment
+    return errors
+
+
+def row_errors(page_text, label, manifest, source, required):
+    """The version in the `label` row of the versions table is the one in `manifest` (a shard.yml)."""
+    declared = re.search(r"^version:\s*(\S+)\s*$", manifest.read_text(), re.M)
+    row = re.search(rf"^\| {re.escape(label)} \| ([^|]+)\|", page_text, re.M)
+    if not declared:
+        return [f"{manifest}: no version"]
+    if not row:
+        return [f"docs/reference/compatibility.md: no `{label}` row in the versions table"] if required else []
+    documented = re.match(r"\s*(\d+\.\d+\.\d+)(?:,\s*tag `v(\d+\.\d+\.\d+)`)?", row[1])
+    if not documented or {documented[1], documented[2] or documented[1]} != {declared[1]}:
+        return [f"docs/reference/compatibility.md documents {label} {row[1].strip()}, {source} declares {declared[1]}"]
+    return []
+
+
+PRO_NOT_CHECKED = "Pro row not checked (no joobq-pro checkout)"
+
+
+def pro_manifest(root, pro_checkout=None):
+    """shard.yml of a joobq-pro checkout (the given one, JOOBQ_PRO_CHECKOUT, or a sibling of the repository), or None."""
+    manifest = Path(pro_checkout or os.environ.get("JOOBQ_PRO_CHECKOUT") or root.parent / "joobq-pro") / "shard.yml"
+    return manifest if manifest.is_file() else None
+
+
+def compatibility_errors(root, pro_checkout=None):
+    """docs/reference/compatibility.md names the shard.yml version of JoobQ (Core), and of JoobQ Pro when its checkout is at hand."""
+    manifest = root / "shard.yml"
+    page = root / "docs" / "reference" / "compatibility.md"
+    if not manifest.is_file() or not page.is_file():
+        return []
+    text = page.read_text()
+    errors = row_errors(text, "JoobQ (Core)", manifest, "shard.yml", True)
+    pro = pro_manifest(root, pro_checkout)
+    if pro:
+        errors += row_errors(text, "JoobQ Pro", pro, "joobq-pro/shard.yml", False)
+    return errors
+
+
 def check(root):
     docs = root / "docs"
     errors = []
     errors += gitbook_errors(root)
+    errors += compatibility_errors(root)
+    errors += nodoc_errors(root)
     summary = docs / "SUMMARY.md"
     if not summary.exists():
         return errors + ["missing docs/SUMMARY.md"]
@@ -189,6 +243,8 @@ def main():
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
+    if not pro_manifest(args.root.resolve()):
+        print(f"NOTE {PRO_NOT_CHECKED}: joobq-pro is private, so CI cannot check the version of the JoobQ Pro row of docs/reference/compatibility.md")
     print("PASS GitBook navigation, links, markup, and executable examples")
     return 0
 

@@ -12,7 +12,7 @@ description: Run one job later, or enqueue a job at a fixed interval, so that it
 
 ## Delay one job
 
-Call `delay` (or `enqueue_at`) with a `Time::Span` and the job's arguments; it returns the job's id:
+Call `delay` with a `Time::Span` and the job's arguments; it returns the job's id:
 
 <!-- illustrative: ProcessOrderJob from the first tutorial -->
 ```crystal

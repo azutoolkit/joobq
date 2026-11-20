@@ -37,7 +37,7 @@ module JoobQ
     it "runs the worker" do
       queue.store.queue_size(job.queue).should eq 0
 
-      JoobQ.add job
+      JoobQ.enqueue job
       queue.store.queue_size(job.queue).should eq 1
 
       worker.run

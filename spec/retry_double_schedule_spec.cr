@@ -25,7 +25,7 @@ end
 # Starts a worker for the job and returns it; the caller terminates it.
 def start_flaky(job : FlakyJob) : JoobQ::Worker(FlakyJob)
   queue = JoobQ::Queue(FlakyJob).new("flaky", 1)
-  JoobQ.add job
+  JoobQ.enqueue job
   worker = JoobQ::Worker(FlakyJob).new(1, Channel(Nil).new, queue)
   worker.run
   worker

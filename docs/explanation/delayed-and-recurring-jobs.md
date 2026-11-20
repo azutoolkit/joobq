@@ -18,7 +18,7 @@ JoobQ has four ways to run work later or on a schedule, and they differ in one t
 
 ```mermaid
 flowchart LR
-  D[Job.delay / enqueue_at] --> Set[(joobq:v1:delayed_jobs)] -->|due, checked every second| Q[(queue)] --> W[worker: retries, DLQ]
+  D[Job.delay] --> Set[(joobq:v1:delayed_jobs)] -->|due, checked every second| Q[(queue)] --> W[worker: retries, DLQ]
   E[Job.schedule every: / scheduler every, cron] --> P[perform called in this process]
   Y[YAML schedulers:] -->|JoobQUI worker fires it| Q
   S[Pro workflow schedule] -->|leader starts a run| WF[workflow run]
@@ -80,7 +80,7 @@ Every failure was only logged. To keep retries, make the recurring callback enqu
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `Job.delay(for:, **args)`, `Job.enqueue_at(span, **args)` | `Time::Span` | none | One job, due after the span; both take a span, not a `Time` |
+| `Job.delay(for:, **args)` | `Time::Span` | none | One job, due after the span, not a `Time` (`Job.enqueue_at` is a deprecated alias) |
 | `Job.schedule(every:, **args)` | `Time::Span` | none | Calls `perform` every span in this process, first call at once |
 | `config.scheduler { every ...; cron "..." { } }` | DSL | none | Interval and cron loops in this process |
 | `config.time_location` | `Time::Location` | `America/New_York` | Time zone of the scheduler DSL's cron patterns (set by YAML `timezone`); the process zone is not changed |

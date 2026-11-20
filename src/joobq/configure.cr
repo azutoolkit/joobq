@@ -61,8 +61,16 @@ module JoobQ
 
     # Keys for `encrypted_property` (see `JoobQ::Encryption`); when nil, `JOOBQ_PAYLOAD_KEYS` / `JOOBQ_PAYLOAD_KEY`.
     property payload_keys : Encryption::Keys? = nil
-    # Whether a payload property that is not sealed (written before it was encrypted) is read as it is.
-    property? allow_plaintext_payloads : Bool = true
+    # Whether a worker reads a payload property that is not sealed (written before it was encrypted). False by
+    # default: anyone who can write to Redis could otherwise replace a sealed value with a plain one and it would
+    # run. Set it to true only while draining jobs stored before the property was encrypted.
+    property? allow_plaintext_payloads : Bool = false
+
+    # Whether the management API hides the value of any job argument whose name matches `redacted_payload_keys`
+    # (see `JoobQ::PayloadRedaction`). On by default; false shows plain arguments to every API role.
+    property? redact_api_payloads : Bool = true
+    # Name fragments (case-insensitive, `-` and spaces count as `_`) that mark an argument as secret.
+    property redacted_payload_keys : Array(String) = PayloadRedaction::DEFAULT_KEYS.dup
 
     # Sets the payload encryption keys: `current` seals and opens, each of `previous` only opens. Entries are
     # `id:key` (32 bytes as 64 hex digits or base64).
@@ -232,6 +240,7 @@ module JoobQ
       Middleware::Timeout.new,
     ] of Middleware
 
+    # :nodoc:
     getter middleware_pipeline : MiddlewarePipeline do
       MiddlewarePipeline.new(middlewares)
     end
@@ -320,7 +329,9 @@ module JoobQ
       error_monitor.notify_alert = notify_alert if notify_alert
     end
 
-    # YAML configuration loading methods
+    # Loads and returns a configuration from a YAML file (it also applies the environment's override
+    # file), or from the search order when `path` is nil. Installs nothing: pass the
+    # result to `JoobQ.set_config`, or use `JoobQ.initialize_config_with(:yaml, ...)` to load and install.
     def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure
       if path
         YamlConfigLoader.load_with_env_overrides(path, env)
@@ -329,7 +340,7 @@ module JoobQ
       end
     end
 
-    # Hybrid configuration - YAML + programmatic
+    # Hybrid configuration - YAML + programmatic. Returns the configuration without installing it.
     def self.load_hybrid(yaml_path : String? = nil, &)
       # Start with YAML configuration
       config = if yaml_path
@@ -344,12 +355,12 @@ module JoobQ
       config
     end
 
-    # Load from multiple YAML sources with merging
+    # Load from multiple YAML sources with merging. Returns the configuration without installing it.
     def self.load_from_yaml_sources(sources : Array(String)) : Configure
       YamlConfigLoader.load_from_sources(sources)
     end
 
-    # Load from CLI arguments
+    # Load from CLI arguments. Returns the configuration without installing it.
     def self.load_from_cli_args(args : Array(String)) : Configure
       YamlConfigLoader.load_from_cli_args(args)
     end
@@ -365,7 +376,8 @@ module JoobQ
     # Example:
     # ```
     # # Load YAML config
-    # config = Configure.load_from_yaml("config/joobq.yml")
+    # JoobQ.initialize_config_with(:file, "config/joobq.yml")
+    # config = JoobQ.config
     #
     # # Register job types (must be done after job classes are defined)
     # QueueFactory.register_job_type(EmailJob)
@@ -403,7 +415,7 @@ module JoobQ
     # ```
     macro register_job(job_class)
       job_registry.register({{job_class.id}})
-      QueueFactory.register_job_type({{job_class.id}})
+      ::JoobQ::QueueFactory.register_job_type({{job_class.id}})
     end
   end
 end

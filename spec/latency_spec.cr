@@ -103,7 +103,7 @@ module JoobQ
       it "records how long a job's perform took" do
         job_queue = Queue(ExampleJob | FailJob).new("example", 1)
         worker = Worker(ExampleJob | FailJob).new(1, Channel(Nil).new, job_queue)
-        JoobQ.add ExampleJob.new(1)
+        JoobQ.enqueue ExampleJob.new(1)
 
         worker.run
         eventually(5.seconds) { recorded.call("example") >= 1 }.should be_true
@@ -115,7 +115,7 @@ module JoobQ
         worker = Worker(ExampleJob | FailJob).new(1, Channel(Nil).new, job_queue)
         failing = FailJob.new
         failing.retries = 0
-        JoobQ.add failing
+        JoobQ.enqueue failing
 
         worker.run
         eventually(5.seconds) { recorded.call("failed") >= 1 }.should be_true

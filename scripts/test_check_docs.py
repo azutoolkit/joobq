@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_docs import anchors, check, gitbook_errors, landing_errors, markup_errors
+from check_docs import anchors, check, compatibility_errors, gitbook_errors, landing_errors, markup_errors, nodoc_errors, pro_manifest
 
 
 class DocumentationChecks(unittest.TestCase):
@@ -34,6 +34,45 @@ class DocumentationChecks(unittest.TestCase):
             errors = '\n'.join(check(root))
             for expected in ('page missing from SUMMARY', 'missing target', 'link escapes repository', 'missing anchor', 'example differs'):
                 self.assertIn(expected, errors)
+
+    def test_compatibility_page_names_the_shard_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'docs' / 'reference').mkdir(parents=True)
+            page = root / 'docs' / 'reference' / 'compatibility.md'
+            (root / 'shard.yml').write_text('name: joobq\nversion: 0.7.2\n')
+            page.write_text('| JoobQ (Core) | 0.7.2, tag `v0.7.2` | `joobq/shard.yml` |\n')
+            self.assertEqual([], compatibility_errors(root))
+            page.write_text('| JoobQ (Core) | 0.5.6, tag `v0.5.6` | `joobq/shard.yml` |\n')
+            self.assertIn('documents JoobQ (Core) 0.5.6, tag `v0.5.6`, shard.yml declares 0.7.2', '\n'.join(compatibility_errors(root)))
+            page.write_text('| JoobQ (Core) | 0.7.2, tag `v0.7.1` | `joobq/shard.yml` |\n')
+            self.assertTrue(compatibility_errors(root))
+            page.write_text('no table\n')
+            self.assertIn('no `JoobQ (Core)` row', '\n'.join(compatibility_errors(root)))
+
+    def test_compatibility_page_names_the_pro_version_when_its_checkout_is_there(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'joobq'
+            pro = Path(directory) / 'pro'
+            (root / 'docs' / 'reference').mkdir(parents=True)
+            pro.mkdir()
+            (root / 'shard.yml').write_text('name: joobq\nversion: 0.7.2\n')
+            (pro / 'shard.yml').write_text('name: joobq_pro\nversion: 0.7.5\n')
+            page = root / 'docs' / 'reference' / 'compatibility.md'
+            page.write_text('| JoobQ (Core) | 0.7.2 | `joobq/shard.yml` |\n| JoobQ Pro | 0.7.4, needs `joobq >= 0.7.2` | `joobq-pro/shard.yml` |\n')
+            self.assertIn('documents JoobQ Pro 0.7.4, needs `joobq >= 0.7.2`, joobq-pro/shard.yml declares 0.7.5', '\n'.join(compatibility_errors(root, pro)))
+            page.write_text('| JoobQ (Core) | 0.7.2 | `joobq/shard.yml` |\n| JoobQ Pro | 0.7.5, needs `joobq >= 0.7.2` | `joobq-pro/shard.yml` |\n')
+            self.assertEqual([], compatibility_errors(root, pro))
+            self.assertEqual([], compatibility_errors(root, Path(directory) / 'absent'))
+            self.assertEqual(pro / 'shard.yml', pro_manifest(root, pro))
+            self.assertIsNone(pro_manifest(root, Path(directory) / 'absent'))
+
+    def test_nodoc_must_start_its_comment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src' / 'a.cr').write_text('# :nodoc:\n#\n# Internal.\ndef a\nend\n\n# Prose first.\n#\n# :nodoc:\ndef b\nend\n')
+            self.assertEqual(['src/a.cr:9: `:nodoc:` must be the first line of its comment'], nodoc_errors(root))
 
     def test_gitbook_configuration(self):
         with tempfile.TemporaryDirectory() as directory:

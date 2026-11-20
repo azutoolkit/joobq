@@ -40,7 +40,7 @@ module JoobQ
   def self.initialize_config : Nil
     return if @@config_initialized
 
-    @@config = load_auto
+    @@config = YamlConfigLoader.load_auto
     @@config_initialized = true
     Log.info { "JoobQ configuration initialized with auto-discovery" }
   end
@@ -51,28 +51,28 @@ module JoobQ
 
     case loading_method
     when :yaml
-      @@config = load_from_yaml(*args, **kwargs)
+      @@config = Configure.load_from_yaml(*args, **kwargs)
     when :file
       # load_from_file only takes a path argument
       path = args.first?.to_s || raise ArgumentError.new("File path required for :file loading method")
-      @@config = load_from_file(path)
+      @@config = YamlConfigLoader.load_from_file(path)
     when :string
       # load_from_string takes content and optional source_path
       content = args.first?.to_s || raise ArgumentError.new("YAML content required for :string loading method")
       source_path = args[1]?.to_s
-      @@config = load_from_string(content, source_path)
+      @@config = YamlConfigLoader.load_from_string(content, source_path)
     when :sources
       # Convert args to Array(String) for sources
       sources = Array(String).new
       args.each { |arg| sources << arg.to_s }
-      @@config = load_from_yaml_sources(sources)
+      @@config = Configure.load_from_yaml_sources(sources)
     when :cli_args
       # Convert args to Array(String) for CLI args
       cli_args = Array(String).new
       args.each { |arg| cli_args << arg.to_s }
-      @@config = load_from_cli_args(cli_args)
+      @@config = Configure.load_from_cli_args(cli_args)
     when :env_overrides
-      @@config = load_with_env_overrides(*args, **kwargs)
+      @@config = YamlConfigLoader.load_with_env_overrides(*args, **kwargs)
     else
       raise ArgumentError.new("Unknown loading method: #{loading_method}")
     end
@@ -87,7 +87,7 @@ module JoobQ
 
     case loading_method
     when :hybrid
-      @@config = load_hybrid(*args, **kwargs) { |cfg| yield cfg }
+      @@config = Configure.load_hybrid(*args, **kwargs) { |cfg| yield cfg }
     else
       raise ArgumentError.new("Loading method #{loading_method} does not support blocks")
     end
@@ -96,6 +96,8 @@ module JoobQ
     Log.info { "JoobQ configuration initialized with #{loading_method}" }
   end
 
+  # :nodoc:
+  #
   # Reset configuration (useful for testing)
   def self.reset_config : Nil
     @@config = nil
@@ -103,7 +105,7 @@ module JoobQ
     Log.info { "JoobQ configuration reset" }
   end
 
-  # Set a custom configuration
+  # Installs a `Configure` you built (`JoobQ::Configure.new`, or one a YAML loader returned) as the configuration in effect.
   def self.set_config(config : Configure) : Nil
     @@config = config
     @@config_initialized = true
@@ -130,8 +132,14 @@ module JoobQ
     QueueFactory.queues
   end
 
-  def self.add(job)
+  # Enqueues a job instance on its own queue and returns its job id.
+  def self.enqueue(job : Job) : String
     store.enqueue(job)
+  end
+
+  @[Deprecated("Use JoobQ.enqueue(job)")]
+  def self.add(job : Job) : String
+    enqueue(job)
   end
 
   class UnknownQueue < Exception
@@ -151,10 +159,6 @@ module JoobQ
     queue.add!(json)
   end
 
-  def self.scheduler
-    Scheduler.instance
-  end
-
   def self.[](name : String)
     queues[name]
   end
@@ -164,38 +168,47 @@ module JoobQ
   end
 
   # Configuration loading methods
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:yaml, path, env). To get the Configure back without installing it: JoobQ::Configure.load_from_yaml(path, env)")]
   def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure
     Configure.load_from_yaml(path, env)
   end
 
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:hybrid, yaml_path) { |config| ... }. To get the Configure back without installing it: JoobQ::Configure.load_hybrid(yaml_path) { |config| ... }")]
   def self.load_hybrid(yaml_path : String? = nil, &)
     Configure.load_hybrid(yaml_path) { |config| yield config }
   end
 
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:sources, *paths). To get the Configure back without installing it: JoobQ::Configure.load_from_yaml_sources(sources)")]
   def self.load_from_yaml_sources(sources : Array(String)) : Configure
     Configure.load_from_yaml_sources(sources)
   end
 
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:cli_args, *args). To get the Configure back without installing it: JoobQ::Configure.load_from_cli_args(args)")]
   def self.load_from_cli_args(args : Array(String)) : Configure
     Configure.load_from_cli_args(args)
   end
 
+  @[Deprecated("To load and install: JoobQ.initialize_config. To get the Configure back without installing it: JoobQ::Configure.load_from_yaml")]
   def self.load_auto : Configure
     YamlConfigLoader.load_auto
   end
 
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:file, path). To get the Configure back without installing it: JoobQ::Configure.load_from_yaml(path), which also applies the environment's override file")]
   def self.load_from_file(path : String) : Configure
     YamlConfigLoader.load_from_file(path)
   end
 
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:string, yaml_content). It installs; to get a Configure back without installing, write the YAML to a file and use JoobQ::Configure.load_from_yaml(path)")]
   def self.load_from_string(yaml_content : String, source_path : String? = nil) : Configure
     YamlConfigLoader.load_from_string(yaml_content, source_path)
   end
 
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:env_overrides, base_path, env). To get the Configure back without installing it: JoobQ::Configure.load_from_yaml(base_path, env)")]
   def self.load_with_env_overrides(base_path : String? = nil, env : String? = nil) : Configure
     YamlConfigLoader.load_with_env_overrides(base_path, env)
   end
 
+  @[Deprecated("JoobQ.initialize_config searches for the file itself; there is no replacement for only locating it")]
   def self.find_config_file : String?
     YamlConfigLoader.find_config_file
   end

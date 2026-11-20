@@ -73,7 +73,7 @@ end
 
 def start_lifecycle(job : LifecycleJob) : JoobQ::Worker(LifecycleJob)
   queue = JoobQ::Queue(LifecycleJob).new("lifecycle", 1)
-  JoobQ.add job
+  JoobQ.enqueue job
   worker = JoobQ::Worker(LifecycleJob).new(1, Channel(Nil).new, queue)
   worker.run
   worker
@@ -162,7 +162,7 @@ module JoobQ
       job = LifecycleClassJob.new
       job.retries = 5
       job.max_retries = 5
-      JoobQ.add job
+      JoobQ.enqueue job
       worker = Worker(LifecycleClassJob).new(1, Channel(Nil).new, queue)
       worker.run
       dlq = DeadLetterQueue.new(redis)

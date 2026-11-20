@@ -408,7 +408,6 @@ EmailJob.new(email_address: "john.doe@example.com").perform
 
 # Delayed
 EmailJob.delay(for: 1.hour, email_address: "john.doe@example.com")
-EmailJob.enqueue_at(time: 3.minutes.from_now, email_address: "john.doe@example.com")
 
 # Recurring at given interval
 EmailJob.schedule(every: 1.second, email_address: "john.doe@example.com")
@@ -471,7 +470,7 @@ Without that call the keys come from `JOOBQ_PAYLOAD_KEYS` (comma separated `id:k
 - Each value carries its key id, a random 96 bit nonce and the tag. The job class and the property name are authenticated data, so a value copied to another field or class is refused. Renaming the class or the property makes stored values unreadable; pass `job_name:` to `encrypted_property` to pin the name.
 - A job whose values cannot be opened because of the *job* (unknown key id, wrong class or field, altered, damaged) is never run: it goes to the dead-letter set as the job itself with error type `decryption_error` and a message that names the class and property but holds no value. Once the key is back, redrive it (dead-letter API or `DeadLetterQueue#redrive`) and it runs.
 - A problem with the *process's keys* (none configured, `JOOBQ_PAYLOAD_KEYS` malformed) is a configuration error: the queue of a job class with encrypted properties refuses to start, enqueuing raises `JoobQ::Encryption::Error`, and a worker that meets such a job puts it back on its queue (atomically, not counted as processed) and stops claiming for a few seconds (`Encryption.key_backoff`, monotonic clock) instead of dead-lettering it.
-- Values written before the property was encrypted are read as they are and sealed on the next write. Set `JoobQ.config.allow_plaintext_payloads = false` to make workers refuse them (the job is dead-lettered without its payload, which holds the plain values: that legacy job is gone, so drain old jobs first rather than flipping the flag). The same withholding applies to any other parse error in a job class with encrypted properties (`Queue#add` and the HTTP API still accept plain values, which are then sealed). While it is true, anyone who can write to Redis can substitute an unsealed value and it will run.
+- Values written before the property was encrypted are read as they are and sealed on the next write. Workers refuse them by default (`JoobQ.config.allow_plaintext_payloads` is `false`: the job is dead-lettered without its payload, which holds the plain values, so that legacy job is gone). When you start encrypting a property of a class that has jobs in Redis, set `allow_plaintext_payloads = true` until those jobs are drained, then remove it. The same withholding applies to any other parse error in a job class with encrypted properties (`Queue#add` and the HTTP API still accept plain values, which are then sealed). While it is true, anyone who can write to Redis can substitute an unsealed value and it will run. The management API never shows a sealed value opened, and hides plain arguments whose name looks secret (`config.redacted_payload_keys`).
 - The library scrubs the plain values (and their `to_s`, `inspect`, JSON forms and the leaves of hashes and arrays; strings under 4 characters and numbers under 6 digits excepted, booleans never) from the error messages, causes and backtraces it records (error context, `job.failed` event, stored job error). It cannot scrub what your own `perform` logs. Scrubbing never raises: if it cannot be done the text is replaced by `[REDACTED: not scrubbable]`, so the job still retries or dead-letters.
 - The sealed value is bound to the class and property, not to the job id: someone who can write to Redis can copy a sealed value between jobs of the same class and property. Nonces are random 96 bit values: rotate keys before about 2^32 seals per key.
 - Sealing is not deterministic (random nonce per value): two serialisations of one job differ, so nothing may re-serialise a job to find it again by value.
@@ -675,10 +674,17 @@ The JSON formatter preserves structured identifiers in `data` and application co
 4. Push to the branch (git push origin my-new-feature)
 5. Create a new Pull Request
 
+## Versioning and support
+
+JoobQ follows semantic versioning. The [public API](docs/reference/public-api.md) is frozen for 1.0, deprecations last at
+least two minor releases, and only the latest release receives fixes: see the
+[compatibility and support policy](docs/reference/compatibility.md).
+
 ## Security
 
 Report vulnerabilities privately, not in a public issue: see [SECURITY.md](SECURITY.md) for the address, what to
-include and what response to expect.
+include and what response to expect. Fixes ship in new releases and are announced with them
+([policy](docs/reference/compatibility.md#security-fixes)).
 
 ## Testing
 

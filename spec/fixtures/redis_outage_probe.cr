@@ -25,7 +25,7 @@ JoobQ.config.timeout = 10.minutes
 JoobQ.configure do
   queue "outage_probe", 12, OutageProbeJob
 end
-jobs.times { |i| JoobQ.add(OutageProbeJob.new(i)) }
+jobs.times { |i| JoobQ.enqueue(OutageProbeJob.new(i)) }
 JoobQ.config.queues.each_value(&.start)
 
 # Finished means: every job ran to its end AND Redis holds nothing for the queue (no waiting job, no processing copy).

@@ -75,7 +75,7 @@ when "failing", "succeeding"
   # runs, the program lives on and counts the job.completed events it sees
   sink = CountingSink.new
   JoobQ::Events.subscribe(sink)
-  JoobQ.add(ProbeJob.new)
+  JoobQ.enqueue(ProbeJob.new)
   JoobQ.config.queues.each_value(&.start)
   spawn do
     until Dir.glob(File.join(ENV["PROBE_DIR"], "started-*")).size >= 1
@@ -100,7 +100,7 @@ when "retained", "redriven"
   JoobQ.trap_termination((ENV["PROBE_TIMEOUT"]? || "15").to_f.seconds)
   sleep
 else
-  (mode == "slow" ? 1 : (ENV["PROBE_JOBS"]? || "5").to_i).times { JoobQ.add(ProbeJob.new) }
+  (mode == "slow" ? 1 : (ENV["PROBE_JOBS"]? || "5").to_i).times { JoobQ.enqueue(ProbeJob.new) }
   JoobQ.config.queues.each_value(&.start)
   JoobQ.forge(shutdown_timeout: (ENV["PROBE_TIMEOUT"]? || "15").to_f.seconds)
 end

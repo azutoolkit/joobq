@@ -410,14 +410,11 @@ module JoobQ
     end
 
     describe ".enqueue_at" do
-      it "enqueues job at specific time" do
-        store = JoobQ.store.as(RedisStore)
-        store.clear_queue("joobq:v1:delayed_jobs")
-
-        jid = ExampleJob.enqueue_at(2.minutes, x: 10)
-
-        jid.should be_a(UUID)
-        store.set_size("joobq:v1:delayed_jobs").should eq(1)
+      # Calling it prints a deprecation warning in this build, so the spec checks the annotation; `delay` (which it
+      # calls) is covered above.
+      it "is deprecated in favour of delay" do
+        {{ ExampleJob.class.methods.select { |m| m.name.stringify == "enqueue_at" }.size > 0 }}.should be_true
+        {{ ExampleJob.class.methods.select { |m| m.name.stringify == "enqueue_at" }.all? { |m| m.annotation(Deprecated) } }}.should be_true
       end
     end
 

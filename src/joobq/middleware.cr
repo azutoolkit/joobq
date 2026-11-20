@@ -4,6 +4,9 @@ module JoobQ
     abstract def call(job : Job, queue : BaseQueue, worker_id : String, next_middleware : ->) : Nil
   end
 
+  # :nodoc:
+  #
+  # Runs the middlewares around a job; built from `config.middlewares`.
   class MiddlewarePipeline
     @middlewares : Array(Middleware)
 

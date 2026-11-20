@@ -60,6 +60,9 @@ module JoobQ
     # The parsed URL of a store made with `url:`; nil for one made with host and port.
     getter endpoint : RedisEndpoint? = nil
 
+    # :nodoc:
+    #
+    # The connection pool, for code that must run a Redis command the store has no method for (JoobQ Pro, JoobQUI).
     getter redis : Redis::PooledClient
     getter host : String
     getter port : Int32

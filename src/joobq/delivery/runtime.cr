@@ -58,6 +58,9 @@ module JoobQ::Delivery
   class Runtime
     record Registration, name : String, ledger : Ledger, handler : Proc(String, Context, Outcome)
 
+    # What the durable runtime needs of the server, checked once at start.
+    DURABLE_CONFIG = {"appendonly" => "yes", "appendfsync" => "always", "maxmemory-policy" => "noeviction"}
+
     getter store : RedisStore
     getter namespace : String
     getter capacity : Int32
@@ -112,15 +115,14 @@ module JoobQ::Delivery
       verify_durability! if production
     end
 
-    DURABLE_CONFIG = {"appendonly" => "yes", "appendfsync" => "always", "maxmemory-policy" => "noeviction"}
-
     def verify_durability! : Nil
       unless DURABLE_CONFIG.all? { |name, required| config_value(name) == required }
         raise ArgumentError.new(ErrorCodes["JQ-201"].tag("durable runtime requires appendonly=yes, appendfsync=always and maxmemory-policy=noeviction"))
       end
     end
 
-    # One CONFIG GET per setting: several names in one call are Redis 7.0+, and the floor is 6.2.
+    # One CONFIG GET per setting: several names in one call are Redis 7.0+, and the floor is 6.2. The three reads are
+    # no longer one snapshot; that is fine for a check made once, at start.
     private def config_value(name : String) : String?
       store.redis.command(["CONFIG", "GET", name]).as(Array)[1]?.try(&.as(String))
     end

@@ -98,6 +98,20 @@ def gitbook_errors(root):
     return errors
 
 
+def nodoc_errors(root):
+    """`:nodoc:` hides a member from `crystal docs` only as the first line of its comment block."""
+    errors = []
+    source = root / "src"
+    for path in sorted(source.rglob("*.cr")) if source.is_dir() else []:
+        previous_comment = False
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            comment = line.lstrip().startswith("#")
+            if comment and line.lstrip().startswith("# :nodoc:") and previous_comment:
+                errors.append(f"{path.relative_to(root)}:{number}: `:nodoc:` must be the first line of its comment")
+            previous_comment = comment
+    return errors
+
+
 def compatibility_errors(root):
     """The version docs/reference/compatibility.md documents for JoobQ (Core) is the one in shard.yml."""
     manifest = root / "shard.yml"
@@ -121,6 +135,7 @@ def check(root):
     errors = []
     errors += gitbook_errors(root)
     errors += compatibility_errors(root)
+    errors += nodoc_errors(root)
     summary = docs / "SUMMARY.md"
     if not summary.exists():
         return errors + ["missing docs/SUMMARY.md"]

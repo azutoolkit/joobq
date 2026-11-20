@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_docs import anchors, check, compatibility_errors, gitbook_errors, landing_errors, markup_errors
+from check_docs import anchors, check, compatibility_errors, gitbook_errors, landing_errors, markup_errors, nodoc_errors
 
 
 class DocumentationChecks(unittest.TestCase):
@@ -49,6 +49,13 @@ class DocumentationChecks(unittest.TestCase):
             self.assertTrue(compatibility_errors(root))
             page.write_text('no table\n')
             self.assertIn('no `JoobQ (Core)` row', '\n'.join(compatibility_errors(root)))
+
+    def test_nodoc_must_start_its_comment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src' / 'a.cr').write_text('# :nodoc:\n#\n# Internal.\ndef a\nend\n\n# Prose first.\n#\n# :nodoc:\ndef b\nend\n')
+            self.assertEqual(['src/a.cr:9: `:nodoc:` must be the first line of its comment'], nodoc_errors(root))
 
     def test_gitbook_configuration(self):
         with tempfile.TemporaryDirectory() as directory:

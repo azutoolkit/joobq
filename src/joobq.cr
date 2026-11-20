@@ -96,9 +96,9 @@ module JoobQ
     Log.info { "JoobQ configuration initialized with #{loading_method}" }
   end
 
-  # Reset configuration (useful for testing)
-  #
   # :nodoc:
+  #
+  # Reset configuration (useful for testing)
   def self.reset_config : Nil
     @@config = nil
     @@config_initialized = false

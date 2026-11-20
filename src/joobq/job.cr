@@ -146,10 +146,10 @@ module JoobQ
         job
       end
 
+      # :nodoc:
+      #
       # The plain values of this job's encrypted properties (see `JoobQ::Encryption`); empty, and free, for a job
       # without any. Used to keep them out of the errors the library records.
-      #
-      # :nodoc:
       def __secret_values : Array(String)
         values = [] of String
         \{% for iv in @type.instance_vars %}
@@ -267,9 +267,9 @@ module JoobQ
 
     abstract def perform
 
-    # See the override that `included` defines.
-    #
     # :nodoc:
+    #
+    # See the override that `included` defines.
     def __secret_values : Array(String)
       [] of String
     end

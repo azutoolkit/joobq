@@ -260,9 +260,9 @@ module JoobQ
       error_monitor.notify_alert = notify_alert if notify_alert
     end
 
-    # YAML configuration loading methods: the helpers behind `JoobQ.initialize_config_with`.
-    #
     # :nodoc:
+    #
+    # YAML configuration loading methods: the helpers behind `JoobQ.initialize_config_with`.
     def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure
       if path
         YamlConfigLoader.load_with_env_overrides(path, env)
@@ -271,9 +271,9 @@ module JoobQ
       end
     end
 
-    # Hybrid configuration - YAML + programmatic
-    #
     # :nodoc:
+    #
+    # Hybrid configuration - YAML + programmatic
     def self.load_hybrid(yaml_path : String? = nil, &)
       # Start with YAML configuration
       config = if yaml_path
@@ -288,16 +288,16 @@ module JoobQ
       config
     end
 
-    # Load from multiple YAML sources with merging
-    #
     # :nodoc:
+    #
+    # Load from multiple YAML sources with merging
     def self.load_from_yaml_sources(sources : Array(String)) : Configure
       YamlConfigLoader.load_from_sources(sources)
     end
 
-    # Load from CLI arguments
-    #
     # :nodoc:
+    #
+    # Load from CLI arguments
     def self.load_from_cli_args(args : Array(String)) : Configure
       YamlConfigLoader.load_from_cli_args(args)
     end
@@ -313,7 +313,8 @@ module JoobQ
     # Example:
     # ```
     # # Load YAML config
-    # config = Configure.load_from_yaml("config/joobq.yml")
+    # JoobQ.initialize_config_with(:file, "config/joobq.yml")
+    # config = JoobQ.config
     #
     # # Register job types (must be done after job classes are defined)
     # QueueFactory.register_job_type(EmailJob)

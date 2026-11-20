@@ -241,13 +241,14 @@ module JoobQ
         end
       ensure
         if InFlight.finishing(token)
-          # Shutdown already put this job back on its queue; another process may hold it now, so the
-          # processing list is not touched
-          Log.warn &.emit("Job outlived the shutdown deadline; it was returned to its queue", queue: @queue.name, worker_id: @worker_id)
+          # The job is back on its queue (shutdown put it there, or another process reclaimed it after this process's
+          # heartbeat lapsed); another process may hold it now, so the processing list is not touched
+          Log.warn &.emit("Job outlived its claim (the shutdown deadline, or a reclaim by another process); it was returned to its queue", queue: @queue.name, worker_id: @worker_id)
         else
           stored = false
           begin
-            stored = settle_outcome(job, keys_missing, outcome_stored, job_completed_successfully && !parsed_job.nil?)
+            # a retry or dead letter applied inside the middleware already took the copy off the list and counted the job
+            stored = InFlight.applied?(token) || settle_outcome(job, keys_missing, outcome_stored, job_completed_successfully && !parsed_job.nil?)
           ensure
             # one step: the claim is forgotten, or kept (retained) when the outcome could not be stored, so shutdown
             # never sees a moment with neither
@@ -310,6 +311,12 @@ module JoobQ
     # Handle jobs that cannot be parsed (invalid JSON or structure)
     private def handle_unparseable_job(job_json : String, parse_error : Exception) : Nil
       return unless InFlight.settle # abandoned: the requeued copy will meet the same error and dead-letter it once
+      # a claim another process reclaimed is not dead-lettered by this one
+      if (store = @queue.store).is_a?(RedisStore) && !store.claim_held?(@queue.name, job_json)
+        store.warn_reclaimed(@queue.name, job_json)
+        InFlight.fence
+        return
+      end
 
       Log.error &.emit("Unparseable job detected, moving to dead letter queue",
         queue: @queue.name,

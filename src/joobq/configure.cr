@@ -34,7 +34,15 @@ module JoobQ
     # True once a configuration source set `time_location`, so merging sources keeps the zone one of them chose.
     property? time_location_configured : Bool = false
 
-    property store : Store = RedisStore.from_env
+    getter store : Store = RedisStore.from_env
+
+    # Replaces the store. A Redis store takes `owner_ttl` only when it was set on the configuration; otherwise the TTL
+    # of the assigned store stays (and `owner_ttl` reports it).
+    def store=(store : Store) : Store
+      @owner_ttl.try { |ttl| store.as?(RedisStore).try(&.owner_ttl = ttl) }
+      @store = store
+    end
+
     # True once a configuration source (a YAML `redis` section) chose the store, as opposed to the default built from
     # the environment. Merging sources keeps a chosen store whichever source comes last.
     property? store_configured : Bool = false
@@ -62,6 +70,66 @@ module JoobQ
       @payload_keys = Encryption::Keys.parse([current] + previous, "payload_encryption")
     end
 
+    # Crash recovery. A process whose last heartbeat is older than `owner_ttl` is judged dead and its in-flight jobs go
+    # back to their queue the next time the reaper looks (every `reaper_interval`), so they are back at most
+    # `owner_ttl + reaper_interval` after a crash (60 s by default). Shorter values recover sooner and make a process
+    # that stalls (a long GC pause, a frozen container) more likely to be judged dead while it still works.
+    # `owner_ttl` must be the same on every process that shares a Redis: a process judges liveness by its own TTL.
+    DEFAULT_OWNER_TTL       = RedisStore::DEFAULT_OWNER_TTL
+    DEFAULT_REAPER_INTERVAL = 30.seconds
+    MIN_REAPER_INTERVAL     = 100.milliseconds
+    @owner_ttl : Time::Span? = nil
+    @reaper_interval : Time::Span? = nil
+
+    def owner_ttl_set? : Bool
+      !@owner_ttl.nil?
+    end
+
+    def reaper_interval_set? : Bool
+      !@reaper_interval.nil?
+    end
+
+    # The TTL in force: the Redis store's (what `owner_ttl=` and `RedisStore#owner_ttl=` both set).
+    def owner_ttl : Time::Span
+      store.as?(RedisStore).try(&.owner_ttl) || @owner_ttl || DEFAULT_OWNER_TTL
+    end
+
+    def owner_ttl=(ttl : Time::Span) : Time::Span
+      store.as?(RedisStore).try(&.owner_ttl = ttl) || RedisStore.check_owner_ttl(ttl)
+      @owner_ttl = ttl
+    end
+
+    # The interval as set, or when unset the default 30 s lowered to the TTL. It is also the cadence of the expired-job
+    # scan of every queue, so a very short one costs a scan of every queue each time (100 ms: ten per second).
+    def reaper_interval : Time::Span
+      @reaper_interval || {DEFAULT_REAPER_INTERVAL, owner_ttl}.min
+    end
+
+    def reaper_interval=(interval : Time::Span) : Time::Span
+      @reaper_interval = interval
+    end
+
+    # What the reaper runs at: never longer than the TTL, which would make recovery wait on the reaper.
+    def effective_reaper_interval : Time::Span
+      {reaper_interval, owner_ttl}.min
+    end
+
+    # Both set together and in conflict is an error. An interval set alone above the TTL in force (a pure expired-job
+    # knob before the TTL was a setting) is clamped with a warning, so an existing configuration keeps booting.
+    def validate_recovery_timing : Nil
+      RedisStore.check_owner_ttl(owner_ttl)
+      if reaper_interval < MIN_REAPER_INTERVAL
+        raise ConfigValidationError.new("reaper_interval must be at least #{MIN_REAPER_INTERVAL}, got #{reaper_interval}")
+      end
+      return unless reaper_interval > owner_ttl
+
+      if @owner_ttl && @reaper_interval
+        raise ConfigValidationError.new("reaper_interval (#{reaper_interval}) must not be longer than owner_ttl (#{owner_ttl})")
+      end
+      Log.warn &.emit("reaper_interval is longer than owner_ttl; the reaper runs every owner_ttl instead",
+        reaper_interval_seconds: reaper_interval.total_seconds, owner_ttl_seconds: owner_ttl.total_seconds)
+    end
+
     # Pipeline optimization settings (always enabled)
     property pipeline_batch_size : Int32 = 100
     property pipeline_timeout : Float64 = 1.0
@@ -73,6 +141,7 @@ module JoobQ
       validate_pipeline_settings
       validate_timeouts
       validate_retries
+      validate_recovery_timing
     end
 
     # Validate Redis pool size against configured workers (call after queues are set up)
@@ -180,15 +249,15 @@ module JoobQ
     # Delayed job scheduler (processes retrying jobs)
     property delayed_job_scheduler : DelayedJobScheduler = DelayedJobScheduler.new
 
-    # Expired job reaper configuration
-    property reaper_interval : Time::Span = 30.seconds
+    # Expired job reaper configuration (`reaper_interval` is above)
     property reaper_scan_limit : Int32 = 1000
 
-    # Expired job reaper (scans queues for expired jobs)
+    # Expired job reaper (scans queues for expired jobs and reclaims dead processes' jobs). Built on first use, with
+    # `effective_reaper_interval` of that moment: set `reaper_interval` (and `owner_ttl`) before `forge`.
     getter expired_job_reaper : ExpiredJobReaper do
       ExpiredJobReaper.new(
         store: store,
-        interval: reaper_interval,
+        interval: effective_reaper_interval,
         scan_limit: reaper_scan_limit
       )
     end

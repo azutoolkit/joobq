@@ -67,6 +67,7 @@ when optimizing; an enqueue-only benchmark is not an acceptable replacement.
 CRYSTAL_WORKERS=4 python3 scripts/run_integration.py
 CRYSTAL_WORKERS=1 python3 scripts/run_integration.py --url
 python3 scripts/run_integration.py --probe python3 scripts/leased_process_probe.py
+python3 scripts/crash_recovery_smoke.py # SIGKILL a Core worker process; a second one recovers within TTL + interval
 crystal tool format --check src spec benchmarks
 ```
 

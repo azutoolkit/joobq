@@ -122,6 +122,7 @@ module JoobQ
 
       # Apply environment variable overrides
       apply_env_overrides(config, environment)
+      config.validate_recovery_timing
 
       config
     end
@@ -197,6 +198,10 @@ module JoobQ
           config.time_location = value
         when "worker_batch_size"
           config.worker_batch_size = value.to_i
+        when "owner_ttl"
+          config.owner_ttl = env_time_span(key, value)
+        when "reaper_interval"
+          config.reaper_interval = env_time_span(key, value)
         when "pipeline_batch_size"
           config.pipeline_batch_size = value.to_i
         when "pipeline_timeout"
@@ -218,6 +223,12 @@ module JoobQ
       Log.info { "Applied environment overrides for environment: #{environment}" }
     end
 
+    private def self.env_time_span(name : String, value : String) : Time::Span
+      parse_time_span(value)
+    rescue ArgumentError
+      raise ConfigValidationError.new("#{name} must be a time span such as '30 seconds', got #{value.inspect}")
+    end
+
     private def self.merge_configurations(base : Configure, override : Configure) : Configure
       # Create a new config with merged values
       merged = Configure.new
@@ -231,6 +242,10 @@ module JoobQ
       merged.failed_ttl = base.failed_ttl
       merged.dead_letter_ttl = base.dead_letter_ttl
       merged.worker_batch_size = base.worker_batch_size
+      ttl_source = override.owner_ttl_set? ? override : base
+      merged.owner_ttl = ttl_source.owner_ttl if ttl_source.owner_ttl_set?
+      interval_source = override.reaper_interval_set? ? override : base
+      merged.reaper_interval = interval_source.reaper_interval if interval_source.reaper_interval_set?
       merged.pipeline_batch_size = base.pipeline_batch_size
       merged.pipeline_timeout = base.pipeline_timeout
       merged.pipeline_max_commands = base.pipeline_max_commands

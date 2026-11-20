@@ -30,7 +30,7 @@ module JoobQ
       Retained
     end
 
-    record Entry, queue : String, job : String, state : State, fiber : UInt64? = nil
+    record Entry, queue : String, job : String, state : State, fiber : UInt64? = nil, applied : Bool = false
 
     @@jobs = {} of Int64 => Entry
     @@fibers = {} of UInt64 => Int64
@@ -88,7 +88,7 @@ module JoobQ
         entry.fiber.try { |fiber| @@fibers.delete(fiber) if @@fibers[fiber]? == token }
         next !@@jobs.delete(token).nil? if entry.state.abandoned?
 
-        @@jobs[token] = Entry.new(entry.queue, entry.job, State::Finishing)
+        @@jobs[token] = Entry.new(entry.queue, entry.job, State::Finishing, nil, entry.applied)
         false
       end
     end
@@ -150,6 +150,45 @@ module JoobQ
       end
       after_settle.try(&.call) if allowed
       allowed
+    end
+
+    # The queue and the raw copy the current fiber's claim holds in this process's processing list, while the job runs
+    # or applies a failure outcome; nil for a fiber that is not running a claimed job (a caller outside a worker, or a
+    # worker already cleaning up). The store fences the failure outcome on it (see `RedisStore#settle_claim`).
+    def self.current : {String, String}?
+      @@lock.synchronize do
+        token = @@fibers[Fiber.current.object_id]? || next nil
+        entry = @@jobs[token]? || next nil
+        {entry.queue, entry.job} if entry.state.running? || entry.state.settling?
+      end
+    end
+
+    # The failure outcome of the current fiber's claim was applied in one step that also took the copy off the
+    # processing list and counted the job: the worker's cleanup has nothing left to do (`applied?`).
+    def self.applied : Nil
+      @@lock.synchronize do
+        token = @@fibers[Fiber.current.object_id]? || next
+        entry = @@jobs[token]? || next
+        @@jobs[token] = Entry.new(entry.queue, entry.job, entry.state, entry.fiber, true)
+      end
+    end
+
+    def self.applied?(token : Int64) : Bool
+      @@lock.synchronize { @@jobs[token]?.try(&.applied) || false }
+    end
+
+    # The current fiber's claim was reclaimed by another process (its copy is gone from this process's processing
+    # list): the execution becomes inert, like one abandoned at shutdown, because the process that reclaimed the job
+    # owns it now. Nothing of it is scheduled, counted or removed afterwards.
+    def self.fence : Nil
+      @@lock.synchronize do
+        token = @@fibers[Fiber.current.object_id]? || next
+        entry = @@jobs[token]? || next
+        next if entry.state.retained?
+
+        @@jobs[token] = Entry.new(entry.queue, entry.job, State::Abandoned, entry.fiber)
+        @@any_abandoned.set(true)
+      end
     end
 
     # Whether the job being executed by the current fiber was abandoned by shutdown. Read only, and cheap enough

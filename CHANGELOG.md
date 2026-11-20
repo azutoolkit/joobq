@@ -26,6 +26,29 @@
   `JoobQ::UnsupportedJobVersion` (a `JSON::ParseException`, so the worker dead-letters the payload unread and whole, and logs a
   message naming the version; redrive it after upgrading). A job without `v` is a 0.6 job and is read as before.
 
+### Added
+
+- **The crash-recovery time is a setting.** `owner_ttl` (how long a heartbeat counts as alive, default 30 s, 1 s to 1 h)
+  and `reaper_interval` (default 30 s, 100 ms up to `owner_ttl`) are `Configure` properties, `settings` keys in YAML and
+  the environment variables `JOOBQ_OWNER_TTL` and `JOOBQ_REAPER_INTERVAL`. A process's jobs are back on their queue at
+  most `owner_ttl + reaper_interval` after it was killed. The heartbeat now beats at a third of the TTL, at most every
+  10 s. Values outside the range, or an interval longer than the TTL, raise `ConfigValidationError` when the YAML is
+  loaded, from the environment (also for a value that is not a time span), and in `forge`. Defaults are unchanged.
+  **Upgrade note:** `reaper_interval` was only the expired-job scan cadence. An existing `reaper_interval` above the
+  default TTL does not stop the boot: the reaper runs every `owner_ttl` instead and a warning says so (only
+  `owner_ttl` and `reaper_interval` both set, with the interval above the TTL, raise). Unset, the interval is
+  `min(30 s, owner_ttl)`, so lowering `owner_ttl` alone works. Set both before `forge` (the reaper is built on first use);
+  a very short interval scans every queue that often. `owner_ttl` must be the same on every process sharing a Redis, so
+  change it with every process stopped. An assigned store keeps its own TTL unless the configuration set `owner_ttl`.
+
+### Tests
+
+- **A real SIGKILL proves Core crash recovery.** `scripts/crash_recovery_smoke.py` (run by CI) kills a worker process with
+  12 jobs running, starts a second one inside the heartbeat TTL, and fails unless every job is re-run once by the second
+  process within `owner_ttl + reaper_interval` (3 s + 1 s in the smoke). The assertions on the 0.5 shared
+  processing list (`joobq:v1:processing:<queue>`, which 0.6 never writes to) in the shutdown and race specs now read
+  `processing_depth`, so they can fail.
+
 ### Fixed
 
 - **`Configure#setup_schedulers_from_config` is removed (refs #42).** It was public and documented with an example, but
@@ -57,6 +80,21 @@
   `"<pattern>:UTC"`. The `azu_cli` joobq initializer template (`config.time_location = "UTC"`) now yields UTC cron times
   too. Check each cron pattern against the zone you configured, or set `timezone: "America/New_York"` to keep the old
   times. Code that relied on the process zone changing must set `Time::Location.local` itself.
+- **A process frozen past the heartbeat TTL no longer settles jobs another process reclaimed.** After `owner_ttl` of
+  silence recovery moves a process's jobs back to their queue; when that process woke up it still completed its copies,
+  and every job counted twice (`joobq:v1:stats:completed` = 20 for 10 jobs) while a failure could schedule a second
+  retry or a second dead letter. A claim is now the copy in the process's own processing list, and the settlement
+  scripts act only while they still hold it: completion and cleanup (`RedisStore#mark_job_completed`, `#cleanup_job`) remove
+  the copy and count in one step, and inside a worker `move_to_retry`, `move_to_dead_letter` and `mark_as_dead` write only
+  if the copy is still there (and leave its removal to the cleanup). A refused claim makes its execution inert
+  (`InFlight.fence`, as for an abandoned one), logs `Another process reclaimed this job after this process's heartbeat
+  lapsed`, and counts nothing; a heartbeat that finds the previous one older than the TTL logs `This process's heartbeat
+  lapsed`. The job body still ran twice: delivery stays at-least-once. Behaviour changes: `mark_job_completed` and
+  `cleanup_job` count only when they remove the copy (they answer `true` either way), and they remove one copy, not
+  every identical one.
+  `RedisStore#claim_held?` reads whether a claim is still held. A retry or dead letter inside a worker is one script
+  that also takes the claim copy off the list and counts the job (the worker skips its cleanup), so a cleanup lost to an
+  outage leaves nothing to re-drive; `RedisPipeline#cleanup_jobs_batch` settles each job the same fenced way.
 - **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the
   worker could not remove the job's copy from its own processing list (or could not store a failure), and nothing
   returned the copy until the process was restarted: the heartbeat that protects the list came back by itself. The

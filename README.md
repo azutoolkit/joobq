@@ -294,7 +294,7 @@ own processing list (`joobq:v1:processing:<queue>:<owner>`). Each process claims
 heartbeat (the `joobq:v1:processing:owners` sorted set). Start-up recovery (`Queue#start`), the expired-job reaper and
 `POST /joobq/queues/:name/reprocess` return **every** job a crashed or stopped process left in processing back to the
 head of its queue, in the order it was claimed, so it runs before newer work. Recovery reclaims a process's list only
-once that process's heartbeat has lapsed (`OWNER_TTL`, 30 seconds), so a process that starts beside live workers never
+once that process's heartbeat has lapsed (`owner_ttl`, 30 seconds; the reaper looks every `reaper_interval`, 30 seconds, so recovery after a crash takes at most 60 seconds; both are configurable), so a process that starts beside live workers never
 moves their in-flight jobs and never makes them run twice. Prefer a graceful stop (`SIGTERM`) in rolling deploys so
 jobs come back at once rather than after the heartbeat times out. (Workers from 0.5 share one
 `joobq:v1:processing:<queue>` list and publish no heartbeat; stop them before relying on 0.6 recovery — see the

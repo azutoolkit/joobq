@@ -76,6 +76,11 @@ module JoobQ
               retries_remaining: updated_job.retries,
               max_retries: max_retries
             )
+          elsif InFlight.abandoned?
+            # Another process reclaimed this claim (see `RedisStore#settle_claim`): it owns the job, so nothing is
+            # scheduled or dead-lettered here
+            Log.info &.emit("Failure of a claim reclaimed by another process; the job is not touched",
+              job_id: job.jid.to_s, queue: queue.name)
           elsif updated_job.retrying?
             # The retry was attempted (the job was marked retrying) but could not be stored: do not lose the job.
             Log.error &.emit("Job retry could not be stored, moving the job to the dead letter queue",
@@ -98,6 +103,7 @@ module JoobQ
       private def move_to_dead_letter(job : JoobQ::Job, queue : BaseQueue, error_context)
         # Move job from processing to dead letter queue
         updated_job = ExponentialBackoff.move_to_dead_letter(job, queue)
+        return if InFlight.abandoned? # reclaimed by another process: nothing was dead-lettered
 
         Log.info &.emit("Job moved to dead letter queue with error information",
           job_id: updated_job.jid.to_s,

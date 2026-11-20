@@ -72,6 +72,14 @@ module JoobQ
         validate_time_span(dead_letter_ttl.as_s)
       end
 
+      if owner_ttl = settings["owner_ttl"]?
+        validate_time_span(owner_ttl.as_s)
+      end
+
+      if reaper_interval = settings["reaper_interval"]?
+        validate_time_span(reaper_interval.as_s)
+      end
+
       if timezone = settings["timezone"]?
         validate_timezone(timezone.as_s)
       end

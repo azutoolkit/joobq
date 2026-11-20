@@ -174,6 +174,11 @@ class JoobQ::RedisStore
     return false if @@spec_cleanup_fails
     previous_def
   end
+
+  def cleanup_job(job_json : String, queue_name : String) : Bool
+    return false if @@spec_cleanup_fails
+    previous_def
+  end
 end
 
 module JoobQ
@@ -188,6 +193,20 @@ module JoobQ
 
     def perform
       RAN.add(1)
+    end
+  end
+
+  class RetainFailJob
+    include JoobQ::Job
+
+    def initialize(queue : String = "retain_unused", retries : Int32 = 0)
+      @queue = queue
+      @retries = retries
+      @max_retries = retries
+    end
+
+    def perform
+      raise "boom"
     end
   end
 
@@ -227,6 +246,52 @@ module JoobQ
       redis.llen(Keys.processing(name, store.owner_id)).should eq(0)
       redis.llen(Keys.queue(name)).should eq(1) # run again: at-least-once
       store.redrive_retained.moved.should eq(0)
+    end
+
+    # The failure outcome is one script that writes the retry or dead letter AND takes the claim copy off the list, so
+    # a cleanup that fails afterwards (Redis away) has nothing to retain and nothing to re-drive.
+    it "does not run a dead-lettered job again when the cleanup after it fails" do
+      RedisStore.spec_cleanup_fails = true
+      queue = Queue(RetainFailJob).new(name, 1)
+      JoobQ.queues[name] = queue.not_nil!
+      queue.not_nil!.start
+      dead_before = DeadLetterQueue.new(redis).count
+      job = RetainFailJob.new(name)
+      JoobQ.enqueue(name, job.to_json)
+
+      eventually { DeadLetterQueue.new(redis).count > dead_before }.should be_true
+      eventually { InFlight.count == 0 }.should be_true
+      queue.not_nil!.stop!
+      RedisStore.spec_cleanup_fails = false
+      InFlight.retained.should be_empty
+      store.redrive_retained.moved.should eq(0)
+      redis.llen(Keys.queue(name)).should eq(0)
+      redis.llen(Keys.processing(name, store.owner_id)).should eq(0)
+      redis.hget(Keys.stat("processed"), name).should eq("1") # counted by the failure outcome itself
+      redis.zrange(Keys::DEAD_LETTER, 0, -1).each { |entry| redis.zrem(Keys::DEAD_LETTER, entry) if entry.to_s.includes?(name) }
+      redis.del(Keys::DEAD_LETTER_COUNTS)
+      redis.hdel(Keys.stat("processed"), name)
+      redis.hdel(Keys.stat("dead_letter"), name)
+    end
+
+    it "does not run a retried job a third time when the cleanup after it fails" do
+      RedisStore.spec_cleanup_fails = true
+      queue = Queue(RetainFailJob).new(name, 1)
+      JoobQ.queues[name] = queue.not_nil!
+      queue.not_nil!.start
+      job = RetainFailJob.new(name, retries: 1)
+      JoobQ.enqueue(name, job.to_json)
+
+      eventually { redis.zrange(RedisStore::DELAYED_SET, 0, -1).any? { |entry| entry.to_s.includes?(job.jid.to_s) } }.should be_true
+      eventually { InFlight.count == 0 }.should be_true
+      queue.not_nil!.stop!
+      RedisStore.spec_cleanup_fails = false
+      InFlight.retained.should be_empty
+      store.redrive_retained.moved.should eq(0)
+      redis.llen(Keys.queue(name)).should eq(0) # only the scheduled retry will run it again
+      redis.zrange(RedisStore::DELAYED_SET, 0, -1).each { |entry| redis.zrem(RedisStore::DELAYED_SET, entry) if entry.to_s.includes?(name) }
+      redis.hdel(Keys.stat("processed"), name)
+      redis.hdel(Keys.stat("retries"), name)
     end
 
     it "reads a 0.6 job (no format version) through a worker, and finishes it" do

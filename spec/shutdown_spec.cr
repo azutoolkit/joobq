@@ -27,12 +27,6 @@ module JoobQ
   end
 end
 
-class JoobQ::Worker(T)
-  def test_unparseable(job_json : String, error : Exception) : Nil
-    handle_unparseable_job(job_json, error)
-  end
-end
-
 PROBE_BINARY = File.join(Dir.tempdir, "joobq-shutdown-probe-#{Random::Secure.hex(4)}")
 Spec.after_suite { File.delete?(PROBE_BINARY) }
 
@@ -62,7 +56,7 @@ def with_probe(mode : String, extra = {} of String => String, &)
       process.signal(Signal::KILL) rescue nil
       process.wait rescue nil
     end
-    redis.del(JoobQ::Keys.queue(queue), "joobq:v1:processing:#{queue}")
+    redis.del(JoobQ::Keys.queue(queue), JoobQ::Keys.processing(queue, "#{System.hostname}:#{process.pid}"))
     FileUtils.rm_rf(dir)
   end
 end
@@ -84,24 +78,6 @@ def wait_for_files(dir : String, prefix : String, count : Int32) : Nil
 end
 
 module JoobQ
-  # Jobs in processing for a queue across every process's own list (`joobq:v1:processing:<queue>:<owner>`) and the
-  # legacy shared list. The probe runs in another process, so its list key carries a pid this spec does not know.
-  def self.processing_depth(redis, queue : String) : Int64
-    prefix = "joobq:v1:processing:#{queue}"
-    total = 0_i64
-    cursor = 0_i64
-    loop do
-      result = redis.scan(cursor, match: "#{prefix}*", count: 100)
-      cursor = result[0].as(String).to_i64
-      result[1].as(Array).each do |key|
-        key_str = key.as(String)
-        total += redis.llen(key_str) if key_str == prefix || key_str.starts_with?("#{prefix}:")
-      end
-      break if cursor == 0
-    end
-    total
-  end
-
   describe "orderly shutdown" do
     it "compiles forge and signal shutdown without any concrete job or queue types" do
       # Compile in a separate program: spec_helper registers concrete queues,
@@ -190,6 +166,8 @@ module JoobQ
         queue = JoobQ.queues["example"]
         job = ExampleJob.new
         job.retries = retries
+        owned_list = JoobQ::Keys.processing("example", JoobQ.store.as(JoobQ::RedisStore).owner_id)
+        JoobQ.store.as(JoobQ::RedisStore).redis.rpush(owned_list, job.to_json) # a claim is the copy in the process's own list
         token = InFlight.claimed("example", [job.to_json]).first
         done = Channel(Nil).new
         spawn do
@@ -203,6 +181,7 @@ module JoobQ
         sleep 30.milliseconds
         InFlight.abandon_all if abandon
         done.receive
+        JoobQ.store.as(JoobQ::RedisStore).redis.del(owned_list)
         job.jid.to_s
       end
 
@@ -241,8 +220,10 @@ module JoobQ
       after_each { InFlight.clear }
 
       # Runs the block in a fiber that runs a claimed job, abandoning the claim first when asked.
-      run_claimed = ->(abandon : Bool, body : -> Nil) do
-        token = InFlight.claimed("example", ["{}"]).first
+      run_claimed = ->(abandon : Bool, body : -> Nil, raw : String) do
+        owned_list = JoobQ::Keys.processing("example", JoobQ.store.as(JoobQ::RedisStore).owner_id)
+        JoobQ.store.as(JoobQ::RedisStore).redis.rpush(owned_list, raw) # a claim is the copy in the process's own list
+        token = InFlight.claimed("example", [raw]).first
         ready = Channel(Nil).new
         go = Channel(Nil).new
         done = Channel(Nil).new
@@ -261,6 +242,7 @@ module JoobQ
         InFlight.abandon_all if abandon
         go.send(nil)
         done.receive
+        JoobQ.store.as(JoobQ::RedisStore).redis.del(owned_list)
       end
 
       it "settle is true for a fiber that runs no claimed job" do
@@ -290,7 +272,7 @@ module JoobQ
 
       it "settle after an abandonment answers false, once" do
         saw = Channel(Bool).new(1)
-        run_claimed.call(true, -> { saw.send(InFlight.settle); nil })
+        run_claimed.call(true, -> { saw.send(InFlight.settle); nil }, "{}")
         saw.receive.should be_false
       end
 
@@ -308,7 +290,7 @@ module JoobQ
         run_claimed.call(false, -> do
           JoobQ::Middleware::Retry.new.call(job, queue, "w", Proc(Nil).new { raise "boom" })
           nil
-        end)
+        end, "{}")
         taken.should be_empty
         scheduled = redis.zrange("joobq:v1:delayed_jobs", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
         scheduled.size.should eq(1)
@@ -327,7 +309,7 @@ module JoobQ
             run_claimed.call(abandon, -> do
               ErrorHandler.handle_job_error(job, queue, Exception.new("bad"), "w", schedule: true)
               nil
-            end)
+            end, "{}")
             sleep 300.milliseconds
             seen = [] of String
             loop do
@@ -364,7 +346,7 @@ module JoobQ
           run_claimed.call(abandon, -> do
             JoobQ::Middleware::Timeout.new.call(job, queue, "w", -> { })
             nil
-          end)
+          end, "{}")
           dead = redis.zrange("joobq:v1:dead_letter", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
           dead.empty?.should eq(abandon)
           redis.zrem("joobq:v1:dead_letter", dead) unless dead.empty?
@@ -380,7 +362,7 @@ module JoobQ
           run_claimed.call(abandon, -> do
             worker.test_unparseable("{\"jid\": \"not-a-job", Exception.new("bad json"))
             nil
-          end)
+          end, "{\"jid\": \"not-a-job")
           (redis.zcard("joobq:v1:dead_letter") - before).should eq(abandon ? 0 : 1)
         end
         redis.zremrangebyscore("joobq:v1:dead_letter", "-inf", "+inf")
@@ -553,7 +535,7 @@ module JoobQ
           (Time.instant - started).should be < 14.seconds
           File.exists?(File.join(dir, "done")).should be_true
           redis.llen(JoobQ::Keys.queue(queue)).should eq(0)
-          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
+          JoobQ.processing_depth(redis, queue).should eq(0)
         end
       end
 
@@ -567,7 +549,7 @@ module JoobQ
           (Time.instant - started).should be < 8.seconds
 
           redis.llen(JoobQ::Keys.queue(queue)).should eq(5)
-          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
+          JoobQ.processing_depth(redis, queue).should eq(0)
           sleep 500.milliseconds # nothing is left to run them again
           files = Dir.glob(File.join(dir, "started-*"))
           files.size.should eq(5)
@@ -651,7 +633,7 @@ module JoobQ
           File.exists?(File.join(dir, "raised")).should be_true
           redis.zrange("joobq:v1:delayed_jobs", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
           redis.zrange("joobq:v1:dead_letter", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
-          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
+          JoobQ.processing_depth(redis, queue).should eq(0)
         end
       end
 
@@ -661,7 +643,7 @@ module JoobQ
           File.exists?(File.join(dir, "finished")).should be_true # the abandoned execution did finish
           File.read(File.join(dir, "completed-events")).should eq("0")
           redis.llen(JoobQ::Keys.queue(queue)).should eq(1) # the requeued copy is untouched
-          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
+          JoobQ.processing_depth(redis, queue).should eq(0)
           redis.hget("joobq:v1:stats:processed", queue).should be_nil
         end
       end

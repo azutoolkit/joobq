@@ -199,25 +199,19 @@ module JoobQ
     end
 
     describe "worker restart race conditions" do
-      it "handles worker crashes during job processing" do
-        queue = Queue(ExampleJob).new("example", 3)
+      it "loses no job and leaves none in a processing list when the queue is stopped with jobs claimed" do
         store = JoobQ.store.as(RedisStore)
+        queue = Queue(ExampleJob).new("example", 3)
 
-        # Add jobs
         5.times { |i| store.enqueue(ExampleJob.new(i)) }
-
         queue.start
         sleep 0.5.seconds
-
-        # Simulate worker crash (force stop without cleanup)
         queue.stop!
 
-        # Jobs might be in processing queue
-        processing_size = store.redis.llen("joobq:v1:processing:example")
-
-        # All jobs should eventually be recovered
-        # (This tests dead job recovery mechanisms)
-        processing_size.should be >= 0
+        # every job either ran or is back on its queue; none is stuck in this process's list
+        JoobQ.processing_depth(store.redis, "example").should eq(0)
+        completed = store.redis.hget(Keys.stat("completed"), "example").try(&.to_i64) || 0_i64
+        (store.queue_size("example") + completed).should eq(5)
       end
     end
 

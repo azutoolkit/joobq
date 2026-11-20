@@ -127,6 +127,15 @@ def row_errors(page_text, label, manifest, source, required):
     return []
 
 
+PRO_NOT_CHECKED = "Pro row not checked (no joobq-pro checkout)"
+
+
+def pro_manifest(root, pro_checkout=None):
+    """shard.yml of a joobq-pro checkout (the given one, JOOBQ_PRO_CHECKOUT, or a sibling of the repository), or None."""
+    manifest = Path(pro_checkout or os.environ.get("JOOBQ_PRO_CHECKOUT") or root.parent / "joobq-pro") / "shard.yml"
+    return manifest if manifest.is_file() else None
+
+
 def compatibility_errors(root, pro_checkout=None):
     """docs/reference/compatibility.md names the shard.yml version of JoobQ (Core), and of JoobQ Pro when its checkout is at hand."""
     manifest = root / "shard.yml"
@@ -135,8 +144,8 @@ def compatibility_errors(root, pro_checkout=None):
         return []
     text = page.read_text()
     errors = row_errors(text, "JoobQ (Core)", manifest, "shard.yml", True)
-    pro = Path(pro_checkout or os.environ.get("JOOBQ_PRO_CHECKOUT") or root.parent / "joobq-pro") / "shard.yml"
-    if pro.is_file():
+    pro = pro_manifest(root, pro_checkout)
+    if pro:
         errors += row_errors(text, "JoobQ Pro", pro, "joobq-pro/shard.yml", False)
     return errors
 
@@ -234,6 +243,8 @@ def main():
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
+    if not pro_manifest(args.root.resolve()):
+        print(f"NOTE {PRO_NOT_CHECKED}: joobq-pro is private, so CI cannot check the version of the JoobQ Pro row of docs/reference/compatibility.md")
     print("PASS GitBook navigation, links, markup, and executable examples")
     return 0
 

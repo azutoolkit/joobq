@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_docs import anchors, check, compatibility_errors, gitbook_errors, landing_errors, markup_errors, nodoc_errors
+from check_docs import anchors, check, compatibility_errors, gitbook_errors, landing_errors, markup_errors, nodoc_errors, pro_manifest
 
 
 class DocumentationChecks(unittest.TestCase):
@@ -64,6 +64,8 @@ class DocumentationChecks(unittest.TestCase):
             page.write_text('| JoobQ (Core) | 0.7.2 | `joobq/shard.yml` |\n| JoobQ Pro | 0.7.5, needs `joobq >= 0.7.2` | `joobq-pro/shard.yml` |\n')
             self.assertEqual([], compatibility_errors(root, pro))
             self.assertEqual([], compatibility_errors(root, Path(directory) / 'absent'))
+            self.assertEqual(pro / 'shard.yml', pro_manifest(root, pro))
+            self.assertIsNone(pro_manifest(root, Path(directory) / 'absent'))
 
     def test_nodoc_must_start_its_comment(self):
         with tempfile.TemporaryDirectory() as directory:

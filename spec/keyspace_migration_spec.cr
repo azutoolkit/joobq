@@ -194,6 +194,68 @@ module JoobQ
         redis.llen(Keys.queue(queue)).should eq(3)
       end
 
+      it "keeps the waiting jobs of a queue named like a transient key, whose v1 list already exists" do
+        names = ["events", "workers", "worker:x", "delivery-bridge:q", "events:trim_lock"]
+        begin
+          names.each do |name|
+            redis.rpush(name, "#{name} old 1", "#{name} old 2")
+            redis.rpush(Keys.queue(name), "#{name} new")
+          end
+
+          report = JoobQ.migrate_keyspace!(queues: names)
+
+          report.skipped.should be_empty
+          names.each do |name|
+            redis.lrange(Keys.queue(name), 0, -1).map(&.to_s).should eq(["#{name} old 1", "#{name} old 2", "#{name} new"])
+            redis.exists(name).should eq(0)
+          end
+          report.merged.should be >= names.size
+        ensure
+          redis.del(names + names.map { |name| Keys.queue(name) })
+        end
+      end
+
+      it "renames the list of a queue named like a transient key when no v1 list exists" do
+        names = ["events", "workers", "worker:x", "delivery-bridge:q"]
+        begin
+          names.each { |name| redis.rpush(name, "#{name} 1", "#{name} 2") }
+
+          report = JoobQ.migrate_keyspace!(queues: names)
+
+          report.skipped.should be_empty
+          names.each do |name|
+            redis.lrange(Keys.queue(name), 0, -1).map(&.to_s).should eq(["#{name} 1", "#{name} 2"])
+            redis.exists(name).should eq(0)
+          end
+        ensure
+          redis.del(names + names.map { |name| Keys.queue(name) })
+        end
+      end
+
+      it "still drops every stale legacy transient key under joobq: when the new one exists" do
+        keys = {
+          "joobq:events"            => Keys::EVENTS,
+          "joobq:events:trim_lock"  => Keys::EVENTS_TRIM_LOCK,
+          "joobq:workers"           => Keys::WORKERS,
+          "joobq:worker:x"          => Keys.worker("x"),
+          "joobq:delivery-bridge:q" => Keys.delivery_bridge("q"),
+        }
+        begin
+          keys.each do |old, new|
+            redis.set(old, "old")
+            redis.set(new, "new")
+          end
+
+          report = JoobQ.migrate_keyspace!(queues: [] of String)
+
+          report.skipped.should be_empty
+          existing.call(keys.keys).should eq(0)
+          keys.each_value { |new| redis.get(new).should eq("new") }
+        ensure
+          redis.del(keys.keys + keys.values)
+        end
+      end
+
       it "leaves a pair of keys of different types where they are, and lists the old one" do
         redis.set(Keys.queue(queue), "not a list")
 

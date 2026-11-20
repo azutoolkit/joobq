@@ -82,10 +82,11 @@ module JoobQ
     # put the old items at the head of the new list, in their order, so no waiting job is stranded; any other value
     # keeps the new one.
     private def self.merge(redis : Redis::PooledClient, old : String, new : String) : Bool
-      family = old.lchop(OLD_PREFIX)
+      # nil for a bare queue list: its name is the user's, so a queue called `events` is not JoobQ's events stream
+      family = old.lchop?(OLD_PREFIX)
       type = redis.type(old)
       return true if type == "none" # gone
-      if TRANSIENT.matches?(family)
+      if family && TRANSIENT.matches?(family)
         redis.del(old)
         return true
       end
@@ -99,7 +100,7 @@ module JoobQ
       when "zset"
         redis.command(["ZUNIONSTORE", new, "2", new, old, "AGGREGATE", "MAX"])
       when "hash"
-        merge_hash(redis, old, new, COUNTERS.matches?(family))
+        merge_hash(redis, old, new, !family.nil? && COUNTERS.matches?(family))
         return true # the script deleted *old* with the merge
       end
       redis.del(old)

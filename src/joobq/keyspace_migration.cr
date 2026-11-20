@@ -80,10 +80,10 @@ module JoobQ
     # *old* into it and deletes *old*, or returns false (nothing changed) when the two are of different types.
     # Transient keys are stale and dropped; sorted sets are united (the later score wins); counters add up; lists
     # put the old items at the head of the new list, in their order, so no waiting job is stranded; any other value
-    # keeps the new one.
+    # keeps the new one. Only a key that `new_name` maps to *new* is a `joobq:` key of 0.6: a bare queue list maps to
+    # `Keys.queue`, so a queue named `events` or `joobq:events` is merged like any list, never dropped.
     private def self.merge(redis : Redis::PooledClient, old : String, new : String) : Bool
-      # nil for a bare queue list: its name is the user's, so a queue called `events` is not JoobQ's events stream
-      family = old.lchop?(OLD_PREFIX)
+      family = (old.lchop(OLD_PREFIX) if new_name(old) == new)
       type = redis.type(old)
       return true if type == "none" # gone
       if family && TRANSIENT.matches?(family)

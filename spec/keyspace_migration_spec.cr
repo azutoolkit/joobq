@@ -195,7 +195,7 @@ module JoobQ
       end
 
       it "keeps the waiting jobs of a queue named like a transient key, whose v1 list already exists" do
-        names = ["events", "workers", "worker:x", "delivery-bridge:q", "events:trim_lock"]
+        names = ["events", "workers", "worker:x", "delivery-bridge:q", "events:trim_lock", "processing-owners"]
         begin
           names.each do |name|
             redis.rpush(name, "#{name} old 1", "#{name} old 2")
@@ -209,9 +209,45 @@ module JoobQ
             redis.lrange(Keys.queue(name), 0, -1).map(&.to_s).should eq(["#{name} old 1", "#{name} old 2", "#{name} new"])
             redis.exists(name).should eq(0)
           end
-          report.merged.should be >= names.size
+          report.merged.should eq(names.size)
         ensure
           redis.del(names + names.map { |name| Keys.queue(name) })
+        end
+      end
+
+      it "keeps the waiting jobs of a queue named like a legacy joobq: key, whose v1 list already exists" do
+        names = ["joobq:events", "joobq:workers"]
+        begin
+          redis.del(names) # the seed wrote JoobQ's own stream and zset under these names
+          names.each do |name|
+            redis.rpush(name, "#{name} old 1", "#{name} old 2")
+            redis.rpush(Keys.queue(name), "#{name} new")
+          end
+
+          report = JoobQ.migrate_keyspace!(queues: names)
+
+          report.skipped.should be_empty
+          report.merged.should eq(names.size)
+          names.each do |name|
+            redis.lrange(Keys.queue(name), 0, -1).map(&.to_s).should eq(["#{name} old 1", "#{name} old 2", "#{name} new"])
+            redis.exists(name).should eq(0)
+          end
+        ensure
+          redis.del(names + names.map { |name| Keys.queue(name) } + [Keys::EVENTS, Keys::WORKERS])
+        end
+      end
+
+      it "leaves a key named like a family alone when it is not a list, even if the queue is named" do
+        begin
+          redis.set("events", "not a queue")
+
+          report = JoobQ.migrate_keyspace!(queues: ["events"])
+
+          report.skipped.should be_empty
+          redis.get("events").should eq("not a queue")
+          redis.exists(Keys.queue("events")).should eq(0)
+        ensure
+          redis.del("events")
         end
       end
 

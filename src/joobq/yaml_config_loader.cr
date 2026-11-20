@@ -236,7 +236,8 @@ module JoobQ
       merged.pipeline_max_commands = base.pipeline_max_commands
       merged.rest_api_enabled = base.rest_api_enabled?
       merged.stats_enabled = base.stats_enabled?
-      merged.time_location = base.time_location.name
+      source = override.time_location_configured? ? override : base
+      merged.time_location = source.time_location if source.time_location_configured?
 
       # Merge queues (override takes precedence)
       base.queues.each { |name, queue| merged.queues[name] = queue }

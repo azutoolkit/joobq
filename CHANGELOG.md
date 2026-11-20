@@ -28,6 +28,13 @@
 
 ### Fixed
 
+- **The `timezone` setting applies, and no longer changes the process zone (#44).** `config.time_location = "UTC"`
+  (also YAML `timezone` and `JOOBQ_TIMEZONE`) used to set the process-wide `Time::Location.local` and never store the
+  zone, so `config.time_location` and every `Scheduler.new` default stayed `America/New_York`. It now stores the zone for
+  JoobQ's own cron computations and leaves `Time::Location.local` alone; it also takes a `Time::Location`. Merging YAML
+  sources keeps the zone of the last source that set one. Code that relied on the process zone changing must set
+  `Time::Location.local` itself.
+
 - **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the
   worker could not remove the job's copy from its own processing list (or could not store a failure), and nothing
   returned the copy until the process was restarted: the heartbeat that protects the list came back by itself. The

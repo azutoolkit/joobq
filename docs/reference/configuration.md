@@ -20,7 +20,7 @@ description: Every JoobQ Core setting (JoobQ.configure properties, YAML keys, JO
 | `worker_batch_size` | `Int32` | `10` | 1 to 1000; jobs one worker holds at once |
 | `rest_api_enabled` | `Bool` | `false` | Starts the management API in `forge` |
 | `stats_enabled` | `Bool` | `true` | |
-| `time_location` | `Time::Location` | `America/New_York` | Time zone of `scheduler` cron patterns |
+| `time_location` | `Time::Location` | `America/New_York` | Time zone of `scheduler` cron patterns; set by `timezone` in YAML or `JOOBQ_TIMEZONE`. The process zone, `Time::Location.local`, is never changed |
 | `reaper_interval`, `reaper_scan_limit` | `Time::Span`, `Int32` | `30.seconds`, `1000` | Expired-job reaper |
 | `pipeline_batch_size`, `pipeline_timeout`, `pipeline_max_commands` | `Int32`, `Float64`, `Int32` | `100`, `1.0`, `1000` | Batch size ≤ max commands |
 | `middlewares` | `Array(Middleware)` | `[Throttle, Retry, Timeout]` | Add Pro middleware here |

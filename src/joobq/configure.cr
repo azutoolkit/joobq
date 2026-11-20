@@ -28,7 +28,11 @@ module JoobQ
     # The one queue registry, shared with `JoobQ.queues` and `QueueFactory.queues` (the same Hash, not a copy).
     getter queues = {} of String => BaseQueue
     getter queue_configs = {} of String => NamedTuple(job_class_name: String, workers: Int32, throttle: NamedTuple(limit: Int32, period: Time::Span)?)
+    # The zone JoobQ's own time computations use (cron patterns of the scheduler DSL). The process zone,
+    # `Time::Location.local`, is never touched.
     getter time_location : Time::Location = Time::Location.load("America/New_York")
+    # True once a configuration source set `time_location`, so merging sources keeps the zone one of them chose.
+    property? time_location_configured : Bool = false
 
     property store : Store = RedisStore.from_env
     # True once a configuration source (a YAML `redis` section) chose the store, as opposed to the default built from
@@ -194,11 +198,14 @@ module JoobQ
       yield middlewares
     end
 
-    # Set the time location globally
+    # Sets the zone of JoobQ's cron patterns and `Scheduler` defaults, by IANA name. Does not change the process zone.
     def time_location=(tz : String = "America/New_York") : Time::Location
-      timezone = Time::Location.load(tz)
-      Time::Location.local = timezone
-      timezone
+      self.time_location = Time::Location.load(tz)
+    end
+
+    def time_location=(zone : Time::Location) : Time::Location
+      @time_location_configured = true
+      @time_location = zone
     end
 
     # Macro: Define a queue

@@ -83,7 +83,7 @@ Every failure was only logged. To keep retries, make the recurring callback enqu
 | `Job.delay(for:, **args)`, `Job.enqueue_at(span, **args)` | `Time::Span` | none | One job, due after the span; both take a span, not a `Time` |
 | `Job.schedule(every:, **args)` | `Time::Span` | none | Calls `perform` every span in this process, first call at once |
 | `config.scheduler { every ...; cron "..." { } }` | DSL | none | Interval and cron loops in this process |
-| `config.time_location` | `Time::Location` | `America/New_York` | Time zone of the scheduler DSL's cron patterns |
+| `config.time_location` | `Time::Location` | `America/New_York` | Time zone of the scheduler DSL's cron patterns (set by YAML `timezone`); the process zone is not changed |
 | YAML `schedulers:` | YAML | none | Loaded, never fired by Core; fired by `joobqui-selfhosted --worker` |
 | Pro `overlap` | `OverlapPolicy` | `Skip` | `Skip`, `BufferOne`, `AllowAll` or `CancelPrevious` when the previous run is still open |
 | Pro `catchup_window_ms` | `Int64` | `60000` | How late a missed fire time may still start |

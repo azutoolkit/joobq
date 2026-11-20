@@ -13,8 +13,10 @@ describe JoobQ do
   it "registers recurring jobs at specific time" do
     jobs = JoobQ.config.schedulers.first.cron_scheduler.jobs
 
-    jobs["*/30 * * * *:America/New_York"].should_not be_nil
-    jobs["*/5 20-23 * * *:America/New_York"].should_not be_nil
+    # config/joobq.test.yml says `timezone: "UTC"`, and the scheduler's default zone now follows it
+    JoobQ.config.time_location.name.should eq("UTC")
+    jobs["*/30 * * * *:UTC"].should_not be_nil
+    jobs["*/5 20-23 * * *:UTC"].should_not be_nil
     # jobs[ExampleJob.name].should_not be_nil
   end
 end

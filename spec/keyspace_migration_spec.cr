@@ -154,6 +154,35 @@ module JoobQ
         existing.call(["joobq:delayed_jobs", "joobq:dead_letter", "joobq:stats:processed", "joobq:queue:#{queue}:config"]).should eq(0)
       end
 
+      it "adds a counter once, however often the migration runs, and never raises on a non-integer field" do
+        redis.hset(Keys.stat("processed"), queue, 3)
+        redis.hset(Keys.stat("processed"), "text", "not a number") # in the new hash
+        redis.hset("joobq:stats:processed", "text", "5")           # numeric in the old one: the new value stays
+        redis.hset("joobq:stats:processed", "other", "word")       # not numeric in the old one: kept only if absent
+        redis.hset(Keys.stat("processed"), "other", "9")
+
+        JoobQ.migrate_keyspace!(queues: [queue])
+        JoobQ.migrate_keyspace!(queues: [queue])
+
+        redis.hget(Keys.stat("processed"), queue).should eq("10") # 3 + 7, once
+        redis.hget(Keys.stat("processed"), "text").should eq("not a number")
+        redis.hget(Keys.stat("processed"), "other").should eq("9")
+        redis.exists("joobq:stats:processed").should eq(0)
+      end
+
+      it "merges a hash and deletes the old one in a single step, so an interrupted run cannot add twice" do
+        redis.hset("joobq:stats:processed", "a", "4")
+        redis.hset(Keys.stat("processed"), "a", "1")
+
+        Keyspace.merge_hash(redis, "joobq:stats:processed", Keys.stat("processed"), true)
+
+        redis.hget(Keys.stat("processed"), "a").should eq("5")
+        redis.exists("joobq:stats:processed").should eq(0)
+        # a second call finds nothing left to add
+        Keyspace.merge_hash(redis, "joobq:stats:processed", Keys.stat("processed"), true)
+        redis.hget(Keys.stat("processed"), "a").should eq("5")
+      end
+
       it "is still idempotent after a merge" do
         redis.rpush(Keys.queue(queue), "already here")
         JoobQ.migrate_keyspace!(queues: [queue])

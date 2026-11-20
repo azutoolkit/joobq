@@ -1,9 +1,9 @@
 module JoobQ
   # Redis metrics collection and statistics
   class RedisMetrics
-    DELAYED_SET      = "joobq:delayed_jobs"
-    DEAD_LETTER      = "joobq:dead_letter"
-    PROCESSING_QUEUE = "joobq:processing"
+    DELAYED_SET      = Keys::DELAYED_JOBS
+    DEAD_LETTER      = Keys::DEAD_LETTER
+    PROCESSING_QUEUE = Keys::PROCESSING
 
     def initialize(@redis : Redis::PooledClient)
     end
@@ -38,7 +38,7 @@ module JoobQ
           pipe.llen(processing_queue(queue_name))             # Processing size
           pipe.zcard("#{Keys.queue(queue_name)}:failed")      # Failed count
           pipe.zcard("#{Keys.queue(queue_name)}:dead_letter") # Dead letter count
-          pipe.hget("joobq:stats:processed", queue_name)      # Processed count
+          pipe.hget(Keys.stat("processed"), queue_name)       # Processed count
         end
       end
 
@@ -92,10 +92,10 @@ module JoobQ
         pipe.zcard(DEAD_LETTER)
 
         # Global statistics
-        pipe.hget("joobq:stats:total_processed", "global")
-        pipe.hget("joobq:stats:total_completed", "global")
-        pipe.hget("joobq:stats:total_retries", "global")
-        pipe.hget("joobq:stats:total_dead_letter", "global")
+        pipe.hget(Keys.stat("total_processed"), "global")
+        pipe.hget(Keys.stat("total_completed"), "global")
+        pipe.hget(Keys.stat("total_retries"), "global")
+        pipe.hget(Keys.stat("total_dead_letter"), "global")
       end
 
       result_index = 0
@@ -133,7 +133,7 @@ module JoobQ
     def get_processing_jobs_count : Int32
       # Use Lua script to efficiently count all processing jobs
       lua_script = <<-LUA
-        local keys = redis.call('KEYS', 'joobq:processing:*')
+        local keys = redis.call('KEYS', ARGV[1])
         local total_count = 0
 
         for i = 1, #keys do
@@ -148,7 +148,7 @@ module JoobQ
         return total_count
       LUA
 
-      @redis.eval(lua_script, [] of String, [] of String).as(Int64).to_i
+      @redis.eval(lua_script, [] of String, ["#{PROCESSING_QUEUE}:*"]).as(Int64).to_i
     rescue ex
       Log.warn &.emit("Error getting processing jobs count", error: ex.message)
       0
@@ -217,7 +217,7 @@ module JoobQ
         when "retrying"
           pipe.echo("0") # Placeholder - handled separately
         when "failed"
-          pipe.zcard("joobq:failed_jobs")
+          pipe.zcard(Keys::FAILED_JOBS)
         when "dead"
           pipe.zcard(DEAD_LETTER)
         when "queued"

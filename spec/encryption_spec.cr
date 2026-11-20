@@ -325,7 +325,7 @@ module JoobQ
           DeadLetterQueue.new(redis).count.should eq 0
           # claimed and put back whole: either in the queue or, for a moment, claimed again
           eventually { redis.llen(JoobQ::Keys.queue("secrets")) + JoobQ.store.processing_queue_size("secrets") == 1 }.should be_true
-          redis.hget("joobq:stats:processed", "secrets").should be_nil # a bounce is not a processed job
+          redis.hget("joobq:v1:stats:processed", "secrets").should be_nil # a bounce is not a processed job
           redis_dump(redis).should contain("jqe1:a1:")
         ensure
           Encryption.key_backoff = 5.seconds

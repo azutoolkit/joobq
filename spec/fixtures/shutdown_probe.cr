@@ -88,7 +88,7 @@ when "failing", "succeeding"
 when "retained"
   store = JoobQ.store.as(JoobQ::RedisStore)
   job = ProbeJob.new.to_json
-  store.redis.lpush("joobq:processing:#{ENV["PROBE_QUEUE"]}:#{store.owner_id}", job)
+  store.redis.lpush("joobq:v1:processing:#{ENV["PROBE_QUEUE"]}:#{store.owner_id}", job)
   token = JoobQ::InFlight.claimed(ENV["PROBE_QUEUE"], [job]).first
   JoobQ::InFlight.begin_run(token)
   JoobQ::InFlight.finished(token)

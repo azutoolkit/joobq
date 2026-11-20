@@ -6,8 +6,8 @@ module JoobQ
   # Each state change is one atomic Lua step, so two operators can never redrive
   # or purge the same entry twice.
   class DeadLetterQueue
-    KEY    = "joobq:dead_letter"
-    COUNTS = "joobq:dead_letter:counts" # entries per queue, kept by the scripts below
+    KEY    = Keys::DEAD_LETTER
+    COUNTS = Keys::DEAD_LETTER_COUNTS # entries per queue, kept by the scripts below
     CHUNK  = 200
 
     # Entries whose JSON has no queue are counted under this name, so the counts always add up to the set.
@@ -166,7 +166,7 @@ module JoobQ
         if !entry.redrivable?
           tally.unredrivable << entry.jid
         else
-          case @redis.eval(REDRIVE, [KEY, Keys.queue(entry.queue), "joobq:retry_lock:#{entry.jid}", COUNTS], [entry.member, fresh_payload(entry), entry.queue])
+          case @redis.eval(REDRIVE, [KEY, Keys.queue(entry.queue), Keys.retry_lock(entry.jid), COUNTS], [entry.member, fresh_payload(entry), entry.queue])
           when  1 then tally.succeeded += 1
           when -1 then tally.unredrivable << entry.jid # its queue name is not a queue
           else         tally.conflicted << entry.jid
@@ -182,7 +182,7 @@ module JoobQ
       return Outcome.new(0, missing: [jid]) unless entry
       return Outcome.new(0, conflicted: [jid]) unless Digest::SHA256.hexdigest(entry.member) == expected_digest
       return Outcome.new(0, unredrivable: [jid]) unless entry.redrivable?
-      result = @redis.eval(REDRIVE, [KEY, Keys.queue(entry.queue), "joobq:retry_lock:#{entry.jid}", COUNTS], [entry.member, fresh_payload(entry), entry.queue])
+      result = @redis.eval(REDRIVE, [KEY, Keys.queue(entry.queue), Keys.retry_lock(entry.jid), COUNTS], [entry.member, fresh_payload(entry), entry.queue])
       case result
       when  1 then Outcome.new(1)
       when -1 then Outcome.new(0, unredrivable: [jid])

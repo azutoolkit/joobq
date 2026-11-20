@@ -45,7 +45,7 @@ module JoobQ
       queue.total_workers.should eq(original + 2)
     ensure
       queue.try(&.apply_concurrency(original.not_nil!)) if original
-      JoobQ.store.as(RedisStore).redis.del("joobq:queue:example:config")
+      JoobQ.store.as(RedisStore).redis.del(JoobQ::Keys.config("example"))
     end
 
     it "ignores a size that was set before the process started" do
@@ -58,7 +58,7 @@ module JoobQ
 
       queue.total_workers.should eq(original)
     ensure
-      JoobQ.store.as(RedisStore).redis.del("joobq:queue:example:config")
+      JoobQ.store.as(RedisStore).redis.del(JoobQ::Keys.config("example"))
     end
   end
 end

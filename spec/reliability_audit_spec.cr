@@ -114,7 +114,7 @@ module JoobQ
     end
 
     describe "A. claims of a crashed process" do
-      list_of = ->(queue : String, owner : String) { "joobq:processing:#{queue}:#{owner}" }
+      list_of = ->(queue : String, owner : String) { "joobq:v1:processing:#{queue}:#{owner}" }
 
       it "are not recovered while the crashed owner's last heartbeat is younger than 30 s, and go to the head once it is older" do
         crashed = "crashed-host:4242"
@@ -258,7 +258,7 @@ module JoobQ
         job = AuditMixedJob.new(true)
         job.retries = 2
         job.max_retries = 2
-        redis.lpush("joobq:processing:audit_mixed:#{flaky.owner_id}", job.to_json)
+        redis.lpush("joobq:v1:processing:audit_mixed:#{flaky.owner_id}", job.to_json)
 
         Middleware::Retry.new.call(job, queue, "w", Proc(Nil).new { raise "boom" })
 
@@ -266,7 +266,7 @@ module JoobQ
         audit_entries(redis, DeadLetterQueue::KEY, "audit_mixed").should be_empty
       ensure
         flaky.try(&.close)
-        redis.del("joobq:processing:audit_mixed:#{store.owner_id}")
+        redis.del("joobq:v1:processing:audit_mixed:#{store.owner_id}")
       end
 
       it "has no enqueue deduplication: the same job enqueued twice is queued twice" do

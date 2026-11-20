@@ -52,7 +52,7 @@ module JoobQ
     it "recovers an orphaned processing list of a YAML-only queue in one reaper pass" do
       name = fresh.call
       config.queue_configs[name] = {job_class_name: "ExampleJob", workers: 1, throttle: nil}
-      redis.lpush("joobq:processing:#{name}:host:dead", due_job.call(name))
+      redis.lpush("joobq:v1:processing:#{name}:host:dead", due_job.call(name))
       redis.zrem(RedisStore::OWNERS, "host:dead")
 
       ExpiredJobReaper.new(store: store).reap_once

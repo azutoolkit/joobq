@@ -30,10 +30,10 @@ module JoobQ
       store = JoobQ.config.store.as(RedisStore)
       job = ExampleJob.new(1)
       raw = job.to_json
-      store.redis.rpush("joobq:processing:example", raw)
+      store.redis.rpush("joobq:v1:processing:example", raw)
       store.redis.set(DeadLetterQueue::KEY, "wrong-type")
       expect_raises(Redis::Error) { store.move_to_dead_letter(job, "example") }
-      store.redis.lrange("joobq:processing:example", 0, -1).should eq([raw])
+      store.redis.lrange("joobq:v1:processing:example", 0, -1).should eq([raw])
     end
 
     it "propagates DLQ settlement failure to the worker boundary" do
@@ -55,7 +55,7 @@ module JoobQ
       worker.run
       eventually { store.redis.llen(JoobQ::Keys.queue("example")) == 0 }.should be_true
       eventually { worker.in_progress == 0 }.should be_true
-      store.redis.lrange("joobq:processing:example:#{store.owner_id}", 0, -1).should eq([raw])
+      store.redis.lrange("joobq:v1:processing:example:#{store.owner_id}", 0, -1).should eq([raw])
     ensure
       worker.try(&.terminate)
     end

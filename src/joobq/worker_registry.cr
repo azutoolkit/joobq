@@ -31,8 +31,8 @@ module JoobQ
   # an index entry, so crashed processes disappear on their own.
   class WorkerRegistry
     Log      = ::Log.for("WORKER_REGISTRY")
-    PREFIX   = "joobq:worker:"
-    INDEX    = "joobq:workers"
+    PREFIX   = "#{Keys::PREFIX}:worker:"
+    INDEX    = Keys::WORKERS
     INTERVAL = 10.seconds
     TTL      = 30.seconds
 

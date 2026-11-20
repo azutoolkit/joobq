@@ -97,11 +97,11 @@ module JoobQ
         3.times do |i|
           job = ExampleJob.new(i)
           job.dead!
-          store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job.to_json)
+          store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job.to_json)
         end
 
         # Get dead jobs
-        dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
+        dead_jobs = store.redis.zrange("joobq:v1:dead_letter", 0, -1)
         dead_jobs.size.should eq 3
 
         # Verify they're dead jobs
@@ -118,20 +118,20 @@ module JoobQ
         job1 = ExampleJob.new(1)
         job1.queue = "example"
         job1.dead!
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job1.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job1.to_json)
 
         job2 = Job1.new
         job2.queue = "single"
         job2.dead!
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job2.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job2.to_json)
 
         job3 = ExampleJob.new(3)
         job3.queue = "example"
         job3.dead!
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job3.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job3.to_json)
 
         # Filter by queue
-        all_dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
+        all_dead_jobs = store.redis.zrange("joobq:v1:dead_letter", 0, -1)
         example_queue_jobs = all_dead_jobs.select do |job_data|
           parsed = JSON.parse(job_data.as(String))
           parsed["queue"]?.try(&.as_s) == "example"
@@ -147,11 +147,11 @@ module JoobQ
         10.times do |i|
           job = ExampleJob.new(i)
           job.dead!
-          store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job.to_json)
+          store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job.to_json)
         end
 
         # Get with limit
-        limited_jobs = store.redis.zrange("joobq:dead_letter", 0, 4) # 0-4 = 5 jobs
+        limited_jobs = store.redis.zrange("joobq:v1:dead_letter", 0, 4) # 0-4 = 5 jobs
         limited_jobs.size.should eq 5
       end
     end
@@ -166,14 +166,14 @@ module JoobQ
         job.dead!
         job_jid = job.jid.to_s
 
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job.to_json)
 
         # Verify it's in dead letter
-        store.redis.zcard("joobq:dead_letter").should eq 1
+        store.redis.zcard("joobq:v1:dead_letter").should eq 1
         store.queue_size("example").should eq 0
 
         # Simulate retry (find and move the job)
-        dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
+        dead_jobs = store.redis.zrange("joobq:v1:dead_letter", 0, -1)
         job_to_retry = dead_jobs.find do |job_data|
           parsed = JSON.parse(job_data.as(String))
           parsed["jid"]?.try(&.as_s) == job_jid
@@ -186,12 +186,12 @@ module JoobQ
 
           # Move from dead letter to main queue using atomic operations
           store.redis.pipelined do |pipe|
-            pipe.zrem("joobq:dead_letter", job_to_retry.as(String))
+            pipe.zrem("joobq:v1:dead_letter", job_to_retry.as(String))
             pipe.lpush(JoobQ::Keys.queue(queue_name), job_to_retry.as(String))
           end
 
           # Verify move immediately (pipelined operations are atomic)
-          store.redis.zcard("joobq:dead_letter").should eq 0
+          store.redis.zcard("joobq:v1:dead_letter").should eq 0
           store.queue_size(queue_name).should eq 1
         end
       end
@@ -202,7 +202,7 @@ module JoobQ
         # Try to find a non-existent job
         fake_jid = UUID.random.to_s
 
-        dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
+        dead_jobs = store.redis.zrange("joobq:v1:dead_letter", 0, -1)
         job_found = dead_jobs.any? do |job_data|
           parsed = JSON.parse(job_data.as(String))
           parsed["jid"]?.try(&.as_s) == fake_jid
@@ -223,17 +223,17 @@ module JoobQ
         job2.queue = "single"
         job2.dead!
 
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job1.to_json)
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job2.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job1.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job2.to_json)
 
         # Verify initial state
-        store.redis.zcard("joobq:dead_letter").should eq 2
+        store.redis.zcard("joobq:v1:dead_letter").should eq 2
         store.queue_size("example").should eq 0
         store.queue_size("single").should eq 0
 
         # Retry job1
         job_jid = job1.jid.to_s
-        dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
+        dead_jobs = store.redis.zrange("joobq:v1:dead_letter", 0, -1)
         job_to_retry = dead_jobs.find do |job_data|
           parsed = JSON.parse(job_data.as(String))
           parsed["jid"]?.try(&.as_s) == job_jid
@@ -245,7 +245,7 @@ module JoobQ
           queue_name = JSON.parse(job_to_retry.as(String))["queue"].as_s
 
           store.redis.pipelined do |pipe|
-            pipe.zrem("joobq:dead_letter", job_to_retry.as(String))
+            pipe.zrem("joobq:v1:dead_letter", job_to_retry.as(String))
             pipe.lpush(JoobQ::Keys.queue(queue_name), job_to_retry.as(String))
           end
 
@@ -253,7 +253,7 @@ module JoobQ
           queue_name.should eq "example"
           store.queue_size("example").should eq 1
           store.queue_size("single").should eq 0
-          store.redis.zcard("joobq:dead_letter").should eq 1
+          store.redis.zcard("joobq:v1:dead_letter").should eq 1
         end
       end
     end
@@ -331,10 +331,10 @@ module JoobQ
         store = JoobQ.store.as(RedisStore)
 
         # Add invalid JSON
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, "invalid json")
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, "invalid json")
 
         # Get jobs (should handle parse error gracefully)
-        dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
+        dead_jobs = store.redis.zrange("joobq:v1:dead_letter", 0, -1)
         valid_jobs = dead_jobs.select do |job_data|
           begin
             parsed = JSON.parse(job_data.as(String))

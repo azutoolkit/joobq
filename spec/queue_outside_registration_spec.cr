@@ -32,7 +32,7 @@ module JoobQ
       started.each(&.stop!)
       started.clear
       JoobQ.queues.delete(name)
-      redis.del(JoobQ::Keys.queue(name), "joobq:processing:#{name}:#{store.owner_id}", "joobq:worker:outside-host:1")
+      redis.del(JoobQ::Keys.queue(name), "joobq:v1:processing:#{name}:#{store.owner_id}", "joobq:v1:worker:outside-host:1")
       redis.zrem(WorkerRegistry::INDEX, "outside-host:1")
     end
 
@@ -59,7 +59,7 @@ module JoobQ
       JoobQ.enqueue(name, OutsideJob.new(name).to_json)
 
       eventually { OutsideJob::RAN.get == 1 && redis.llen(JoobQ::Keys.queue(name)) == 0 }.should be_true
-      eventually { redis.llen("joobq:processing:#{name}:#{store.owner_id}") == 0 }.should be_true
+      eventually { redis.llen("joobq:v1:processing:#{name}:#{store.owner_id}") == 0 }.should be_true
       OutsideJob::RAN.get.should eq(1)
     end
 

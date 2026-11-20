@@ -28,24 +28,24 @@ module JoobQ
       it "reprocesses in-flight jobs once: starting a running queue must not requeue what a worker is processing" do
         name = "start_guard"
         redis = JoobQ.store.as(RedisStore).redis
-        [name, "joobq:processing:#{name}"].each { |key| redis.del(key) }
+        [name, "joobq:v1:processing:#{name}"].each { |key| redis.del(key) }
         queue = Queue(Job1).new(name, 0) # no workers, so nothing consumes what the specs push
-        redis.rpush("joobq:processing:#{name}", %({"jid":"a"}))
+        redis.rpush("joobq:v1:processing:#{name}", %({"jid":"a"}))
 
         queue.start
         redis.llen(JoobQ::Keys.queue(name)).should eq(1) # the first start puts the stranded job back
 
-        redis.rpush("joobq:processing:#{name}", %({"jid":"b"})) # a job a worker is processing right now
+        redis.rpush("joobq:v1:processing:#{name}", %({"jid":"b"})) # a job a worker is processing right now
         queue.start
         redis.llen(JoobQ::Keys.queue(name)).should eq(1) # a second start leaves it alone
-        redis.llen("joobq:processing:#{name}").should eq(1)
+        redis.llen("joobq:v1:processing:#{name}").should eq(1)
 
         queue.stop!
         queue.start
         redis.llen(JoobQ::Keys.queue(name)).should eq(2) # after a stop, starting again reprocesses as the first start did
       ensure
         queue.try(&.stop!)
-        [name, "joobq:processing:#{name}"].each { |key| redis.try(&.del(key)) } if name
+        [name, "joobq:v1:processing:#{name}"].each { |key| redis.try(&.del(key)) } if name
       end
 
       it "processes enqueued jobs" do
@@ -55,8 +55,8 @@ module JoobQ
         running_queue.size.should eq(10)
         running_queue.start
         eventually do
-          store.redis.hget("joobq:stats:completed", "example") == "10" &&
-            store.redis.llen("joobq:processing:example") == 0
+          store.redis.hget("joobq:v1:stats:completed", "example") == "10" &&
+            store.redis.llen("joobq:v1:processing:example") == 0
         end.should be_true
         running_queue.size.should eq(0)
       ensure
@@ -197,8 +197,8 @@ module JoobQ
     #     job3 = Job1.new
 
     #     # Manually add jobs to processing queues to simulate jobs being processed
-    #     processing_queue_1 = "joobq:processing:example"
-    #     processing_queue_2 = "joobq:processing:single"
+    #     processing_queue_1 = "joobq:v1:processing:example"
+    #     processing_queue_2 = "joobq:v1:processing:single"
 
     #     store.redis.lpush(processing_queue_1, job1.to_json)
     #     store.redis.lpush(processing_queue_1, job2.to_json)
@@ -218,7 +218,7 @@ module JoobQ
     #     limited_jobs.size.should eq 2
 
     #     # Test with custom pattern
-    #     pattern_jobs = store.processing_list("joobq:processing:example", 10)
+    #     pattern_jobs = store.processing_list("joobq:v1:processing:example", 10)
     #     pattern_jobs.size.should eq 2
     #     pattern_jobs.should contain(job1.to_json)
     #     pattern_jobs.should contain(job2.to_json)

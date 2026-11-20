@@ -36,14 +36,14 @@ module JoobQ
         queue = JoobQ["example"]
         queue.clear
         redis = JoobQ.store.as(RedisStore).redis
-        redis.del("joobq:processing:example")
+        redis.del("joobq:v1:processing:example")
         job = ExampleJob.new(1)
-        job.queue = "joobq:processing:example"
+        job.queue = "joobq:v1:processing:example"
 
         queue.add!(job.to_json).should eq(job.jid.to_s)
 
         queue.size.should eq(1)
-        redis.llen("joobq:processing:example").should eq(0)
+        redis.llen("joobq:v1:processing:example").should eq(0)
       end
 
       it "enqueues onto a non-default queue when the payload names no queue" do
@@ -89,7 +89,7 @@ module JoobQ
         redis = JoobQ.store.as(RedisStore).redis
         redis.del(RedisStore::DELAYED_SET)
         job = ExampleJob.new(1)
-        job.queue = "joobq:processing:example"
+        job.queue = "joobq:v1:processing:example"
 
         queue.add_delayed(job.to_json, Time.utc + 10.minutes)
 

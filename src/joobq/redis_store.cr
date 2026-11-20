@@ -2,9 +2,9 @@ require "digest/sha1"
 
 module JoobQ
   class RedisStore < Store
-    DELAYED_SET      = "joobq:delayed_jobs"
-    private DEAD_LETTER      = "joobq:dead_letter"
-    private PROCESSING_QUEUE = "joobq:processing"
+    DELAYED_SET      = Keys::DELAYED_JOBS
+    private DEAD_LETTER      = Keys::DEAD_LETTER
+    private PROCESSING_QUEUE = Keys::PROCESSING
     private BLOCKING_TIMEOUT = 0.5
 
     # Each process claims into its own processing list, `joobq:processing:<queue>:<owner>`, and publishes a liveness
@@ -15,7 +15,7 @@ module JoobQ
     # `WorkerRegistry`, so recovery is correct whether or not a process publishes the richer worker snapshot.
     # Not under the `joobq:processing:` prefix, so the processing-list SCANs never match it, and a queue
     # literally named "owners" does not collide with it.
-    OWNERS = "joobq:processing-owners"
+    OWNERS = Keys::PROCESSING_OWNERS
     # The shape of an owner id: `<host>:<pid>`, exactly one colon. Recovery tells a queue's own processing lists
     # from those of a queue whose name merely starts with it by this shape.
     OWNER_ID   = /\A[^:]+:[^:]+\z/
@@ -313,7 +313,7 @@ module JoobQ
     def ensure_list_move_support! : Nil
       return if @list_move_checked.get
       begin
-        redis.command(["LMOVE", "joobq:lmove-probe", "joobq:lmove-probe", "LEFT", "LEFT"])
+        redis.command(["LMOVE", Keys::LMOVE_PROBE, Keys::LMOVE_PROBE, "LEFT", "LEFT"])
       rescue ex : Redis::Error
         # anything else (a timeout, NOPERM, READONLY) is not about the version and is raised as it is
         raise ex unless ex.message.try(&.downcase.includes?("unknown command"))
@@ -617,8 +617,8 @@ module JoobQ
         pipe.lrem(legacy_processing_queue(queue_name), 0, job_json)
 
         # Update statistics
-        pipe.hincrby("joobq:stats:processed", queue_name, 1)
-        pipe.hincrby("joobq:stats:total_processed", "global", 1)
+        pipe.hincrby(Keys.stat("processed"), queue_name, 1)
+        pipe.hincrby(Keys.stat("total_processed"), "global", 1)
       end
 
       Log.debug &.emit("Job cleanup successful",
@@ -648,10 +648,10 @@ module JoobQ
         pipe.lrem(legacy_processing_queue(queue_name), 0, job_json)
 
         # Update completion statistics
-        pipe.hincrby("joobq:stats:completed", queue_name, 1)
-        pipe.hincrby("joobq:stats:total_completed", "global", 1)
-        pipe.hincrby("joobq:stats:processed", queue_name, 1)
-        pipe.hincrby("joobq:stats:total_processed", "global", 1)
+        pipe.hincrby(Keys.stat("completed"), queue_name, 1)
+        pipe.hincrby(Keys.stat("total_completed"), "global", 1)
+        pipe.hincrby(Keys.stat("processed"), queue_name, 1)
+        pipe.hincrby(Keys.stat("total_processed"), "global", 1)
       end
 
       Log.debug &.emit("Job marked as completed",
@@ -717,7 +717,7 @@ module JoobQ
           pipe.llen(processing_queue(queue_name))             # Processing size
           pipe.zcard("#{Keys.queue(queue_name)}:failed")      # Failed count
           pipe.zcard("#{Keys.queue(queue_name)}:dead_letter") # Dead letter count
-          pipe.hget("joobq:stats:processed", queue_name)      # Processed count
+          pipe.hget(Keys.stat("processed"), queue_name)       # Processed count
         end
       end
 
@@ -910,18 +910,18 @@ module JoobQ
     end
 
     private def config_key(queue_name : String) : String
-      "joobq:queue:#{queue_name}:config"
+      Keys.config(queue_name)
     end
 
     private def pause_key(queue_name : String) : String
-      "joobq:queue:#{queue_name}:paused"
+      Keys.paused(queue_name)
     end
 
     # High-performance move to dead letter queue using pipelined operations
     def move_to_dead_letter(job : Job, queue_name : String) : Nil
       current_timestamp = Time.local.to_unix_ms
       job_json = job.to_json
-      retry_lock_key = "joobq:retry_lock:#{job.jid}"
+      retry_lock_key = Keys.retry_lock(job.jid)
 
       # Persist the destination before acknowledging the source. If either write fails,
       # retain a recoverable copy; duplicates still require a fenced settlement protocol.
@@ -933,8 +933,8 @@ module JoobQ
         pipe.del(retry_lock_key)
 
         # Update statistics
-        pipe.hincrby("joobq:stats:dead_letter", queue_name, 1)
-        pipe.hincrby("joobq:stats:total_dead_letter", "global", 1)
+        pipe.hincrby(Keys.stat("dead_letter"), queue_name, 1)
+        pipe.hincrby(Keys.stat("total_dead_letter"), "global", 1)
       end
 
       Events.emit("job.dead") { {jid: job.jid.to_s, queue: queue_name} }
@@ -963,8 +963,8 @@ module JoobQ
         pipe.zadd(DELAYED_SET, schedule_time, job_json)
 
         # Update statistics
-        pipe.hincrby("joobq:stats:retries", queue_name, 1)
-        pipe.hincrby("joobq:stats:total_retries", "global", 1)
+        pipe.hincrby(Keys.stat("retries"), queue_name, 1)
+        pipe.hincrby(Keys.stat("total_retries"), "global", 1)
       end
 
       # Remove job by ID from processing queue (more reliable than JSON match). The retry is stored by now, so a

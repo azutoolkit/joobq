@@ -110,8 +110,6 @@ module JoobQ
   end
 
   class ExponentialBackoff
-    # Retry lock key prefix for Redis
-    private RETRY_LOCK_PREFIX = "joobq:retry_lock"
     # Base retry lock TTL - will be extended based on actual delay
     private RETRY_LOCK_BASE_TTL = 60
     # Maximum delay in milliseconds (1 hour)
@@ -151,7 +149,7 @@ module JoobQ
     def self.retry_idempotent(job : JoobQ::Job, queue : BaseQueue, retry_attempt : Int32) : {Bool, JoobQ::Job}
       return {false, job} unless queue.store.is_a?(RedisStore)
 
-      retry_lock_key = "#{RETRY_LOCK_PREFIX}:#{job.jid}"
+      retry_lock_key = Keys.retry_lock(job.jid)
       redis_store = queue.store.as(RedisStore)
 
       # The lock lasts past the longest delay this attempt could get, so a short jittered delay does not shorten it
@@ -238,7 +236,7 @@ module JoobQ
       return unless queue.store.is_a?(RedisStore)
 
       redis_store = queue.store.as(RedisStore)
-      retry_lock_key = "joobq:retry_lock:#{job.jid}"
+      retry_lock_key = Keys.retry_lock(job.jid)
 
       # Clean up retry lock only (a claim holds no job lock: it is the job's place in the processing list)
       redis_store.redis.del(retry_lock_key)

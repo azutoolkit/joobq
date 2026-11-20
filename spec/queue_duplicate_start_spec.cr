@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 # Two `Queue` instances of one name in one process share the process's `owner_id`, so they share one processing list
-# `joobq:processing:<queue>:<owner>`. Starting the second must not run restart recovery (`include_self`): that would
+# `joobq:v1:processing:<queue>:<owner>`. Starting the second must not run restart recovery (`include_self`): that would
 # drain the first instance's in-flight jobs back to the queue head and run them twice. Recovery after every instance
 # of the name has stopped is unchanged.
 module JoobQ
@@ -40,7 +40,7 @@ module JoobQ
   describe "starting a second Queue instance of a running queue name" do
     store = JoobQ.store.as(RedisStore)
     redis = store.redis
-    owned = ->(name : String) { "joobq:processing:#{name}:#{store.owner_id}" }
+    owned = ->(name : String) { "joobq:v1:processing:#{name}:#{store.owner_id}" }
     name = ""
 
     before_each do

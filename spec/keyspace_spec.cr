@@ -40,6 +40,25 @@ module JoobQ
       end
     end
 
+    it "names every other key family under the same prefix" do
+      [
+        Keys::DELAYED_JOBS, Keys::DEAD_LETTER, Keys::DEAD_LETTER_COUNTS, Keys::PROCESSING, Keys::PROCESSING_OWNERS,
+        Keys::ERROR_COUNTS, Keys::RECENT_ERRORS, Keys::ERROR_INDEX, Keys::WORKERS, Keys::EVENTS, Keys::EVENTS_LIVE,
+        Keys::EVENTS_TRIM_LOCK, Keys::FAILED_JOBS, Keys::LMOVE_PROBE, Keys::LATENCY,
+        Keys.queue("q"), Keys.processing("q"), Keys.processing("q", "h:1"), Keys.stat("processed"), Keys.retry_lock("j"),
+        Keys.paused("q"), Keys.config("q"), Keys.worker("h:1"), Keys.delivery_bridge("q"),
+      ].each { |key| key.should start_with("joobq:v1:") }
+      Keys.processing("q", "h:1").should eq("joobq:v1:processing:q:h:1")
+      Keys.paused("q").should_not eq(Keys.queue("paused:q")) # a queue named like a flag cannot collide with it
+    end
+
+    it "keeps the delivery runtime's namespaces apart from JoobQ's own families" do
+      Keys::RESERVED_NAMESPACES.each do |namespace|
+        expect_raises(ArgumentError, /reserved/) { Delivery::Ledger.new(redis, namespace, "work") }
+      end
+      Delivery::Ledger.new(redis, "billing", "work").ready_key.should start_with("joobq:v1:billing:")
+    end
+
     it "enqueue to the queue `default` writes only joobq:v1:* keys" do
       before = all_keys.call
       store.enqueue(DefaultQueueJob.new)
@@ -55,7 +74,7 @@ module JoobQ
       store.list_jobs("default").size.should eq(1)
       store.claim_job("default", "w1", DefaultQueueJob).should_not be_nil
       store.queue_size("default").should eq(0)
-      redis.del("joobq:v1:processing:default:#{store.owner_id}", "joobq:processing:default:#{store.owner_id}")
+      redis.del("joobq:v1:processing:default:#{store.owner_id}", "joobq:v1:processing:default:#{store.owner_id}")
     end
   end
 end

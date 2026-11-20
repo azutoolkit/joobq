@@ -8,7 +8,7 @@ module JoobQ
     store.queue_size(queue_name).should eq main
     store.processing_queue_size(queue_name).should eq processing
     store.set_size(RedisStore::DELAYED_SET).should eq delayed
-    store.redis.zcard("joobq:dead_letter").should eq dead
+    store.redis.zcard("joobq:v1:dead_letter").should eq dead
 
     # Verify total is exactly 1 (or 0 if all are 0)
     total = main + processing + delayed + dead
@@ -31,9 +31,9 @@ module JoobQ
 
         # Verify it's ONLY in main queue
         store.queue_size(queue_name).should eq 1
-        store.redis.llen("joobq:processing:#{queue_name}").should eq 0
+        store.redis.llen("joobq:v1:processing:#{queue_name}").should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 0
-        store.redis.zcard("joobq:dead_letter").should eq 0
+        store.redis.zcard("joobq:v1:dead_letter").should eq 0
       end
 
       it "job is only in processing queue when claimed by worker" do
@@ -49,7 +49,7 @@ module JoobQ
         store.queue_size(queue_name).should eq 0
         store.processing_queue_size(queue_name).should eq 1
         store.set_size(RedisStore::DELAYED_SET).should eq 0
-        store.redis.zcard("joobq:dead_letter").should eq 0
+        store.redis.zcard("joobq:v1:dead_letter").should eq 0
       end
 
       it "job is only in delayed queue after retry scheduling" do
@@ -59,14 +59,14 @@ module JoobQ
         job.retrying!
 
         # Add to processing first
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         # Move to retry (atomic)
         delay_ms = 1000_i64
         # Simulate move to retry
         success = true
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lrem(processing_key, 1, job.to_json)
         store.redis.zadd(RedisStore::DELAYED_SET, Time.local.to_unix_ms + delay_ms, job.to_json)
 
@@ -76,7 +76,7 @@ module JoobQ
         store.queue_size(queue_name).should eq 0
         store.redis.llen(processing_key).should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 1
-        store.redis.zcard("joobq:dead_letter").should eq 0
+        store.redis.zcard("joobq:v1:dead_letter").should eq 0
       end
 
       it "job is only in dead letter queue after moving from processing" do
@@ -86,20 +86,20 @@ module JoobQ
         job.dead!
 
         # Add to processing first
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         # Move to dead letter (atomic)
         # Move to dead letter manually
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lrem(processing_key, 1, job.to_json)
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job.to_json)
 
         # Verify it's ONLY in dead letter queue
         store.queue_size(queue_name).should eq 0
         store.redis.llen(processing_key).should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 0
-        store.redis.zcard("joobq:dead_letter").should eq 1
+        store.redis.zcard("joobq:v1:dead_letter").should eq 1
       end
 
       it "job moves back to main queue from delayed queue" do
@@ -117,9 +117,9 @@ module JoobQ
 
         # Verify it's ONLY in main queue
         store.queue_size(queue_name).should eq 1
-        store.redis.llen("joobq:processing:#{queue_name}").should eq 0
+        store.redis.llen("joobq:v1:processing:#{queue_name}").should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 0
-        store.redis.zcard("joobq:dead_letter").should eq 0
+        store.redis.zcard("joobq:v1:dead_letter").should eq 0
       end
     end
 
@@ -133,12 +133,12 @@ module JoobQ
 
         # Artificially add job to MULTIPLE locations (shouldn't happen, but test cleanup)
         store.redis.lpush(JoobQ::Keys.queue(queue_name), job_json)
-        store.redis.lpush("joobq:processing:#{queue_name}", job_json)
+        store.redis.lpush("joobq:v1:processing:#{queue_name}", job_json)
         store.redis.zadd(RedisStore::DELAYED_SET, Time.local.to_unix_ms, job_json)
 
         # Verify job is in multiple places
         store.queue_size(queue_name).should eq 1
-        store.redis.llen("joobq:processing:#{queue_name}").should eq 1
+        store.redis.llen("joobq:v1:processing:#{queue_name}").should eq 1
         store.set_size(RedisStore::DELAYED_SET).should eq 1
 
         # Move to dead letter using the proper method (this will only clean up processing queue)
@@ -150,12 +150,12 @@ module JoobQ
 
         # Verify it's ONLY in dead letter queue
         store.queue_size(queue_name).should eq 0
-        store.redis.llen("joobq:processing:#{queue_name}").should eq 0
+        store.redis.llen("joobq:v1:processing:#{queue_name}").should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 0
-        store.redis.zcard("joobq:dead_letter").should eq 1
+        store.redis.zcard("joobq:v1:dead_letter").should eq 1
 
         # Verify the job in dead letter is correct
-        dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
+        dead_jobs = store.redis.zrange("joobq:v1:dead_letter", 0, -1)
         dead_jobs.size.should eq 1
       end
 
@@ -164,7 +164,7 @@ module JoobQ
         queue_name = "example"
         job = ExampleJob.new(1)
         job_json = job.to_json
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
 
         # Add job multiple times to processing (shouldn't happen, but test cleanup)
         3.times { store.redis.lpush(processing_key, job_json) }
@@ -190,7 +190,7 @@ module JoobQ
         job = ExampleJob.new(1)
         job.retrying!
         job_json = job.to_json
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
 
         # Add job to processing
         store.redis.lpush(processing_key, job_json)
@@ -203,7 +203,7 @@ module JoobQ
         store.queue_size(queue_name).should eq 0
         store.redis.llen(processing_key).should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 1
-        store.redis.zcard("joobq:dead_letter").should eq 0
+        store.redis.zcard("joobq:v1:dead_letter").should eq 0
 
         # Verify only ONE entry in delayed queue
         delayed_jobs = store.redis.zrange(RedisStore::DELAYED_SET, 0, -1)
@@ -229,7 +229,7 @@ module JoobQ
 
         # Job 3: In dead letter
         job3.dead!
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job3.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job3.to_json)
 
         # Verify each job is in exactly one location
         # Job 1
@@ -241,13 +241,13 @@ module JoobQ
         delayed_jobs.any? { |j| j.as(String).includes?(job2.jid.to_s) }.should be_true
 
         # Job 3
-        dead_jobs = store.redis.zrange("joobq:dead_letter", 0, -1)
+        dead_jobs = store.redis.zrange("joobq:v1:dead_letter", 0, -1)
         dead_jobs.any? { |j| j.as(String).includes?(job3.jid.to_s) }.should be_true
 
         # Verify total unique locations
         store.queue_size("example").should eq 1
         store.set_size(RedisStore::DELAYED_SET).should eq 1
-        store.redis.zcard("joobq:dead_letter").should eq 1
+        store.redis.zcard("joobq:v1:dead_letter").should eq 1
       end
 
       it "processing multiple jobs maintains uniqueness" do
@@ -282,7 +282,7 @@ module JoobQ
         job.max_retries = 3
 
         # Add to processing
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         # First retry attempt (should succeed)
@@ -302,7 +302,7 @@ module JoobQ
         store.set_size(RedisStore::DELAYED_SET).should eq 1
 
         # Verify lock exists
-        retry_lock_key = "joobq:retry_lock:#{job.jid}"
+        retry_lock_key = "joobq:v1:retry_lock:#{job.jid}"
         store.redis.exists(retry_lock_key).should eq 1
       end
 
@@ -311,7 +311,7 @@ module JoobQ
         job = ExampleJob.new(1)
 
         # Set a retry lock
-        retry_lock_key = "joobq:retry_lock:#{job.jid}"
+        retry_lock_key = "joobq:v1:retry_lock:#{job.jid}"
         store.redis.set(retry_lock_key, "retrying", ex: 30)
         store.redis.exists(retry_lock_key).should eq 1
 
@@ -366,10 +366,10 @@ module JoobQ
         claimed_job2 = ExampleJob.from_json(claimed_job_json2.not_nil!)
         claimed_job2.retries = 0
         # Remove from this process's processing list first
-        store.redis.lrem("joobq:processing:#{queue_name}:#{store.owner_id}", 0, claimed_job_json2.not_nil!)
+        store.redis.lrem("joobq:v1:processing:#{queue_name}:#{store.owner_id}", 0, claimed_job_json2.not_nil!)
         # Move to dead letter manually
         claimed_job2.dead!
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, claimed_job2.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, claimed_job2.to_json)
         JoobQ.verify_single_location(store, queue_name, dead: 1)
       end
     end

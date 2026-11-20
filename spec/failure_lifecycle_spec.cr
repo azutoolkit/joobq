@@ -111,7 +111,7 @@ module JoobQ
       1.upto(3) do |run|
         eventually { LifecycleCounter.runs >= run && lifecycle_delayed(redis).size == 1 && idle.call }.should be_true
         LifecycleCounter.runs.should eq run
-        redis.exists("joobq:retry_lock:#{JSON.parse(lifecycle_delayed(redis).first)["jid"]}").should eq 1
+        redis.exists("joobq:v1:retry_lock:#{JSON.parse(lifecycle_delayed(redis).first)["jid"]}").should eq 1
         JoobQ.config.schedulers.first.enqueue_due_jobs(current_time: 1.hour.from_now)
       end
 

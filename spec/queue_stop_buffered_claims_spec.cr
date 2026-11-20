@@ -45,7 +45,7 @@ module JoobQ
   describe "stopping a Queue while the dispatcher holds claims no worker received" do
     store = JoobQ.store.as(RedisStore)
     redis = store.redis
-    owned = ->(name : String) { "joobq:processing:#{name}:#{store.owner_id}" }
+    owned = ->(name : String) { "joobq:v1:processing:#{name}:#{store.owner_id}" }
     name = ""
 
     before_each do

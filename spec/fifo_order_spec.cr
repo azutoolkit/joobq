@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 # Queue order and crash recovery at the store level. Producers RPUSH to the tail; a process claims from the head into
-# its own per-process list `joobq:processing:<queue>:<owner>` and publishes a liveness heartbeat. Recovery returns a
+# its own per-process list `joobq:v1:processing:<queue>:<owner>` and publishes a liveness heartbeat. Recovery returns a
 # process's jobs to the HEAD of the queue only once that process's heartbeat has lapsed, so a live process's in-flight
 # jobs are never moved and never run twice.
 module JoobQ
@@ -11,8 +11,8 @@ module JoobQ
     name = "fifo_spec"
     self_owner = store.owner_id
 
-    owned = ->(owner : String) { "joobq:processing:#{name}:#{owner}" }
-    legacy = "joobq:processing:#{name}"
+    owned = ->(owner : String) { "joobq:v1:processing:#{name}:#{owner}" }
+    legacy = "joobq:v1:processing:#{name}"
     live = ->(owner : String) { redis.zadd(RedisStore::OWNERS, Time.utc.to_unix_ms, owner) }
     dead = ->(owner : String) { redis.zrem(RedisStore::OWNERS, owner) }
     # A worker claims onto the HEAD of its processing list; seed the same layout for a given claim order.
@@ -30,7 +30,7 @@ module JoobQ
     it "probes the server for LMOVE (Redis 6.2+) and accepts this one" do
       store.ensure_list_move_support!
       store.ensure_list_move_support!
-      redis.exists("joobq:lmove-probe").should eq(0)
+      redis.exists("joobq:v1:lmove-probe").should eq(0)
     end
 
     describe "claiming" do
@@ -71,7 +71,7 @@ module JoobQ
 
       it "leaves alone the lists of a queue whose name extends this one (default and default:x)" do
         longer = "#{name}:x"
-        other = "joobq:processing:#{longer}:host:7" # host:7 is LIVE and holds a job of the longer queue
+        other = "joobq:v1:processing:#{longer}:host:7" # host:7 is LIVE and holds a job of the longer queue
         redis.lpush(other, "THEIRS")
         live.call("host:7")
         begin
@@ -86,7 +86,7 @@ module JoobQ
       end
 
       it "does not treat glob characters in a queue name as a pattern" do
-        other = "joobq:processing:#{name}zz:host:8"
+        other = "joobq:v1:processing:#{name}zz:host:8"
         redis.lpush(other, "THEIRS")
         dead.call("host:8")
         begin

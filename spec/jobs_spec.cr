@@ -10,7 +10,7 @@ module JoobQ
       job_id = ExampleJob.delay(for: 1.hour, x: 1)
       job_id.should be_a UUID
 
-      JoobQ.store.set_size("joobq:delayed_jobs").should eq 1
+      JoobQ.store.set_size("joobq:v1:delayed_jobs").should eq 1
     end
 
     it "performs jobs every one second" do

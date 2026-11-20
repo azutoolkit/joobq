@@ -8,7 +8,7 @@ module JoobQ
     store = JoobQ.store.as(RedisStore)
     redis = store.redis
     name = "retained_spec"
-    own = "joobq:processing:#{name}:#{store.owner_id}"
+    own = "joobq:v1:processing:#{name}:#{store.owner_id}"
 
     # A claim that ended without its outcome stored: claimed, run, then retained instead of dropped.
     retain = ->(job : String) do

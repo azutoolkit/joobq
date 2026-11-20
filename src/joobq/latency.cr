@@ -14,7 +14,7 @@ module JoobQ
   module Latency
     Log = ::Log.for("LATENCY")
 
-    KEY           = "joobq:stats:latency"
+    KEY           = Keys::LATENCY
     FLUSH_EVERY   = 5.seconds
     FIRST_SECONDS = 0.001
     PER_DECADE    =     8

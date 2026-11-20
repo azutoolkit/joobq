@@ -78,7 +78,7 @@ module JoobQ
       verify_encryption_keys
       if redis_store = store.as?(RedisStore)
         redis_store.ensure_list_move_support!
-        if redis_store.redis.exists("joobq:delivery-bridge:#{name}") > 0
+        if redis_store.redis.exists(Keys.delivery_bridge(name)) > 0
           raise ArgumentError.new("queue is bound to leased delivery; a legacy worker cannot start")
         end
       end

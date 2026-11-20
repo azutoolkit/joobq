@@ -20,7 +20,7 @@ module JoobQ
         reaper.reap_once
 
         store.queue_size("example").should eq(0)
-        store.redis.zcard("joobq:dead_letter").should be >= 1
+        store.redis.zcard("joobq:v1:dead_letter").should be >= 1
         DeadLetterQueue.new(store.redis).counts.should eq({"example" => 1_i64})
         store.redis.hget(DeadLetterQueue::COUNTS, "example").should eq("1") # counted when written, not rebuilt on read
       end
@@ -61,7 +61,7 @@ module JoobQ
         job = ExampleJob.new(1)
         job.expires = (Time.local - 1.hour).to_unix_ms
 
-        processing_key = "joobq:processing:example"
+        processing_key = "joobq:v1:processing:example"
         store.redis.rpush(processing_key, job.to_json)
 
         store.redis.llen(processing_key).should eq(1)
@@ -70,7 +70,7 @@ module JoobQ
         reaper.reap_once
 
         store.redis.llen(processing_key).should eq(0)
-        store.redis.zcard("joobq:dead_letter").should be >= 1
+        store.redis.zcard("joobq:v1:dead_letter").should be >= 1
       end
 
       it "handles pagination with many expired jobs" do
@@ -101,7 +101,7 @@ module JoobQ
         reaper = ExpiredJobReaper.new(store: store)
         reaper.reap_once
 
-        expired_count = store.redis.hget("joobq:stats:expired", "example")
+        expired_count = store.redis.hget("joobq:v1:stats:expired", "example")
         expired_count.should_not be_nil
         expired_count.should_not be_nil
         expired_count.as(String).to_i.should be >= 1

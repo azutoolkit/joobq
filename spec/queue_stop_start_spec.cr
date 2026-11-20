@@ -40,7 +40,7 @@ module JoobQ
   describe "starting a Queue instance after another of the same name was stopped with a job still running" do
     store = JoobQ.store.as(RedisStore)
     redis = store.redis
-    owned = ->(name : String) { "joobq:processing:#{name}:#{store.owner_id}" }
+    owned = ->(name : String) { "joobq:v1:processing:#{name}:#{store.owner_id}" }
     name = ""
 
     before_each do

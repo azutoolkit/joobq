@@ -11,7 +11,7 @@ describe "durable migration and recovery" do
     second = ExampleJob.new(2)
     second.queue = queue
     store.redis.rpush(JoobQ::Keys.queue(queue), first.to_json)
-    store.redis.rpush("joobq:processing:#{queue}", second.to_json)
+    store.redis.rpush("joobq:v1:processing:#{queue}", second.to_json)
     migrator = JoobQ::Delivery::Migration.new(ledger, store.redis, queue, "operator")
     expect_raises(ArgumentError) { migrator.run }
     report = migrator.run(quiescent: true)
@@ -19,7 +19,7 @@ describe "durable migration and recovery" do
     ledger.claim("worker").should be_nil
     migrator.run(quiescent: true).digest.should eq(report.digest)
     store.redis.llen(JoobQ::Keys.queue(queue)).should eq(1)
-    store.redis.llen("joobq:processing:#{queue}").should eq(1)
+    store.redis.llen("joobq:v1:processing:#{queue}").should eq(1)
     migrator.activate(report)
     ledger.claim("worker").should_not be_nil
   end

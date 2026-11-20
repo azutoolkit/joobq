@@ -38,7 +38,7 @@ module JoobQ
   describe "per-queue dispatcher" do
     store = JoobQ.store.as(RedisStore)
     redis = store.redis
-    owned = "joobq:processing:#{DispatchJob::QUEUE}:#{store.owner_id}"
+    owned = "joobq:v1:processing:#{DispatchJob::QUEUE}:#{store.owner_id}"
 
     before_each do
       redis.del(DispatchJob::QUEUE, owned)

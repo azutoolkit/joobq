@@ -54,7 +54,7 @@ module JoobQ
 
     describe "Redis Store - FAILED_SET Removal" do
       it "has DELAYED_SET constant" do
-        RedisStore::DELAYED_SET.should eq "joobq:delayed_jobs"
+        RedisStore::DELAYED_SET.should eq "joobq:v1:delayed_jobs"
       end
 
       it "uses DELAYED_SET for retrying jobs" do
@@ -71,7 +71,7 @@ module JoobQ
         delayed_count.should eq 1
       end
 
-      it "does not use joobq:failed_jobs key in operations" do
+      it "does not use joobq:v1:failed_jobs key in operations" do
         store = JoobQ.store.as(RedisStore)
         job = RetryTestJob.new(1)
         job.retrying!
@@ -81,7 +81,7 @@ module JoobQ
         store.schedule(job, delay_ms, delay_set: RedisStore::DELAYED_SET)
 
         # Verify no failed_jobs set is created
-        failed_set_size = store.redis.zcard("joobq:failed_jobs")
+        failed_set_size = store.redis.zcard("joobq:v1:failed_jobs")
         failed_set_size.should eq 0
 
         # Job should be in DELAYED_SET instead
@@ -98,7 +98,7 @@ module JoobQ
         job.retrying!
 
         # Add job to processing queue
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         # Schedule delayed retry
@@ -120,7 +120,7 @@ module JoobQ
         job = RetryTestJob.new(1)
         job.retrying!
 
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         delay_ms = 5000_i64
@@ -257,7 +257,7 @@ module JoobQ
         job = RetryTestJob.new(1)
         job.retrying!
 
-        retry_lock_key = "joobq:retry_lock:#{job.jid}"
+        retry_lock_key = "joobq:v1:retry_lock:#{job.jid}"
 
         # Acquire lock
         lock1 = store.redis.set(retry_lock_key, "retrying", nx: true, ex: 30)
@@ -272,7 +272,7 @@ module JoobQ
         store = JoobQ.store.as(RedisStore)
         job = RetryTestJob.new(1)
 
-        retry_lock_key = "joobq:retry_lock:#{job.jid}"
+        retry_lock_key = "joobq:v1:retry_lock:#{job.jid}"
 
         # Set a lock
         store.redis.set(retry_lock_key, "retrying", nx: true, ex: 30)
@@ -296,18 +296,18 @@ module JoobQ
         job.dead!
 
         # Add job to processing queue
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         # Move to dead letter
         store.redis.lrem(processing_key, 1, job.to_json)
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job.to_json)
 
         # Should be removed from processing
         store.redis.llen(processing_key).should eq 0
 
         # Should be in dead letter queue
-        dead_count = store.redis.zcard("joobq:dead_letter")
+        dead_count = store.redis.zcard("joobq:v1:dead_letter")
         dead_count.should eq 1
       end
 
@@ -318,21 +318,21 @@ module JoobQ
         job.dead!
 
         # Add job to both processing and delayed queue
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
         store.redis.zadd(RedisStore::DELAYED_SET, Time.local.to_unix_ms, job.to_json)
 
         # Move to dead letter
         store.redis.lrem(processing_key, 1, job.to_json)
         store.redis.zrem(RedisStore::DELAYED_SET, job.to_json)
-        store.redis.zadd("joobq:dead_letter", Time.local.to_unix_ms, job.to_json)
+        store.redis.zadd("joobq:v1:dead_letter", Time.local.to_unix_ms, job.to_json)
 
         # Should be removed from both processing and delayed
         store.redis.llen(processing_key).should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 0
 
         # Should be in dead letter queue
-        dead_count = store.redis.zcard("joobq:dead_letter")
+        dead_count = store.redis.zcard("joobq:v1:dead_letter")
         dead_count.should eq 1
       end
 
@@ -342,13 +342,13 @@ module JoobQ
         job = NoRetryFailJob.new
         job.dead!
 
-        retry_lock_key = "joobq:retry_lock:#{job.jid}"
+        retry_lock_key = "joobq:v1:retry_lock:#{job.jid}"
 
         # Set a retry lock
         store.redis.set(retry_lock_key, "retrying", ex: 30)
 
         # Add job to processing
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         # Move to dead letter using the proper method
@@ -447,7 +447,7 @@ module JoobQ
         queue = JoobQ["example"]
 
         # Add to processing queue
-        processing_key = "joobq:processing:example"
+        processing_key = "joobq:v1:processing:example"
         store.redis.lpush(processing_key, job.to_json)
 
         # Use proper retry method - don't change retries before calling
@@ -472,7 +472,7 @@ module JoobQ
         queue = JoobQ["example"]
 
         # Add to processing queue
-        processing_key = "joobq:processing:example"
+        processing_key = "joobq:v1:processing:example"
         store.redis.lpush(processing_key, job.to_json)
 
         # Move to dead letter using proper method
@@ -481,7 +481,7 @@ module JoobQ
         updated_job.dead?.should be_true
 
         # Should be in dead letter queue
-        dead_count = store.redis.zcard("joobq:dead_letter")
+        dead_count = store.redis.zcard("joobq:v1:dead_letter")
         dead_count.should eq 1
 
         # Should be removed from processing
@@ -497,14 +497,14 @@ module JoobQ
         job.retrying!
 
         # Add job to processing queue
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         # Move to retry queue
         delay_ms = 1000_i64
         # Simulate move to retry
         success = true
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lrem(processing_key, 1, job.to_json)
         store.redis.zadd(RedisStore::DELAYED_SET, Time.local.to_unix_ms + delay_ms, job.to_json)
 
@@ -523,7 +523,7 @@ module JoobQ
         job.dead!
 
         # Add job to multiple queues (shouldn't happen, but test cleanup)
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
         store.redis.zadd(RedisStore::DELAYED_SET, Time.local.to_unix_ms, job.to_json)
 
@@ -537,7 +537,7 @@ module JoobQ
         store.redis.llen(processing_key).should eq 0
         store.set_size(RedisStore::DELAYED_SET).should eq 0
         store.queue_size(queue_name).should eq 0
-        store.redis.zcard("joobq:dead_letter").should eq 1
+        store.redis.zcard("joobq:v1:dead_letter").should eq 1
       end
     end
 
@@ -554,7 +554,7 @@ module JoobQ
         job.running!
 
         # Add to processing
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         # Verify initial state
@@ -604,14 +604,14 @@ module JoobQ
         job.running!
 
         # Add to processing
-        processing_key = "joobq:processing:#{queue_name}"
+        processing_key = "joobq:v1:processing:#{queue_name}"
         store.redis.lpush(processing_key, job.to_json)
 
         # Job fails, goes directly to dead letter
         updated_job = JoobQ::ExponentialBackoff.move_to_dead_letter(job, queue)
 
         updated_job.dead?.should be_true
-        store.redis.zcard("joobq:dead_letter").should eq 1
+        store.redis.zcard("joobq:v1:dead_letter").should eq 1
         store.redis.llen(processing_key).should eq 0
       end
     end

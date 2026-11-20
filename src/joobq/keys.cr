@@ -69,5 +69,11 @@ module JoobQ
     def self.delivery_bridge(queue : String) : String
       "#{PREFIX}:delivery-bridge:#{queue}"
     end
+
+    # The 0.6 name of that marker, which an unchanged joobq-pro still writes. `Queue#start` reads it too, so the guard
+    # against a legacy worker on a leased queue stays on; remove it at 1.0, once joobq-pro uses `delivery_bridge`.
+    def self.legacy_delivery_bridge(queue : String) : String
+      "joobq:delivery-bridge:#{queue}"
+    end
   end
 end

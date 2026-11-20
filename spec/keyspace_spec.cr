@@ -30,8 +30,8 @@ module JoobQ
       keys.to_set
     end
 
-    before_each { redis.del(Keys.queue("default")) }
-    after_each { redis.del(Keys.queue("default")) }
+    before_each { redis.del(Keys.queue("default"), Keys.processing("default", store.owner_id)) }
+    after_each { redis.del(Keys.queue("default"), Keys.processing("default", store.owner_id)) }
 
     describe Keys do
       it "names the queue list inside the namespace" do
@@ -59,6 +59,23 @@ module JoobQ
       Delivery::Ledger.new(redis, "billing", "work").ready_key.should start_with("joobq:v1:billing:")
     end
 
+    describe "the leased-delivery guard of Queue#start" do
+      bridge_name = "guarded_#{Random::Secure.hex(3)}"
+      markers = [Keys.delivery_bridge(bridge_name), Keys.legacy_delivery_bridge(bridge_name)]
+
+      after_each { redis.del(markers) }
+
+      # joobq-pro 0.x still writes the 0.6 name of the marker: the guard reads both until Pro moves.
+      markers.each do |marker|
+        it "refuses to start a queue marked at #{marker}" do
+          redis.set(marker, "1")
+          queue = Queue(ExampleJob).new(bridge_name, 1)
+
+          expect_raises(ArgumentError, /bound to leased delivery/) { queue.start }
+        end
+      end
+    end
+
     it "enqueue to the queue `default` writes only joobq:v1:* keys" do
       before = all_keys.call
       store.enqueue(DefaultQueueJob.new)
@@ -74,7 +91,7 @@ module JoobQ
       store.list_jobs("default").size.should eq(1)
       store.claim_job("default", "w1", DefaultQueueJob).should_not be_nil
       store.queue_size("default").should eq(0)
-      redis.del("joobq:v1:processing:default:#{store.owner_id}", "joobq:v1:processing:default:#{store.owner_id}")
+      redis.del(Keys.processing("default", store.owner_id))
     end
   end
 end

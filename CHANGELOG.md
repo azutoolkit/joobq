@@ -9,7 +9,10 @@
   every key (`Keys.queue("default")` is `joobq:v1:queue:default`; processing lists, the delayed set, dead letters,
   stats, retry locks, error records, workers, events and the delivery-bridge marker follow; the pause and config
   flags are `joobq:v1:paused:<queue>` and `joobq:v1:config:<queue>`). Code that built these keys by hand (joobqui,
-  joobq-pro) must call `Keys` instead. `Delivery::Ledger` refuses a namespace named like one of these families.
+  joobq-pro) must call `Keys` instead; land joobq-pro (Keys for the delivery-bridge marker, stats, error counts and the
+  bare queue list it reads) and joobqui together with this release. Until joobq-pro moves, `Queue#start` also reads the
+  0.6 marker `joobq:delivery-bridge:<queue>` (`Keys.legacy_delivery_bridge`, removed at 1.0), so the guard against a
+  legacy worker on a leased queue stays on. `Delivery::Ledger` refuses a namespace named like one of these families.
 - **Upgrade with every JoobQ process stopped, then run `JoobQ.migrate_keyspace!(queues: [...])` once.** It renames the
   bare lists of the queues you name and every `joobq:` key into the new namespace, refuses while another process has a
   live heartbeat, never overwrites an existing new key (it is listed in the report), and reports `renamed: 0` when run

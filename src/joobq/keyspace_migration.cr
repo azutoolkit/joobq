@@ -6,13 +6,20 @@ module JoobQ
   # Moves a 0.6 keyspace into `Keys::PREFIX`. 0.6 kept the waiting jobs of a queue under the bare queue name and its
   # other keys under `joobq:` with no version.
   module Keyspace
-    record Report, renamed : Int32, skipped : Array(String)
+    # *renamed*: keys moved as they were. *merged*: old keys folded into a new key that already existed (the new
+    # version had created it), or dropped as stale. *skipped*: old keys left where they are, listed by name, because
+    # the new key is of another type.
+    record Report, renamed : Int32, skipped : Array(String), merged : Int32 = 0
 
     OLD_PREFIX = "joobq:"
     OLD_OWNERS = "joobq:processing-owners"
 
     # The old name of every key that moves unchanged apart from the prefix (a family is the text after `joobq:`).
     private FAMILIES = /\A(processing|processing-owners|delayed_jobs|dead_letter|dead_letter:counts|error_counts|recent_errors|error_index|workers|events|events:trim_lock|failed_jobs|stats:.+|retry_lock:.+|worker:.+|delivery-bridge:.+)\z/
+    # What 0.6 kept only to know who was alive: when the new key exists, the old one is stale and is dropped.
+    private TRANSIENT = /\A(processing-owners|workers|worker:.+|events|events:trim_lock|delivery-bridge:.+)\z/
+    # Counters that add up when both namespaces have them
+    private COUNTERS = /\A(stats:.+|error_counts|dead_letter:counts)\z/
     private FLAG     = /\Aqueue:(.+):(paused|config)\z/
 
     # The new name of a 0.6 `joobq:` key, or nil for one that is not moved (the pub/sub channel, the probe, anything
@@ -50,34 +57,77 @@ module JoobQ
         raise KeyspaceMigrationError.new("processes are live (#{others.to_a.sort.join(", ")}); stop them before migrating the keyspace")
       end
 
-      renamed = 0
+      renamed = merged = 0
       skipped = [] of String
       legacy_keys(store.redis, queues).each do |(old, new)|
         if store.redis.renamenx(old, new) == 1
           renamed += 1
+        elsif merge(store.redis, old, new)
+          merged += 1
         else
           skipped << old
-          Log.warn &.emit("Keyspace migration left a key: the new name already exists", old: old, new: new)
+          Log.warn &.emit("Keyspace migration left a key: the new name is of another type", old: old, new: new)
         end
       rescue ex : Redis::Error
         # the key went away (another migration) between the scan and the rename
         raise ex unless ex.message.try(&.includes?("no such key"))
       end
-      Log.info &.emit("Keyspace migrated to #{Keys::PREFIX}", renamed: renamed, skipped: skipped.size)
-      Report.new(renamed, skipped)
+      Log.info &.emit("Keyspace migrated to #{Keys::PREFIX}", renamed: renamed, merged: merged, skipped: skipped.size)
+      Report.new(renamed, skipped, merged)
+    end
+
+    # The new version created *new* before the migration ran (its first heartbeat, a queue start, an enqueue): folds
+    # *old* into it and deletes *old*, or returns false (nothing changed) when the two are of different types.
+    # Transient keys are stale and dropped; sorted sets are united (the later score wins); counters add up; lists
+    # put the old items at the head of the new list, in their order, so no waiting job is stranded; any other value
+    # keeps the new one.
+    private def self.merge(redis : Redis::PooledClient, old : String, new : String) : Bool
+      family = old.lchop(OLD_PREFIX)
+      type = redis.type(old)
+      return true if type == "none" # gone
+      if TRANSIENT.matches?(family)
+        redis.del(old)
+        return true
+      end
+      return false unless redis.type(new) == type
+
+      case type
+      when "list"
+        # RIGHT to LEFT: the last old item goes first and ends up behind the others
+        while redis.command(["LMOVE", old, new, "RIGHT", "LEFT"])
+        end
+      when "zset"
+        redis.command(["ZUNIONSTORE", new, "2", new, old, "AGGREGATE", "MAX"])
+      when "hash"
+        merge_hash(redis, old, new, COUNTERS.matches?(family))
+      end
+      redis.del(old)
+      true
+    end
+
+    private def self.merge_hash(redis : Redis::PooledClient, old : String, new : String, counters : Bool) : Nil
+      redis.hgetall(old).each do |field, value|
+        field, value = field.to_s, value.to_s
+        if counters && (count = value.to_i64?)
+          redis.hincrby(new, field, count)
+        else
+          redis.hsetnx(new, field, value)
+        end
+      end
     end
 
     @@warned = Atomic(Bool).new(false)
 
     # Logs, once per process, that 0.6 keys are still in Redis: jobs waiting in them are invisible to this version.
-    # True when it warned. `Queue#start` calls it.
+    # True when it warned. `Queue#start` calls it. It SCANs the whole keyspace for `joobq:*` once per process (the
+    # first queue to start pays for it).
     def self.warn_once(store : RedisStore, queues : Array(String)) : Bool
       return false if @@warned.swap(true)
 
       legacy = legacy_keys(store.redis, queues)
       return false if legacy.empty?
 
-      Log.error &.emit("0.6 keys are still in Redis and are not read by this version; stop every JoobQ process and run JoobQ.migrate_keyspace!",
+      Log.error &.emit("0.6 keys are still in Redis and are not read by this version; stop every JoobQ process, run JoobQ.migrate_keyspace!, then start them",
         count: legacy.size, example: legacy.first[0])
       true
     rescue ex

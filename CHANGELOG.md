@@ -15,8 +15,10 @@
   legacy worker on a leased queue stays on. `Delivery::Ledger` refuses a namespace named like one of these families.
 - **Upgrade with every JoobQ process stopped, then run `JoobQ.migrate_keyspace!(queues: [...])` once.** It renames the
   bare lists of the queues you name and every `joobq:` key into the new namespace, refuses while another process has a
-  live heartbeat, never overwrites an existing new key (it is listed in the report), and reports `renamed: 0` when run
-  again. A version that finds 0.6 keys logs an error at the first `Queue#start`; it does not read them. Running 0.6
+  live heartbeat in either namespace, and reports `renamed: 0` and `merged: 0` when run again. Where the new version
+  already created a key (a start before the migration), it merges: the stale owner, worker and event keys are dropped,
+  sorted sets are united, counters added, and old list items go to the head of the new list; a key whose new name is
+  of another type is left and listed in `skipped`. The order is: stop every process, migrate, then start. A version that finds 0.6 keys logs an error at the first `Queue#start`; it does not read them. Running 0.6
   and this version against one Redis at the same time is not supported.
 - **Stored jobs carry a format version, `"v": 1`.** A reader refuses a greater version with
   `JoobQ::UnsupportedJobVersion` (a `JSON::ParseException`, so the worker dead-letters the payload unread and whole, and logs a

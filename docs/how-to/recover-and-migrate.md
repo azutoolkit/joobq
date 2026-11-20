@@ -32,8 +32,8 @@ description: Recover deliberately when processes, networks, or storage fail.
 0.6 kept a queue's waiting jobs under the bare queue name and everything else under `joobq:` with no version. Since this release every key is under `joobq:v1:` (see [Redis keys](../reference/configuration.md#redis-keys)); a version that finds 0.6 keys logs an error at the first `Queue#start` and does not read them.
 
 1. Stop every JoobQ process, workers and producers included. The migration refuses while another process has a live heartbeat.
-2. Run `JoobQ.migrate_keyspace!(queues: ["default", "exports"])` once, naming every queue that has jobs. It renames the bare lists of those queues and each `joobq:` key into the new namespace, and returns a report with the number renamed and the keys it skipped because the new name already existed.
-3. Run it again: it must report `renamed: 0`. Start the new processes.
+2. Run `JoobQ.migrate_keyspace!(queues: ["default", "exports"])` once, naming every queue that has jobs. It renames the bare lists of those queues and each `joobq:` key into the new namespace, and returns a report: keys `renamed`, keys `merged` into a new key that a start had already created (stale owner and worker keys are dropped, sorted sets united, counters added, old list items put at the head of the new list), and `skipped` keys whose new name is of another type.
+3. Run it again: it must report `renamed: 0` and `merged: 0`. Start the new processes.
 
 A job stored before this release has no `v` field and is read as before. A job with a greater `v` than the process knows is dead-lettered unread, payload intact, and the worker log names the version; redrive it after upgrading that process.
 

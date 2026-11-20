@@ -3,6 +3,20 @@ require "./spec_helper"
 # 0.6 kept waiting jobs under the bare queue name and its other keys under `joobq:` with no version. `migrate_keyspace!`
 # moves them into `joobq:v1:` once no other process is live, and does nothing the second time.
 module JoobQ
+  class MigratedJob
+    include JoobQ::Job
+
+    RAN = Atomic(Int32).new(0)
+
+    def initialize(queue : String = "migrated_unused")
+      @queue = queue
+    end
+
+    def perform
+      RAN.add(1)
+    end
+  end
+
   describe "migrating a 0.6 keyspace" do
     store = JoobQ.store.as(RedisStore)
     redis = store.redis
@@ -23,6 +37,7 @@ module JoobQ
       Keys.config(queue), Keys.worker("host:1"), Keys::WORKERS, Keys::EVENTS, Keys::ERROR_COUNTS, Keys.delivery_bridge(queue),
     ]
     clean = -> { redis.del(old_keys + new_keys) }
+    existing = ->(keys : Array(String)) { keys.count { |key| redis.exists(key) == 1 } }
 
     # The shapes 0.6 wrote
     seed = -> do
@@ -91,14 +106,102 @@ module JoobQ
       store.queue_size(queue).should eq(2)
     end
 
-    it "does not overwrite a key that already exists in the new namespace" do
-      redis.rpush(Keys.queue(queue), "already here")
+    describe "when the new version already created keys of its own" do
+      it "drops the stale transient keys (owners, workers, events) and keeps the new ones" do
+        redis.zadd(Keys::PROCESSING_OWNERS, 5, "newhost:1")
+        redis.zadd("joobq:processing-owners", store.redis_now_ms - 120_000, "deadhost:1")
+        redis.zadd(Keys::WORKERS, 5, "new:1")
+        redis.set(Keys.worker("host:1"), "new")
+        redis.command(["XADD", Keys::EVENTS, "*", "type", "new"])
 
-      report = JoobQ.migrate_keyspace!(queues: [queue])
+        report = JoobQ.migrate_keyspace!(queues: [queue])
 
-      report.skipped.should eq([queue])
-      redis.lrange(Keys.queue(queue), 0, -1).should eq(["already here"])
-      redis.llen(queue).should eq(2) # still there, for the operator to decide
+        report.skipped.should be_empty
+        existing.call(["joobq:processing-owners", "joobq:workers", "joobq:worker:host:1", "joobq:events"]).should eq(0)
+        redis.zrange(Keys::WORKERS, 0, -1).should eq(["new:1"])
+        redis.get(Keys.worker("host:1")).should eq("new")
+        redis.command(["XLEN", Keys::EVENTS]).should eq(1)
+      end
+
+      it "puts the old jobs of a list at the head of the new list, in order" do
+        redis.rpush(Keys.queue(queue), "already here")
+
+        report = JoobQ.migrate_keyspace!(queues: [queue])
+
+        report.skipped.should be_empty
+        redis.lrange(Keys.queue(queue), 0, -1).map(&.to_s).should eq([job.call(1), job.call(2), "already here"])
+        redis.exists(queue).should eq(0)
+      end
+
+      it "unites sorted sets and adds numeric counters, keeping the new value of the rest" do
+        redis.zadd(Keys::DELAYED_JOBS, 2000, "new-delayed")
+        redis.zadd(Keys::DEAD_LETTER, 3000, job.call(6)) # the same member: the later score stays
+        redis.hset(Keys.stat("processed"), queue, 3)
+        redis.hset(Keys::DEAD_LETTER_COUNTS, queue, 2)
+        redis.hset(Keys.config(queue), "concurrency", "9")
+        redis.set(Keys.paused(queue), "0")
+
+        JoobQ.migrate_keyspace!(queues: [queue]).skipped.should be_empty
+
+        redis.zscore(Keys::DELAYED_JOBS, job.call(5)).should eq("1000")
+        redis.zscore(Keys::DELAYED_JOBS, "new-delayed").should eq("2000")
+        redis.zcard(Keys::DEAD_LETTER).should eq(1)
+        redis.zscore(Keys::DEAD_LETTER, job.call(6)).should eq("3000")
+        redis.hget(Keys.stat("processed"), queue).should eq("10")
+        redis.hget(Keys::DEAD_LETTER_COUNTS, queue).should eq("3")
+        redis.hget(Keys.config(queue), "concurrency").should eq("9")
+        redis.get(Keys.paused(queue)).should eq("0")
+        existing.call(["joobq:delayed_jobs", "joobq:dead_letter", "joobq:stats:processed", "joobq:queue:#{queue}:config"]).should eq(0)
+      end
+
+      it "is still idempotent after a merge" do
+        redis.rpush(Keys.queue(queue), "already here")
+        JoobQ.migrate_keyspace!(queues: [queue])
+
+        again = JoobQ.migrate_keyspace!(queues: [queue])
+
+        again.renamed.should eq(0)
+        again.merged.should eq(0)
+        redis.llen(Keys.queue(queue)).should eq(3)
+      end
+
+      it "leaves a pair of keys of different types where they are, and lists the old one" do
+        redis.set(Keys.queue(queue), "not a list")
+
+        report = JoobQ.migrate_keyspace!(queues: [queue])
+
+        report.skipped.should eq([queue])
+        redis.get(Keys.queue(queue)).should eq("not a list")
+        redis.llen(queue).should eq(2)
+      end
+
+      it "refuses while a process of the new namespace is live" do
+        redis.zadd(Keys::PROCESSING_OWNERS, store.redis_now_ms, "newhost:7")
+
+        expect_raises(KeyspaceMigrationError, /newhost:7/) { JoobQ.migrate_keyspace!(queues: [queue]) }
+
+        redis.llen(queue).should eq(2)
+      end
+    end
+
+    it "lets a worker claim and finish a migrated 0.6 job that has no format version" do
+      name = "mig_run_#{Random::Secure.hex(3)}"
+      old = JSON.parse(MigratedJob.new(name).to_json).as_h.reject("v").to_json
+      redis.rpush(name, old)
+      JoobQ.migrate_keyspace!(queues: [name]).renamed.should be >= 1
+      MigratedJob::RAN.set(0)
+      runner = Queue(MigratedJob).new(name, 1)
+      JoobQ.queues[name] = runner
+      begin
+        runner.start
+
+        eventually { MigratedJob::RAN.get == 1 && store.queue_size(name) == 0 }.should be_true
+        eventually { redis.llen(Keys.processing(name, store.owner_id)) == 0 }.should be_true
+      ensure
+        runner.stop!
+        JoobQ.queues.delete(name)
+        redis.del(name, Keys.queue(name), Keys.processing(name, store.owner_id))
+      end
     end
 
     it "refuses while another process is live, and moves nothing" do

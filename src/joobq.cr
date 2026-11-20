@@ -168,47 +168,47 @@ module JoobQ
   end
 
   # Configuration loading methods
-  @[Deprecated("Use JoobQ.initialize_config_with(:yaml, path, env)")]
+  @[Deprecated("These load and install the configuration: use JoobQ.initialize_config_with(:yaml, path, env). To get the Configure back without installing it, use JoobQ::Configure.load_from_yaml(path, env)")]
   def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure
     Configure.load_from_yaml(path, env)
   end
 
-  @[Deprecated("Use JoobQ.initialize_config_with(:hybrid, yaml_path) { |config| ... }")]
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:hybrid, yaml_path) { |config| ... }. To get the Configure back without installing it: JoobQ::Configure.load_hybrid(yaml_path) { |config| ... }")]
   def self.load_hybrid(yaml_path : String? = nil, &)
     Configure.load_hybrid(yaml_path) { |config| yield config }
   end
 
-  @[Deprecated("Use JoobQ.initialize_config_with(:sources, *paths)")]
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:sources, *paths). To get the Configure back without installing it: JoobQ::Configure.load_from_yaml_sources(sources)")]
   def self.load_from_yaml_sources(sources : Array(String)) : Configure
     Configure.load_from_yaml_sources(sources)
   end
 
-  @[Deprecated("Use JoobQ.initialize_config_with(:cli_args, *args)")]
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:cli_args, *args). To get the Configure back without installing it: JoobQ::Configure.load_from_cli_args(args)")]
   def self.load_from_cli_args(args : Array(String)) : Configure
     Configure.load_from_cli_args(args)
   end
 
-  @[Deprecated("Use JoobQ.initialize_config")]
+  @[Deprecated("To load and install: JoobQ.initialize_config. To get the Configure back without installing it: JoobQ::YamlConfigLoader.load_auto")]
   def self.load_auto : Configure
     YamlConfigLoader.load_auto
   end
 
-  @[Deprecated("Use JoobQ.initialize_config_with(:file, path)")]
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:file, path). To get the Configure back without installing it: JoobQ::YamlConfigLoader.load_from_file(path)")]
   def self.load_from_file(path : String) : Configure
     YamlConfigLoader.load_from_file(path)
   end
 
-  @[Deprecated("Use JoobQ.initialize_config_with(:string, yaml_content)")]
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:string, yaml_content). To get the Configure back without installing it: JoobQ::YamlConfigLoader.load_from_string(yaml_content)")]
   def self.load_from_string(yaml_content : String, source_path : String? = nil) : Configure
     YamlConfigLoader.load_from_string(yaml_content, source_path)
   end
 
-  @[Deprecated("Use JoobQ.initialize_config_with(:env_overrides, base_path, env)")]
+  @[Deprecated("To load and install: JoobQ.initialize_config_with(:env_overrides, base_path, env). To get the Configure back without installing it: JoobQ::YamlConfigLoader.load_with_env_overrides(base_path, env)")]
   def self.load_with_env_overrides(base_path : String? = nil, env : String? = nil) : Configure
     YamlConfigLoader.load_with_env_overrides(base_path, env)
   end
 
-  @[Deprecated("Use JoobQ.initialize_config, which searches for the file itself")]
+  @[Deprecated("Use JoobQ::YamlConfigLoader.find_config_file; JoobQ.initialize_config searches for the file itself")]
   def self.find_config_file : String?
     YamlConfigLoader.find_config_file
   end

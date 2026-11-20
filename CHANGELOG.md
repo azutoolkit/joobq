@@ -56,12 +56,17 @@
 - **`JoobQ.enqueue(job)` is the way to enqueue a job instance** (`JoobQ.enqueue(queue_name, json)` is unchanged).
   `JoobQ.add(job)` is deprecated (`@[Deprecated]`, still works); it now takes a `JoobQ::Job` (it took any value).
   `Job.enqueue_at(span, ...)` is deprecated in favour of `Job.delay(for: span, ...)` (same result, it now calls it).
-  The nine `JoobQ.load_*` wrappers and `JoobQ.find_config_file` are deprecated in favour of `JoobQ.initialize_config` and
-  `JoobQ.initialize_config_with(:file | :yaml | :string | :sources | :cli_args | :env_overrides | :hybrid)`. They are
+  The nine `JoobQ.load_*` wrappers and `JoobQ.find_config_file` are deprecated. They return a `Configure` and install
+  nothing, so they are not the same as `JoobQ.initialize_config` and `JoobQ.initialize_config_with(:file | :yaml | :string |
+  :sources | :cli_args | :env_overrides | :hybrid)`, which load **and install** the configuration, return `nil` and do nothing
+  once a configuration is set. A caller that uses the returned object calls `JoobQ::Configure.load_*` or
+  `JoobQ::YamlConfigLoader.load_*` (still available, `:nodoc:`) and passes the result to `JoobQ.set_config`. They are
   removed no sooner than two minor releases and 90 days after the release that deprecates them (the deprecation rule of the
   [compatibility page](docs/reference/compatibility.md)).
-  Known callers outside this repository: none for these; `azu_cli`'s joobq initializer uses `initialize_config_with(:file, ...)`,
-  which stays.
+  Known callers outside this repository: `JoobQ.add` is called by joobqui's `examples/conformance/crystal/worker.cr` (line 500) and
+  `bench/sdk-gateway/crystal/bench.cr` (line 48), which only get a compile warning until they move to `JoobQ.enqueue`; the azu docs
+  (`docs/how-to/jobs/background-jobs.md`) mention `enqueue_at`. Nothing in joobqui, joobq-pro or `azu_cli`'s `src` calls the other deprecated members; `azu_cli`'s joobq initializer uses
+  `initialize_config_with(:file, ...)`, which stays.
 - **Internal helpers are marked `:nodoc:`:** `JoobQ.reset_config` (JoobQUI calls it), `JoobQ::RedisStore#redis` (JoobQ Pro and
   JoobQUI call it), `JoobQ::MiddlewarePipeline`, `Configure#middleware_pipeline`, `Configure.load_*`, `JoobQ::YamlConfigLoader`
   and `Job#__secret_values`. They keep working; they are not part of the frozen API.

@@ -20,6 +20,12 @@ require "./spec_helper"
   {% end %}
 {% end %}
 
+# True when `type` has class methods called `name` and every one carries @[Deprecated]. `name` is a literal.
+macro deprecated_class_methods?(type, name)
+  {% methods = type.resolve.class.methods.select { |m| m.name.stringify == name } %}
+  {{ !methods.empty? && methods.all? { |m| m.annotation(Deprecated) } }}
+end
+
 # Runs the block the way `JoobQ.configure` does, against a configuration of its own.
 def configure_fresh(&)
   config = JoobQ::Configure.new
@@ -94,10 +100,17 @@ describe "the public surface of JoobQ" do
     end
   end
 
-  describe "deprecated members keep working" do
-    it "JoobQ.enqueue and Job.enqueue_at" do
-      JoobQ.enqueue(ExampleJob.new(1)).should be_a(String)
-      ExampleJob.enqueue_at(1.minute, x: 1).should be_a(UUID)
+  # Calling a deprecated member prints a compiler warning, and this build stays warning-free, so the annotation is
+  # checked instead of a call.
+  describe "deprecated members carry @[Deprecated]" do
+    it "JoobQ.add, the JoobQ.load_* wrappers and JoobQ.find_config_file" do
+      {% for name in %w(add load_from_yaml load_hybrid load_from_yaml_sources load_from_cli_args load_auto load_from_file load_from_string load_with_env_overrides find_config_file) %}
+        deprecated_class_methods?(JoobQ, {{name}}).should be_true, "JoobQ.{{name.id}}"
+      {% end %}
+    end
+
+    it "Job.enqueue_at" do
+      deprecated_class_methods?(ExampleJob, "enqueue_at").should be_true
     end
   end
 end

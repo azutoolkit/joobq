@@ -120,7 +120,7 @@ Still callable; the compiler warns at each call site. Removed no sooner than the
 | --- | --- |
 | `JoobQ.add` | `JoobQ.enqueue(job)` |
 | `Job.enqueue_at` | `Job.delay(for: span, ...)` |
-| `JoobQ.load_from_yaml`, `JoobQ.load_hybrid`, `JoobQ.load_from_yaml_sources`, `JoobQ.load_from_cli_args`, `JoobQ.load_auto`, `JoobQ.load_from_file`, `JoobQ.load_from_string`, `JoobQ.load_with_env_overrides`, `JoobQ.find_config_file` | `JoobQ.initialize_config` or `JoobQ.initialize_config_with` |
+| `JoobQ.load_from_yaml`, `JoobQ.load_hybrid`, `JoobQ.load_from_yaml_sources`, `JoobQ.load_from_cli_args`, `JoobQ.load_auto`, `JoobQ.load_from_file`, `JoobQ.load_from_string`, `JoobQ.load_with_env_overrides`, `JoobQ.find_config_file` | These return a `Configure` and install nothing. To load **and install**, call `JoobQ.initialize_config` or `JoobQ.initialize_config_with` (it returns `nil` and does nothing once a configuration is set). To keep using the returned `Configure`, call `JoobQ::Configure.load_*` (`load_from_yaml`, `load_hybrid`, `load_from_yaml_sources`, `load_from_cli_args`) or `JoobQ::YamlConfigLoader.load_*` and pass it to `JoobQ.set_config`; those two are `:nodoc:` helpers that stay available |
 | `POST /joobq/jobs` | `Job.enqueue`, or `JoobQ.enqueue(queue, json)` |
 
 ## Not covered

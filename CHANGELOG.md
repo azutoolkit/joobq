@@ -33,7 +33,13 @@
   the environment variables `JOOBQ_OWNER_TTL` and `JOOBQ_REAPER_INTERVAL`. A process's jobs are back on their queue at
   most `owner_ttl + reaper_interval` after it was killed. The heartbeat now beats at a third of the TTL, at most every
   10 s. Values outside the range, or an interval longer than the TTL, raise `ConfigValidationError` when the YAML is
-  loaded, from the environment, and in `forge`. Defaults are unchanged.
+  loaded, from the environment (also for a value that is not a time span), and in `forge`. Defaults are unchanged.
+  **Upgrade note:** `reaper_interval` was only the expired-job scan cadence. An existing `reaper_interval` above the
+  default TTL does not stop the boot: the reaper runs every `owner_ttl` instead and a warning says so (only
+  `owner_ttl` and `reaper_interval` both set, with the interval above the TTL, raise). Unset, the interval is
+  `min(30 s, owner_ttl)`, so lowering `owner_ttl` alone works. Set both before `forge` (the reaper is built on first use);
+  a very short interval scans every queue that often. `owner_ttl` must be the same on every process sharing a Redis, so
+  change it with every process stopped. An assigned store keeps its own TTL unless the configuration set `owner_ttl`.
 
 ### Tests
 
@@ -56,8 +62,10 @@
   lapsed`, and counts nothing; a heartbeat that finds the previous one older than the TTL logs `This process's heartbeat
   lapsed`. The job body still ran twice: delivery stays at-least-once. Behaviour changes: `mark_job_completed` and
   `cleanup_job` count only when they remove the copy (they answer `true` either way), and they remove one copy, not
-  every identical one; a retry or dead letter written inside a worker leaves the processing copy to the cleanup.
-  `RedisStore#claim_held?` reads whether a claim is still held.
+  every identical one.
+  `RedisStore#claim_held?` reads whether a claim is still held. A retry or dead letter inside a worker is one script
+  that also takes the claim copy off the list and counts the job (the worker skips its cleanup), so a cleanup lost to an
+  outage leaves nothing to re-drive; `RedisPipeline#cleanup_jobs_batch` settles each job the same fenced way.
 - **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the
   worker could not remove the job's copy from its own processing list (or could not store a failure), and nothing
   returned the copy until the process was restarted: the heartbeat that protects the list came back by itself. The

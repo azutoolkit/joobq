@@ -21,13 +21,15 @@ description: Every JoobQ Core setting (JoobQ.configure properties, YAML keys, JO
 | `rest_api_enabled` | `Bool` | `false` | Starts the management API in `forge` |
 | `stats_enabled` | `Bool` | `true` | |
 | `time_location` | `Time::Location` | `America/New_York` | Time zone of `scheduler` cron patterns |
-| `reaper_interval`, `reaper_scan_limit` | `Time::Span`, `Int32` | `30.seconds`, `1000` | Expired-job reaper; it also reclaims dead processes' jobs. `reaper_interval` is 100 ms to `owner_ttl` |
-| `owner_ttl` | `Time::Span` | `30.seconds` | How long after its last beat a process counts as dead (1 second to 1 hour); also `owner_ttl` in YAML settings and `JOOBQ_OWNER_TTL`. A crashed process's jobs are back on their queue at most `owner_ttl + reaper_interval` after the crash (60 s by default) |
+| `reaper_interval`, `reaper_scan_limit` | `Time::Span`, `Int32` | `min(30.seconds, owner_ttl)`, `1000` | Expired-job reaper, which also reclaims dead processes' jobs. `reaper_interval` is also the cadence of the expired-job scan of every queue (100 ms, the minimum, scans each queue ten times a second). The reaper is built on first use (`forge`): set both before it. Set above `owner_ttl` alone it is clamped to the TTL with a warning; set together with `owner_ttl` and above it, it raises `ConfigValidationError` |
+| `owner_ttl` | `Time::Span` | `30.seconds` | How long after its last beat a process counts as dead (1 second to 1 hour); also `owner_ttl` in YAML settings and `JOOBQ_OWNER_TTL` (an invalid value raises `ConfigValidationError`). A crashed process's jobs are back on their queue at most `owner_ttl + reaper_interval` after the crash (60 s by default). **Use the same value on every process that shares a Redis** (see below). An assigned `store` keeps its own TTL unless `owner_ttl` was set here |
 | `pipeline_batch_size`, `pipeline_timeout`, `pipeline_max_commands` | `Int32`, `Float64`, `Int32` | `100`, `1.0`, `1000` | Batch size ≤ max commands |
 | `middlewares` | `Array(Middleware)` | `[Throttle, Retry, Timeout]` | Add Pro middleware here |
 | `store` | `Store` | `RedisStore.from_env` | |
 | `payload_encryption(current, previous)` | method | none | Keys for `encrypted_property`; otherwise read from `JOOBQ_PAYLOAD_KEYS` |
 | `allow_plaintext_payloads` | `Bool` | `true` | |
+
+Liveness is judged by the reader's own `owner_ttl`, while each process beats at a third of its own: with different values a process with a short TTL treats a live process with a long one as dead, reclaims its jobs and fences it. Roll a change of `owner_ttl` out to every process at once (stop all, then start), or lower it first on a fleet that is stopped; never mix values while jobs are running.
 
 Inside the block: `queue name, workers, JobClass, throttle = nil` (workers 1 to 1000), `scheduler(tz) { every ...; cron "..." { } }`, `register_job JobClass`, `error_monitoring(...)`.
 

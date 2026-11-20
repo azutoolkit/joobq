@@ -6,7 +6,9 @@ module JoobQ
     getter version : Int32
 
     def initialize(@version : Int32)
-      super("job has format version #{@version}; this JoobQ reads up to #{Job::FORMAT_VERSION}: upgrade JoobQ", 0, 0)
+      text = "job has format version #{@version}; this JoobQ reads up to #{Job::FORMAT_VERSION}: upgrade JoobQ"
+      super(text, 0, 0)
+      @message = text # ParseException appends the position in the text, which means nothing here
     end
   end
 end

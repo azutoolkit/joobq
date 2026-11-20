@@ -2,7 +2,33 @@ require "./spec_helper"
 
 # The stored job carries the version of its format, `v`. A reader of an older format version is not meant to guess at a
 # newer one: it refuses it by name. A job without `v` was written by 0.6 and is read as it always was.
+# A job class may define its own `after_initialize` (a JSON::Serializable hook); the version check must not depend on it.
+class HookedVersionJob
+  include JoobQ::Job
+
+  getter hooked = false
+
+  def initialize
+    @queue = "hooked_version"
+  end
+
+  def after_initialize
+    @hooked = true
+  end
+
+  def perform
+  end
+end
+
 describe "the job format version" do
+  it "is checked for a job class that defines its own after_initialize, whose hook still runs" do
+    job = HookedVersionJob.from_json(HookedVersionJob.new.to_json)
+    job.hooked.should be_true
+    future = JSON.parse(HookedVersionJob.new.to_json).as_h.merge({"v" => JSON::Any.new(2_i64)}).to_json
+    expect_raises(JoobQ::UnsupportedJobVersion) { HookedVersionJob.from_json(future) }
+    expect_raises(JoobQ::UnsupportedJobVersion) { HookedVersionJob.from_json(IO::Memory.new(future)) }
+  end
+
   it "is written into every stored job" do
     JSON.parse(ExampleJob.new(1).to_json)["v"].as_i.should eq(JoobQ::Job::FORMAT_VERSION)
     JoobQ::Job::FORMAT_VERSION.should eq(1)
@@ -17,6 +43,7 @@ describe "the job format version" do
     error = expect_raises(JoobQ::UnsupportedJobVersion) { ExampleJob.from_json(future) }
     error.message.to_s.should contain("format version 2")
     error.message.to_s.should contain("upgrade")
+    error.message.to_s.should_not match(/line|column/) # it is not a position in the text
     error.should be_a(JSON::ParseException)
   end
 

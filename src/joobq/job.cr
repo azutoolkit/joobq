@@ -143,9 +143,12 @@ module JoobQ
       @[JSON::Field(ignore: true)]
       property enqueue_time = Time.instant
 
-      protected def after_initialize
-        super
-        raise ::JoobQ::UnsupportedJobVersion.new(@format_version) if @format_version > ::JoobQ::Job::FORMAT_VERSION
+      # Every JSON read of a job goes through here, so the version check holds for a class that defines its own
+      # `after_initialize` too.
+      def self.new(pull : ::JSON::PullParser)
+        job = previous_def
+        raise ::JoobQ::UnsupportedJobVersion.new(job.format_version) if job.format_version > ::JoobQ::Job::FORMAT_VERSION
+        job
       end
 
       # The plain values of this job's encrypted properties (see `JoobQ::Encryption`); empty, and free, for a job

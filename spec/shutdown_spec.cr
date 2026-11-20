@@ -62,7 +62,7 @@ def with_probe(mode : String, extra = {} of String => String, &)
       process.signal(Signal::KILL) rescue nil
       process.wait rescue nil
     end
-    redis.del(JoobQ::Keys.queue(queue), "joobq:v1:processing:#{queue}")
+    redis.del(JoobQ::Keys.queue(queue), JoobQ::Keys.processing(queue, "#{System.hostname}:#{process.pid}"))
     FileUtils.rm_rf(dir)
   end
 end
@@ -84,24 +84,6 @@ def wait_for_files(dir : String, prefix : String, count : Int32) : Nil
 end
 
 module JoobQ
-  # Jobs in processing for a queue across every process's own list (`joobq:v1:processing:<queue>:<owner>`) and the
-  # legacy shared list. The probe runs in another process, so its list key carries a pid this spec does not know.
-  def self.processing_depth(redis, queue : String) : Int64
-    prefix = "joobq:v1:processing:#{queue}"
-    total = 0_i64
-    cursor = 0_i64
-    loop do
-      result = redis.scan(cursor, match: "#{prefix}*", count: 100)
-      cursor = result[0].as(String).to_i64
-      result[1].as(Array).each do |key|
-        key_str = key.as(String)
-        total += redis.llen(key_str) if key_str == prefix || key_str.starts_with?("#{prefix}:")
-      end
-      break if cursor == 0
-    end
-    total
-  end
-
   describe "orderly shutdown" do
     it "compiles forge and signal shutdown without any concrete job or queue types" do
       # Compile in a separate program: spec_helper registers concrete queues,
@@ -553,7 +535,7 @@ module JoobQ
           (Time.instant - started).should be < 14.seconds
           File.exists?(File.join(dir, "done")).should be_true
           redis.llen(JoobQ::Keys.queue(queue)).should eq(0)
-          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
+          JoobQ.processing_depth(redis, queue).should eq(0)
         end
       end
 
@@ -567,7 +549,7 @@ module JoobQ
           (Time.instant - started).should be < 8.seconds
 
           redis.llen(JoobQ::Keys.queue(queue)).should eq(5)
-          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
+          JoobQ.processing_depth(redis, queue).should eq(0)
           sleep 500.milliseconds # nothing is left to run them again
           files = Dir.glob(File.join(dir, "started-*"))
           files.size.should eq(5)
@@ -651,7 +633,7 @@ module JoobQ
           File.exists?(File.join(dir, "raised")).should be_true
           redis.zrange("joobq:v1:delayed_jobs", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
           redis.zrange("joobq:v1:dead_letter", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
-          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
+          JoobQ.processing_depth(redis, queue).should eq(0)
         end
       end
 
@@ -661,7 +643,7 @@ module JoobQ
           File.exists?(File.join(dir, "finished")).should be_true # the abandoned execution did finish
           File.read(File.join(dir, "completed-events")).should eq("0")
           redis.llen(JoobQ::Keys.queue(queue)).should eq(1) # the requeued copy is untouched
-          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
+          JoobQ.processing_depth(redis, queue).should eq(0)
           redis.hget("joobq:v1:stats:processed", queue).should be_nil
         end
       end

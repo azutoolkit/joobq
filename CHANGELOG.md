@@ -35,6 +35,14 @@
   10 s. Values outside the range, or an interval longer than the TTL, raise `ConfigValidationError` when the YAML is
   loaded, from the environment, and in `forge`. Defaults are unchanged.
 
+### Tests
+
+- **A real SIGKILL proves Core crash recovery.** `scripts/crash_recovery_smoke.py` (run by CI) kills a worker process with
+  12 jobs running, starts a second one inside the heartbeat TTL, and fails unless every job is re-run once by the second
+  process within `owner_ttl + reaper_interval` (3 s + 1 s in the smoke). The assertions on the 0.5 shared
+  processing list (`joobq:v1:processing:<queue>`, which 0.6 never writes to) in the shutdown and race specs now read
+  `processing_depth`, so they can fail.
+
 ### Fixed
 
 - **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the

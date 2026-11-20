@@ -5,6 +5,7 @@ ENV["JOOBQ_ENV"] = "test"
 require "../src/joobq"
 require "./helpers/all_test_jobs"
 require "./helpers/event_sinks"
+require "./helpers/processing_depth"
 
 # Reset configuration and load from YAML file
 JoobQ.reset_config

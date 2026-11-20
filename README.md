@@ -219,7 +219,7 @@ The `JoobQ::Configure` struct provides several properties that can be customized
 - `default_queue`: The name of the default queue. Defaults to `"default"`.
 - `retries`: The number of retries for a job. Defaults to `3`.
 - `expires`: The expiration time for a job. Defaults to `3.days`.
-- `timeout`: Stored and read from YAML, but not enforced: JoobQ does not stop a job that runs longer. Defaults to `2.seconds`.
+- `timeout`: Stored and read from YAML, but not enforced: JoobQ Core does not stop a job that runs longer. Its only reader is JoobQ Pro, whose `Job#with_timeout` uses it as the default limit. Defaults to `2.seconds`.
 - `failed_ttl`: The time-to-live for failed jobs. Defaults to `3.milliseconds`.
 - `dead_letter_ttl`: The time-to-live for jobs in the dead letter queue. Defaults to `7.days`.
 - `job_registry`: An instance of `JobSchemaRegistry` for managing job schemas.

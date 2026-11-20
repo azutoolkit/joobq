@@ -14,7 +14,7 @@ description: Every JoobQ Core setting (JoobQ.configure properties, YAML keys, JO
 | `retries` | `Int32` | `3` | 0 to 100; retries after the first run |
 | `retry_jitter` | `Bool` | `true` | Each retry waits a random time between 1 second and `min(2^n s, 1 h)`; `false` waits the full `min(2^n s, 1 h)` |
 | `expires` | `Time::Span` | `3.days` | From job construction; a job past it is dead-lettered unrun |
-| `timeout` | `Time::Span` | `2.seconds` | Validated (> 0); not enforced on running jobs |
+| `timeout` | `Time::Span` | `2.seconds` | Validated (> 0); Core does not enforce it on running jobs. Pro's `Job#with_timeout` uses it as its default limit |
 | `failed_ttl` | `Time::Span` | `7.days` | Validated; unused |
 | `dead_letter_ttl` | `Time::Span` | `7.days` | Validated; the Redis DLQ does not expire entries |
 | `worker_batch_size` | `Int32` | `10` | 1 to 1000; jobs one worker holds at once |

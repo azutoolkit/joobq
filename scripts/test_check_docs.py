@@ -77,9 +77,15 @@ class DocumentationChecks(unittest.TestCase):
             page.write_text('| `spec/a_spec.cr` "keeps its name" |\n')
             self.assertEqual([], spec_reference_errors(root))
             page.write_text('| `spec/a_spec.cr` "was renamed" |\n')
-            self.assertIn('no longer contains "was renamed"', '\n'.join(spec_reference_errors(root)))
+            self.assertIn('no describe/it title containing "was renamed"', '\n'.join(spec_reference_errors(root)))
             page.write_text('| `spec/gone_spec.cr` "keeps its name" |\n')
             self.assertIn('spec file missing: spec/gone_spec.cr', '\n'.join(spec_reference_errors(root)))
+            (root / 'spec' / 'a_spec.cr').write_text('# it "only in a comment" do\nit "other" do\nend\n')
+            page.write_text('| `spec/a_spec.cr` "only in a comment" |\n')
+            self.assertIn('no describe/it title containing "only in a comment"', '\n'.join(spec_reference_errors(root)))
+            (root / 'docs' / 'reference').mkdir()
+            (root / 'docs' / 'reference' / 'delivery-guarantees.md').write_text('| no citation |\n')
+            self.assertIn('cites no spec', '\n'.join(spec_reference_errors(root)))
 
     def test_nodoc_must_start_its_comment(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -114,17 +114,25 @@ def nodoc_errors(root):
     return errors
 
 
+SPEC_TITLE = re.compile(r'^[ \t]*(?:describe|context|it|pending)[ \t]*\(?[ \t]*"((?:[^"\\\n]|\\.)*)"', re.M)
+GUARANTEES = Path("docs") / "reference" / "delivery-guarantees.md"
+
+
 def spec_reference_errors(root):
-    """A page that cites a spec as `spec/x_spec.cr` "name" names a file that exists and still contains that name."""
+    """A cited spec, `spec/x_spec.cr` "name", exists and has a describe/context/it title containing the name (a comment does not count).
+    docs/reference/delivery-guarantees.md must cite at least one."""
     errors = []
     docs = root / "docs"
     for page in sorted(docs.rglob("*.md")) if docs.is_dir() else []:
-        for path, name in SPEC_REFERENCE.findall(FENCE.sub("", page.read_text())):
+        citations = SPEC_REFERENCE.findall(FENCE.sub("", page.read_text()))
+        if page.relative_to(root) == GUARANTEES and not citations:
+            errors.append(f"{GUARANTEES}: cites no spec")
+        for path, name in citations:
             source = root / path
             if not source.is_file():
                 errors.append(f"{page.relative_to(root)}: spec file missing: {path}")
-            elif name not in source.read_text():
-                errors.append(f"{page.relative_to(root)}: {path} no longer contains \"{name}\"")
+            elif not any(name in title for title in SPEC_TITLE.findall(source.read_text())):
+                errors.append(f"{page.relative_to(root)}: {path} has no describe/it title containing \"{name}\"")
     return errors
 
 

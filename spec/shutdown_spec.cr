@@ -62,7 +62,7 @@ def with_probe(mode : String, extra = {} of String => String, &)
       process.signal(Signal::KILL) rescue nil
       process.wait rescue nil
     end
-    redis.del(queue, "joobq:processing:#{queue}")
+    redis.del(JoobQ::Keys.queue(queue), "joobq:v1:processing:#{queue}")
     FileUtils.rm_rf(dir)
   end
 end
@@ -84,10 +84,10 @@ def wait_for_files(dir : String, prefix : String, count : Int32) : Nil
 end
 
 module JoobQ
-  # Jobs in processing for a queue across every process's own list (`joobq:processing:<queue>:<owner>`) and the
+  # Jobs in processing for a queue across every process's own list (`joobq:v1:processing:<queue>:<owner>`) and the
   # legacy shared list. The probe runs in another process, so its list key carries a pid this spec does not know.
   def self.processing_depth(redis, queue : String) : Int64
-    prefix = "joobq:processing:#{queue}"
+    prefix = "joobq:v1:processing:#{queue}"
     total = 0_i64
     cursor = 0_i64
     loop do
@@ -211,29 +211,29 @@ module JoobQ
       it "control: a running execution that fails with retries left is scheduled for a retry" do
         redis = JoobQ.store.as(JoobQ::RedisStore).redis
         jid = run_failing.call(3, false)
-        jid_in.call(redis, "joobq:delayed_jobs", jid).should be_true
-        redis.zrem("joobq:delayed_jobs", redis.zrange("joobq:delayed_jobs", 0, -1).select { |e| e.to_s.includes?(jid) })
+        jid_in.call(redis, "joobq:v1:delayed_jobs", jid).should be_true
+        redis.zrem("joobq:v1:delayed_jobs", redis.zrange("joobq:v1:delayed_jobs", 0, -1).select { |e| e.to_s.includes?(jid) })
       end
 
       it "control: a running execution that fails without retries left is dead-lettered" do
         redis = JoobQ.store.as(JoobQ::RedisStore).redis
         jid = run_failing.call(0, false)
-        jid_in.call(redis, "joobq:dead_letter", jid).should be_true
-        redis.zrem("joobq:dead_letter", redis.zrange("joobq:dead_letter", 0, -1).select { |e| e.to_s.includes?(jid) })
+        jid_in.call(redis, "joobq:v1:dead_letter", jid).should be_true
+        redis.zrem("joobq:v1:dead_letter", redis.zrange("joobq:v1:dead_letter", 0, -1).select { |e| e.to_s.includes?(jid) })
       end
 
       it "an abandoned execution that fails is not scheduled a second time" do
         redis = JoobQ.store.as(JoobQ::RedisStore).redis
         jid = run_failing.call(3, true)
-        jid_in.call(redis, "joobq:delayed_jobs", jid).should be_false
-        jid_in.call(redis, "joobq:dead_letter", jid).should be_false
+        jid_in.call(redis, "joobq:v1:delayed_jobs", jid).should be_false
+        jid_in.call(redis, "joobq:v1:dead_letter", jid).should be_false
       end
 
       it "an abandoned execution that fails with no retries left is not dead-lettered" do
         redis = JoobQ.store.as(JoobQ::RedisStore).redis
         jid = run_failing.call(0, true)
-        jid_in.call(redis, "joobq:dead_letter", jid).should be_false
-        jid_in.call(redis, "joobq:delayed_jobs", jid).should be_false
+        jid_in.call(redis, "joobq:v1:dead_letter", jid).should be_false
+        jid_in.call(redis, "joobq:v1:delayed_jobs", jid).should be_false
       end
     end
 
@@ -310,9 +310,9 @@ module JoobQ
           nil
         end)
         taken.should be_empty
-        scheduled = redis.zrange("joobq:delayed_jobs", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
+        scheduled = redis.zrange("joobq:v1:delayed_jobs", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
         scheduled.size.should eq(1)
-        redis.zrem("joobq:delayed_jobs", scheduled)
+        redis.zrem("joobq:v1:delayed_jobs", scheduled)
       end
 
       it "ErrorHandler.handle_job_error with schedule: true neither schedules nor announces for an abandoned execution" do
@@ -338,16 +338,16 @@ module JoobQ
                 break
               end
             end
-            where = redis.zrange("joobq:delayed_jobs", 0, -1).any? { |e| e.to_s.includes?(job.jid.to_s) } ||
-                    redis.zrange("joobq:dead_letter", 0, -1).any? { |e| e.to_s.includes?(job.jid.to_s) }
+            where = redis.zrange("joobq:v1:delayed_jobs", 0, -1).any? { |e| e.to_s.includes?(job.jid.to_s) } ||
+                    redis.zrange("joobq:v1:dead_letter", 0, -1).any? { |e| e.to_s.includes?(job.jid.to_s) }
             if abandon
               where.should be_false
               seen.should_not contain("job.failed")
             else
               where.should be_true
               seen.should contain("job.failed")
-              redis.zremrangebyscore("joobq:delayed_jobs", "-inf", "+inf")
-              redis.zremrangebyscore("joobq:dead_letter", "-inf", "+inf")
+              redis.zremrangebyscore("joobq:v1:delayed_jobs", "-inf", "+inf")
+              redis.zremrangebyscore("joobq:v1:dead_letter", "-inf", "+inf")
             end
           end
         ensure
@@ -365,9 +365,9 @@ module JoobQ
             JoobQ::Middleware::Timeout.new.call(job, queue, "w", -> { })
             nil
           end)
-          dead = redis.zrange("joobq:dead_letter", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
+          dead = redis.zrange("joobq:v1:dead_letter", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
           dead.empty?.should eq(abandon)
-          redis.zrem("joobq:dead_letter", dead) unless dead.empty?
+          redis.zrem("joobq:v1:dead_letter", dead) unless dead.empty?
         end
       end
 
@@ -376,14 +376,14 @@ module JoobQ
         queue = JoobQ.queues["example"]
         worker = Worker(ExampleJob).new(1, Channel(Nil).new(1), queue)
         [true, false].each do |abandon|
-          before = redis.zcard("joobq:dead_letter")
+          before = redis.zcard("joobq:v1:dead_letter")
           run_claimed.call(abandon, -> do
             worker.test_unparseable("{\"jid\": \"not-a-job", Exception.new("bad json"))
             nil
           end)
-          (redis.zcard("joobq:dead_letter") - before).should eq(abandon ? 0 : 1)
+          (redis.zcard("joobq:v1:dead_letter") - before).should eq(abandon ? 0 : 1)
         end
-        redis.zremrangebyscore("joobq:dead_letter", "-inf", "+inf")
+        redis.zremrangebyscore("joobq:v1:dead_letter", "-inf", "+inf")
       end
     end
 
@@ -415,20 +415,20 @@ module JoobQ
         qa = "requeue_a_#{Random::Secure.hex(3)}"
         qb = "requeue_b_#{Random::Secure.hex(3)}"
         begin
-          redis.rpush("joobq:processing:#{qa}", "a1", "a2")
-          redis.rpush("joobq:processing:#{qb}", "b1")
+          redis.rpush("joobq:v1:processing:#{qa}", "a1", "a2")
+          redis.rpush("joobq:v1:processing:#{qb}", "b1")
           entries = [{qa, "a1"}, {qa, "missing"}, {qb, "b1"}, {qa, "a2"}]
 
           store.requeue_many_from_processing(entries).should eq(3)
-          redis.lrange(qa, 0, -1).map(&.to_s).sort.should eq(["a1", "a2"])
-          redis.lrange(qb, 0, -1).should eq(["b1"])
-          redis.llen("joobq:processing:#{qa}").should eq(0)
+          redis.lrange(JoobQ::Keys.queue(qa), 0, -1).map(&.to_s).sort.should eq(["a1", "a2"])
+          redis.lrange(JoobQ::Keys.queue(qb), 0, -1).should eq(["b1"])
+          redis.llen("joobq:v1:processing:#{qa}").should eq(0)
 
           store.requeue_many_from_processing(entries).should eq(0) # nothing is queued twice
-          redis.llen(qa).should eq(2)
+          redis.llen(JoobQ::Keys.queue(qa)).should eq(2)
           store.requeue_many_from_processing([] of {String, String}).should eq(0)
         ensure
-          redis.del(qa, qb, "joobq:processing:#{qa}", "joobq:processing:#{qb}")
+          redis.del(JoobQ::Keys.queue(qa), qb, "joobq:v1:processing:#{qa}", "joobq:v1:processing:#{qb}")
         end
       end
 
@@ -438,15 +438,15 @@ module JoobQ
         good = "requeue_good_#{Random::Secure.hex(3)}"
         bad = "requeue_bad_#{Random::Secure.hex(3)}"
         begin
-          redis.set("joobq:processing:#{bad}", "not a list")
-          redis.rpush("joobq:processing:#{good}", "g1")
+          redis.set("joobq:v1:processing:#{bad}", "not a list")
+          redis.rpush("joobq:v1:processing:#{good}", "g1")
 
           store.requeue_many_from_processing([{bad, "x"}, {good, "g1"}]).should eq(1)
-          redis.lrange(good, 0, -1).should eq(["g1"])
+          redis.lrange(JoobQ::Keys.queue(good), 0, -1).should eq(["g1"])
           redis.ping.should eq("PONG") # the connection still answers in step
-          redis.get("joobq:processing:#{bad}").should eq("not a list")
+          redis.get("joobq:v1:processing:#{bad}").should eq("not a list")
         ensure
-          redis.del(good, bad, "joobq:processing:#{good}", "joobq:processing:#{bad}")
+          redis.del(JoobQ::Keys.queue(good), JoobQ::Keys.queue(bad), "joobq:v1:processing:#{good}", "joobq:v1:processing:#{bad}")
         end
       end
     end
@@ -552,8 +552,8 @@ module JoobQ
           exit_of(process, 30.seconds).exit_code.should eq(0)
           (Time.instant - started).should be < 14.seconds
           File.exists?(File.join(dir, "done")).should be_true
-          redis.llen(queue).should eq(0)
-          redis.llen("joobq:processing:#{queue}").should eq(0)
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(0)
+          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
         end
       end
 
@@ -566,12 +566,34 @@ module JoobQ
           exit_of(process, 30.seconds).exit_code.should eq(3)
           (Time.instant - started).should be < 8.seconds
 
-          redis.llen(queue).should eq(5)
-          redis.llen("joobq:processing:#{queue}").should eq(0)
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(5)
+          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
           sleep 500.milliseconds # nothing is left to run them again
           files = Dir.glob(File.join(dir, "started-*"))
           files.size.should eq(5)
           files.each { |file| File.read_lines(file).size.should eq(1) }
+        end
+      end
+
+      it "counts a retained copy (an outcome that was not stored) as abandoned: returns it to its queue and exits 3" do
+        with_probe("retained", {"PROBE_TIMEOUT" => "2"}) do |process, queue, dir, redis|
+          wait_for_files(dir, "started-", 1)
+          process.signal(Signal::TERM)
+          exit_of(process, 30.seconds).exit_code.should eq(3)
+
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(1)
+          JoobQ.processing_depth(redis, queue).should eq(0)
+        end
+      end
+
+      it "does not count a retained copy the owner already re-drove: exits 0" do
+        with_probe("redriven", {"PROBE_TIMEOUT" => "2"}) do |process, queue, dir, redis|
+          wait_for_files(dir, "started-", 1)
+          process.signal(Signal::TERM)
+          exit_of(process, 30.seconds).exit_code.should eq(0)
+
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(1)
+          JoobQ.processing_depth(redis, queue).should eq(0)
         end
       end
 
@@ -595,7 +617,7 @@ module JoobQ
           with_probe("stuck", {"PROBE_JOBS" => "1", "PROBE_TIMEOUT" => "30"}) do |process, queue, dir, redis|
             wait_for_files(dir, "started-", 1)
             owner = "#{System.hostname}:#{process.pid}"
-            list = "joobq:processing:#{queue}:#{owner}"
+            list = "joobq:v1:processing:#{queue}:#{owner}"
             begin
               signals.each_with_index do |signal, index|
                 sleep 1.5.seconds if index > 0
@@ -604,13 +626,13 @@ module JoobQ
               exit_of(process, 10.seconds)
 
               redis.llen(list).should eq(1)
-              redis.llen(queue).should eq(0)
+              redis.llen(JoobQ::Keys.queue(queue)).should eq(0)
               redis.zscore(RedisStore::OWNERS, owner).should_not be_nil
               store = JoobQ.store.as(RedisStore)
               store.recover_orphaned_processing(queue).should eq(0)
               redis.zadd(RedisStore::OWNERS, store.redis_now_ms - 31_000, owner) # as if 31 s had passed
               store.recover_orphaned_processing(queue).should eq(1)
-              redis.llen(queue).should eq(1)
+              redis.llen(JoobQ::Keys.queue(queue)).should eq(1)
               redis.exists(list).should eq(0)
             ensure
               redis.del(list)
@@ -623,13 +645,13 @@ module JoobQ
       it "does not schedule a requeued job a second time when its abandoned execution fails afterwards" do
         with_probe("failing", {"PROBE_TIMEOUT" => "1"}) do |process, queue, dir, redis|
           exit_of(process, 30.seconds).exit_code.should eq(0)
-          redis.llen(queue).should eq(1)
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(1)
           jid = File.basename(Dir.glob(File.join(dir, "started-*")).first).sub("started-", "")
           # the job raised after the shutdown gave up on it (the probe lives on for that), and nothing was scheduled
           File.exists?(File.join(dir, "raised")).should be_true
-          redis.zrange("joobq:delayed_jobs", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
-          redis.zrange("joobq:dead_letter", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
-          redis.llen("joobq:processing:#{queue}").should eq(0)
+          redis.zrange("joobq:v1:delayed_jobs", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
+          redis.zrange("joobq:v1:dead_letter", 0, -1).any? { |entry| entry.to_s.includes?(jid) }.should be_false
+          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
         end
       end
 
@@ -638,9 +660,9 @@ module JoobQ
           exit_of(process, 30.seconds).exit_code.should eq(0)
           File.exists?(File.join(dir, "finished")).should be_true # the abandoned execution did finish
           File.read(File.join(dir, "completed-events")).should eq("0")
-          redis.llen(queue).should eq(1) # the requeued copy is untouched
-          redis.llen("joobq:processing:#{queue}").should eq(0)
-          redis.hget("joobq:stats:processed", queue).should be_nil
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(1) # the requeued copy is untouched
+          redis.llen("joobq:v1:processing:#{queue}").should eq(0)
+          redis.hget("joobq:v1:stats:processed", queue).should be_nil
         end
       end
 

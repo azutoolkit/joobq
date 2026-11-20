@@ -19,7 +19,7 @@ Call `delay` (or `enqueue_at`) with a `Time::Span` and the job's arguments; it r
 jid = ProcessOrderJob.delay(for: 5.minutes, order_id: 42_i64)
 ```
 
-The job waits in `joobq:delayed_jobs` and joins its queue at the first check after it is due. Both methods take a span, not a `Time`: for "at 09:00", compute the span yourself.
+The job waits in `joobq:v1:delayed_jobs` and joins its queue at the first check after it is due. Both methods take a span, not a `Time`: for "at 09:00", compute the span yourself.
 
 ## Enqueue a job at a fixed interval
 

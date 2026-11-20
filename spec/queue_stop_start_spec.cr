@@ -40,7 +40,7 @@ module JoobQ
   describe "starting a Queue instance after another of the same name was stopped with a job still running" do
     store = JoobQ.store.as(RedisStore)
     redis = store.redis
-    owned = ->(name : String) { "joobq:processing:#{name}:#{store.owner_id}" }
+    owned = ->(name : String) { "joobq:v1:processing:#{name}:#{store.owner_id}" }
     name = ""
 
     before_each do
@@ -50,7 +50,7 @@ module JoobQ
 
     after_each do
       StopStartJob::RELEASE.set(true)
-      redis.del(name, owned.call(name))
+      redis.del(JoobQ::Keys.queue(name), owned.call(name))
     end
 
     it "does not re-queue a job that is still running after stop!" do
@@ -71,12 +71,12 @@ module JoobQ
         # A re-queued job would run a second time (B's worker claims it) while the first is still blocked.
         eventually(400.milliseconds) { StopStartJob.runs("blocker") > 1 }.should be_false
         redis.llen(owned.call(name)).should eq(1)
-        redis.llen(name).should eq(0)
+        redis.llen(JoobQ::Keys.queue(name)).should eq(0)
 
         StopStartJob::RELEASE.set(true)
         eventually { redis.llen(owned.call(name)) == 0 }.should be_true
         StopStartJob.runs("blocker").should eq(1)
-        redis.llen(name).should eq(0)
+        redis.llen(JoobQ::Keys.queue(name)).should eq(0)
       ensure
         StopStartJob::RELEASE.set(true)
         a.stop!

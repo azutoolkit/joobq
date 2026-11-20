@@ -43,7 +43,7 @@ module JoobQ
       attempt = 4
       ceiling = ExponentialBackoff.ceiling_ms(attempt)
       job = RetryTestJob.new(1)
-      store.redis.lpush("joobq:processing:example", job.to_json)
+      store.redis.lpush("joobq:v1:processing:example", job.to_json)
 
       before = Time.utc.to_unix_ms
       success, _ = ExponentialBackoff.retry_idempotent(job, queue, attempt)
@@ -56,7 +56,7 @@ module JoobQ
       score.should be >= before + ExponentialBackoff::MIN_DELAY_MS - 5
       score.should be <= after + ceiling + 5
 
-      store.redis.ttl("joobq:retry_lock:#{job.jid}").should be >= ceiling // 1000
+      store.redis.ttl("joobq:v1:retry_lock:#{job.jid}").should be >= ceiling // 1000
     end
   end
 end

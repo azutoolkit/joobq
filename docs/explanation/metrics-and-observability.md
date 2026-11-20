@@ -18,9 +18,9 @@ Core records what happens in Redis: a latency histogram and counters always, and
 
 ```mermaid
 flowchart LR
-  W[Core worker] -->|XADD, PUBLISH| E[(joobq:events stream and joobq:events:live)]
-  W -->|HINCRBY| L[(joobq:stats:latency)]
-  W -->|heartbeat| R[(joobq:worker:<id>)]
+  W[Core worker] -->|XADD, PUBLISH| E[(joobq:v1:events stream and joobq:v1:events:live)]
+  W -->|HINCRBY| L[(joobq:v1:stats:latency)]
+  W -->|heartbeat| R[(joobq:v1:worker:<id>)]
   E --> UI[JoobQUI console, live]
   L --> UI
   R --> UI
@@ -57,9 +57,9 @@ Without a token the same request answers `401`. The job ran on an SDK worker, wh
 
 | Signal | Where | Kind | Description |
 | --- | --- | --- | --- |
-| Lifecycle events | `joobq:events`, `joobq:events:live` | Redis stream, pub/sub | Enqueue, start, completion, retry, dead letter, pause, resize; written by a subscribed `RedisEventSink` |
-| Run time | `joobq:stats:latency` | Redis hash | Histogram buckets of `perform` time per queue |
-| Worker heartbeat | `joobq:worker:<id>`, `joobq:workers` | Redis key with a 30 s TTL, sorted set | Every 10 s from `JoobQ::WorkerRegistry#start`: host, pid, queues, concurrency, active fibers, RSS, CPU |
+| Lifecycle events | `joobq:v1:events`, `joobq:v1:events:live` | Redis stream, pub/sub | Enqueue, start, completion, retry, dead letter, pause, resize; written by a subscribed `RedisEventSink` |
+| Run time | `joobq:v1:stats:latency` | Redis hash | Histogram buckets of `perform` time per queue |
+| Worker heartbeat | `joobq:v1:worker:<id>`, `joobq:v1:workers` | Redis key with a 30 s TTL, sorted set | Every 10 s from `JoobQ::WorkerRegistry#start`: host, pid, queues, concurrency, active fibers, RSS, CPU |
 | Structured logs | `JoobQ::JSONLogFormatter` | `Log::Formatter` | Opt-in NDJSON: timestamp, severity, source, message, pid, data, context |
 | Pro metrics | `JoobQPro::Middleware::Metrics.instance` | middleware | Counters and percentiles; `/joobq/metrics`, `/joobq/percentiles`, `/joobq/alerts` on Core's management API |
 | JoobQUI `/metrics` | JoobQUI web process | Prometheus text 0.0.4 | Queue gauges, processed counters, job duration histogram, workflows by status, API request counters, leader leases, build info |

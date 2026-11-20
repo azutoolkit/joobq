@@ -97,7 +97,7 @@ module JoobQ
         timeout.call(job, queue, "test-worker", next_middleware)
 
         # Job should be in dead letter queue
-        dead_count = store.redis.zcard("joobq:dead_letter")
+        dead_count = store.redis.zcard("joobq:v1:dead_letter")
         dead_count.should be >= 0 # Depends on implementation
       end
 
@@ -154,7 +154,7 @@ module JoobQ
         job.queue = "example"
 
         # Add to processing
-        processing_key = "joobq:processing:example"
+        processing_key = "joobq:v1:processing:example"
         store.redis.lpush(processing_key, job.to_json)
 
         # Simulate failure
@@ -179,7 +179,7 @@ module JoobQ
         job.queue = "example"
 
         # Add to processing
-        processing_key = "joobq:processing:example"
+        processing_key = "joobq:v1:processing:example"
         store.redis.lpush(processing_key, job.to_json)
 
         # Simulate failure
@@ -191,7 +191,7 @@ module JoobQ
         end
 
         # Should be in dead letter
-        dead_count = store.redis.zcard("joobq:dead_letter")
+        dead_count = store.redis.zcard("joobq:v1:dead_letter")
         dead_count.should be >= 0
       end
 
@@ -212,7 +212,7 @@ module JoobQ
         job.queue = "example"
 
         # Set a retry lock
-        retry_lock_key = "joobq:retry_lock:#{job.jid}"
+        retry_lock_key = "joobq:v1:retry_lock:#{job.jid}"
         store.redis.set(retry_lock_key, "testing", ex: 30)
 
         # Process successfully

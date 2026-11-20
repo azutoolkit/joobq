@@ -78,7 +78,8 @@ module JoobQ
       verify_encryption_keys
       if redis_store = store.as?(RedisStore)
         redis_store.ensure_list_move_support!
-        if redis_store.redis.exists("joobq:delivery-bridge:#{name}") > 0
+        Keyspace.warn_once(redis_store, (JoobQ.queues.keys + [name]).uniq)
+        if [Keys.delivery_bridge(name), Keys.legacy_delivery_bridge(name)].any? { |marker| redis_store.redis.exists(marker) > 0 }
           raise ArgumentError.new("queue is bound to leased delivery; a legacy worker cannot start")
         end
       end
@@ -350,7 +351,7 @@ module JoobQ
         # Still serialize typed jobs (including encryption converters); size is only a buffer capacity hint.
         redis_store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size, json_sizes: json_sizes)
         if raw_jobs = unreadable
-          redis_store.redis.multi { |multi| raw_jobs.each { |job_str| multi.rpush(name, job_str) } }
+          redis_store.redis.multi { |multi| raw_jobs.each { |job_str| multi.rpush(Keys.queue(name), job_str) } }
         end
       else
         store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)
@@ -506,20 +507,22 @@ module JoobQ
 
     # Pipelined job cleanup for improved performance
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
-    def cleanup_job_processing_pipelined(worker_id : String, job_json : String) : Nil
+    def cleanup_job_processing_pipelined(worker_id : String, job_json : String) : Bool
       store.cleanup_job(job_json, name)
     rescue ex
       Log.error &.emit("Error in pipelined job cleanup", queue: name, worker: worker_id,
         job_data_length: job_json.size, error: ex.message)
+      false
     end
 
     # Enhanced cleanup for successfully completed jobs
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
-    def cleanup_completed_job_pipelined(worker_id : String, job_json : String) : Nil
+    def cleanup_completed_job_pipelined(worker_id : String, job_json : String) : Bool
       store.mark_job_completed(job_json, name)
     rescue ex
       Log.error &.emit("Error in completed job cleanup", queue: name, worker: worker_id,
         job_data_length: job_json.size, error: ex.message)
+      false
     end
 
     # Verify that a job has been properly removed from processing queue

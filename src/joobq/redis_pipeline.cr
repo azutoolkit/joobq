@@ -82,7 +82,7 @@ module JoobQ
 
       @redis.pipelined do |pipe|
         queue_names.each do |queue_name|
-          pipe.del(queue_name)
+          pipe.del(Keys.queue(queue_name))
         end
       end
       track_pipeline_operation(queue_names.size, true)
@@ -102,7 +102,7 @@ module JoobQ
 
       results = @redis.pipelined do |pipe|
         queue_names.each do |queue_name|
-          pipe.llen(queue_name)
+          pipe.llen(Keys.queue(queue_name))
         end
       end
 
@@ -150,8 +150,8 @@ module JoobQ
     def cleanup_jobs_batch(job_jsons : Array(String), queue_name : String) : Nil
       return if job_jsons.empty?
 
-      owned_key = "joobq:processing:#{queue_name}:#{@owner_id}"
-      legacy_key = "joobq:processing:#{queue_name}"
+      owned_key = Keys.processing(queue_name, @owner_id)
+      legacy_key = Keys.processing(queue_name)
 
       @redis.pipelined do |pipe|
         # Remove from this process's list and the legacy shared list (a migrated or seeded job)
@@ -161,8 +161,8 @@ module JoobQ
         end
 
         # Update statistics
-        pipe.hincrby("joobq:stats:processed", queue_name, job_jsons.size)
-        pipe.hincrby("joobq:stats:total_processed", "global", job_jsons.size)
+        pipe.hincrby(Keys.stat("processed"), queue_name, job_jsons.size)
+        pipe.hincrby(Keys.stat("total_processed"), "global", job_jsons.size)
       end
 
       track_pipeline_operation(job_jsons.size + 2, true) # +2 for stats updates

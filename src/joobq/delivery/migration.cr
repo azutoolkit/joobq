@@ -51,7 +51,7 @@ module JoobQ::Delivery
     private def inventory
       entries = {} of String => Tuple(String, String, State, Int64)
       @source_entries = 0
-      [@queue, "joobq:processing:#{@queue}"].each do |key|
+      [Keys.queue(@queue), Keys.processing(@queue)].each do |key|
         offset = 0
         loop do
           page = @redis.lrange(key, offset, offset + 99)
@@ -112,6 +112,7 @@ module JoobQ::Delivery
 
     def initialize(@redis : Redis::PooledClient, @namespace : String)
       raise ArgumentError.new("invalid namespace") unless @namespace.matches?(/\A[a-zA-Z0-9_.~-]{1,128}\z/)
+      Keys.check_namespace!(@redis, @namespace)
       @prefix = "joobq:v1:#{@namespace}:"
     end
 

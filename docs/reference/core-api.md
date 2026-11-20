@@ -37,8 +37,8 @@ description: The public Crystal API of JoobQ Core 0.5.6 (jobs, queues, workers, 
 
 | Member | Description |
 | --- | --- |
-| `pause!`, `resume!`, `paused?` | Flag `joobq:queue:<name>:paused` in Redis, read by workers of every process (cached 500 ms) |
-| `resize(count)` | Sets this process's worker count and stores it in `joobq:queue:<name>:config` |
+| `pause!`, `resume!`, `paused?` | Flag `joobq:v1:paused:<name>` in Redis, read by workers of every process (cached 500 ms) |
+| `resize(count)` | Sets this process's worker count and stores it in `joobq:v1:config:<name>` |
 | `size`, `clear`, `stop!` | Waiting jobs, delete them, stop this process's workers |
 | `name`, `job_type`, `total_workers`, `running_workers`, `throttle_limit` | Read-only properties |
 
@@ -46,7 +46,7 @@ description: The public Crystal API of JoobQ Core 0.5.6 (jobs, queues, workers, 
 
 | Member | Description |
 | --- | --- |
-| `count(queue = nil) : Int64`, `counts : Hash(String, Int64)` | Entries in `joobq:dead_letter`, overall or per queue |
+| `count(queue = nil) : Int64`, `counts : Hash(String, Int64)` | Entries in `joobq:v1:dead_letter`, overall or per queue |
 | `page(offset = 0, limit = 50, queue = nil) : Array(Entry)` | One page of entries |
 | `find(jid) : Entry?` | One entry |
 | `redrive(jids) : Outcome` | Puts entries back on their queue with `retries = max_retries`, a new `expires` and no error |
@@ -58,8 +58,8 @@ description: The public Crystal API of JoobQ Core 0.5.6 (jobs, queues, workers, 
 
 | Class | Use |
 | --- | --- |
-| `JoobQ::WorkerRegistry.new.start` | Heartbeat every 10 s to `joobq:worker:<id>` (TTL 30 s), indexed in `joobq:workers` |
-| `JoobQ::Events.subscribe(JoobQ::RedisEventSink.new)` | Writes this process's lifecycle events to `joobq:events` and publishes them on `joobq:events:live` |
+| `JoobQ::WorkerRegistry.new.start` | Heartbeat every 10 s to `joobq:v1:worker:<id>` (TTL 30 s), indexed in `joobq:v1:workers` |
+| `JoobQ::Events.subscribe(JoobQ::RedisEventSink.new)` | Writes this process's lifecycle events to `joobq:v1:events` and publishes them on `joobq:v1:events:live` |
 | `JoobQ::JSONLogFormatter` | `Log::Formatter` for NDJSON log records |
 | `JoobQ::ManagementPolicy.from_env` | Reads `JOOBQ_API_READER_TOKEN`, `JOOBQ_API_OPERATOR_TOKEN`, `JOOBQ_API_ADMIN_TOKEN` |
 | `JoobQ::Delivery::Runtime` | Opt-in leased runtime, **Preview** (see [Delivery](../explanation/delivery.md)) |

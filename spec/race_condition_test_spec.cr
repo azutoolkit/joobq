@@ -80,7 +80,7 @@ module JoobQ
         job.max_retries = 3
 
         # Add to processing queue
-        processing_key = "joobq:processing:example"
+        processing_key = "joobq:v1:processing:example"
         store.redis.lpush(processing_key, job.to_json)
         store.redis.lpush(processing_key, job.to_json) # Duplicate
 
@@ -114,7 +114,7 @@ module JoobQ
         job.dead!
 
         # Add same job to multiple queues (simulate race condition)
-        processing_key = "joobq:processing:example"
+        processing_key = "joobq:v1:processing:example"
         3.times { store.redis.lpush(processing_key, job.to_json) }
 
         # Try to move to dead letter concurrently
@@ -129,7 +129,7 @@ module JoobQ
         3.times { channel.receive }
 
         # Should be in dead letter queue exactly once
-        store.redis.zcard("joobq:dead_letter").should eq(1)
+        store.redis.zcard("joobq:v1:dead_letter").should eq(1)
 
         # Should not be in processing queue
         store.redis.llen(processing_key).should eq(0)
@@ -176,7 +176,7 @@ module JoobQ
         job = RetryTestJob.new(1)
         job.retries = 2
 
-        processing_key = "joobq:processing:example"
+        processing_key = "joobq:v1:processing:example"
         store.redis.lpush(processing_key, job.to_json)
 
         # Multiple workers try to retry same job
@@ -213,7 +213,7 @@ module JoobQ
         queue.stop!
 
         # Jobs might be in processing queue
-        processing_size = store.redis.llen("joobq:processing:example")
+        processing_size = store.redis.llen("joobq:v1:processing:example")
 
         # All jobs should eventually be recovered
         # (This tests dead job recovery mechanisms)

@@ -3,7 +3,7 @@ module JoobQ
     Log = ::Log.for("EXPIRED_JOB_REAPER")
 
     PAGE_SIZE   = 100
-    DEAD_LETTER = "joobq:dead_letter"
+    DEAD_LETTER = Keys::DEAD_LETTER
 
     @loop = BackgroundLoop.new("expired_job_reaper")
 
@@ -48,12 +48,12 @@ module JoobQ
           # expired ones are then reaped by the waiting scan below.
           recovered = redis_store.recover_orphaned_processing(queue_name)
 
-          reaped_waiting = scan_and_reap_queue(redis_store, queue_name)
+          reaped_waiting = scan_and_reap_queue(redis_store, Keys.queue(queue_name), stats_queue: queue_name)
 
           # Reap expired jobs only from the legacy shared list. A live process's own list is left to that process
           # (its Timeout middleware), so the reaper never dead-letters a job a worker is still running; a crashed
           # process's list is emptied by recovery above before this runs.
-          reaped_processing = scan_and_reap_queue(redis_store, "joobq:processing:#{queue_name}", stats_queue: queue_name)
+          reaped_processing = scan_and_reap_queue(redis_store, Keys.processing(queue_name), stats_queue: queue_name)
 
           total = reaped_waiting + reaped_processing
           if total > 0 || recovered > 0
@@ -113,8 +113,8 @@ module JoobQ
           DeadLetterQueue.add(redis_store.redis, current_time_ms, expired_jobs)
           redis_store.redis.pipelined do |pipe|
             expired_jobs.each { |job_json| pipe.lrem(list_key, 0, job_json) }
-            pipe.hincrby("joobq:stats:expired", stats_key, expired_jobs.size)
-            pipe.hincrby("joobq:stats:dead_letter", stats_key, expired_jobs.size)
+            pipe.hincrby(Keys.stat("expired"), stats_key, expired_jobs.size)
+            pipe.hincrby(Keys.stat("dead_letter"), stats_key, expired_jobs.size)
           end
           total_reaped += expired_jobs.size
           # Removed items shift list down; advance past non-expired items only

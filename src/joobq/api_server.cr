@@ -718,7 +718,7 @@ module JoobQ
           redis_store = RedisStore.instance
 
           # Use cached dead jobs to reduce Redis load
-          cached_dead_jobs = redis_store.redis.zrange("joobq:dead_letter", 0, [limit, 100].max - 1).map(&.as(String))
+          cached_dead_jobs = redis_store.redis.zrange(Keys::DEAD_LETTER, 0, [limit, 100].max - 1).map(&.as(String))
 
           dead_jobs = cached_dead_jobs.select do |job_json|
             if queue_name

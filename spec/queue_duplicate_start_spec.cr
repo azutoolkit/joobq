@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 # Two `Queue` instances of one name in one process share the process's `owner_id`, so they share one processing list
-# `joobq:processing:<queue>:<owner>`. Starting the second must not run restart recovery (`include_self`): that would
+# `joobq:v1:processing:<queue>:<owner>`. Starting the second must not run restart recovery (`include_self`): that would
 # drain the first instance's in-flight jobs back to the queue head and run them twice. Recovery after every instance
 # of the name has stopped is unchanged.
 module JoobQ
@@ -40,7 +40,7 @@ module JoobQ
   describe "starting a second Queue instance of a running queue name" do
     store = JoobQ.store.as(RedisStore)
     redis = store.redis
-    owned = ->(name : String) { "joobq:processing:#{name}:#{store.owner_id}" }
+    owned = ->(name : String) { "joobq:v1:processing:#{name}:#{store.owner_id}" }
     name = ""
 
     before_each do
@@ -50,7 +50,7 @@ module JoobQ
 
     after_each do
       DuplicateStartJob::RELEASE.set(true)
-      redis.del(name, owned.call(name))
+      redis.del(JoobQ::Keys.queue(name), owned.call(name))
     end
 
     it "does not re-queue the first instance's in-flight job" do
@@ -67,12 +67,12 @@ module JoobQ
         # A re-queued job would run a second time (B's workers claim it) while the first is still blocked.
         eventually(400.milliseconds) { DuplicateStartJob.runs("blocker") > 1 }.should be_false
         redis.llen(owned.call(name)).should eq(1)
-        redis.llen(name).should eq(0)
+        redis.llen(JoobQ::Keys.queue(name)).should eq(0)
 
         DuplicateStartJob::RELEASE.set(true)
         eventually { redis.llen(owned.call(name)) == 0 }.should be_true
         DuplicateStartJob.runs("blocker").should eq(1)
-        redis.llen(name).should eq(0)
+        redis.llen(JoobQ::Keys.queue(name)).should eq(0)
       ensure
         DuplicateStartJob::RELEASE.set(true)
         a.stop!

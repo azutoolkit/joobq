@@ -3,7 +3,7 @@ module JoobQ
   #
   # Each execution lands in one of a fixed set of logarithmic buckets (eight per decade, 1 ms to about 12 minutes,
   # then one for anything slower). Workers keep counts in memory and add them to the cumulative hash
-  # `joobq:stats:latency` ("queue|bucket" => count) every few seconds, like the other `joobq:stats:*` counters.
+  # `joobq:v1:stats:latency` ("queue|bucket" => count) every few seconds, like the other `joobq:v1:stats:*` counters.
   # A reader that samples the hash twice has the distribution of what ran in between, and merges
   # distributions by adding buckets.
   #
@@ -14,7 +14,7 @@ module JoobQ
   module Latency
     Log = ::Log.for("LATENCY")
 
-    KEY           = "joobq:stats:latency"
+    KEY           = Keys::LATENCY
     FLUSH_EVERY   = 5.seconds
     FIRST_SECONDS = 0.001
     PER_DECADE    =     8

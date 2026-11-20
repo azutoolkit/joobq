@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 # Queue order and crash recovery at the store level. Producers RPUSH to the tail; a process claims from the head into
-# its own per-process list `joobq:processing:<queue>:<owner>` and publishes a liveness heartbeat. Recovery returns a
+# its own per-process list `joobq:v1:processing:<queue>:<owner>` and publishes a liveness heartbeat. Recovery returns a
 # process's jobs to the HEAD of the queue only once that process's heartbeat has lapsed, so a live process's in-flight
 # jobs are never moved and never run twice.
 module JoobQ
@@ -11,48 +11,48 @@ module JoobQ
     name = "fifo_spec"
     self_owner = store.owner_id
 
-    owned = ->(owner : String) { "joobq:processing:#{name}:#{owner}" }
-    legacy = "joobq:processing:#{name}"
+    owned = ->(owner : String) { "joobq:v1:processing:#{name}:#{owner}" }
+    legacy = "joobq:v1:processing:#{name}"
     live = ->(owner : String) { redis.zadd(RedisStore::OWNERS, Time.utc.to_unix_ms, owner) }
     dead = ->(owner : String) { redis.zrem(RedisStore::OWNERS, owner) }
     # A worker claims onto the HEAD of its processing list; seed the same layout for a given claim order.
     seed_claims = ->(owner : String, jobs : Array(String)) { jobs.each { |job| redis.lpush(owned.call(owner), job) } }
 
     before_each do
-      redis.del(name, legacy, owned.call(self_owner), owned.call("host:1"), owned.call("host:2"))
+      redis.del(JoobQ::Keys.queue(name), legacy, owned.call(self_owner), owned.call("host:1"), owned.call("host:2"))
       ["#{self_owner}", "host:1", "host:2"].each { |o| redis.zrem(RedisStore::OWNERS, o) }
     end
     after_each do
-      redis.del(name, legacy, owned.call(self_owner), owned.call("host:1"), owned.call("host:2"))
+      redis.del(JoobQ::Keys.queue(name), legacy, owned.call(self_owner), owned.call("host:1"), owned.call("host:2"))
       ["#{self_owner}", "host:1", "host:2"].each { |o| redis.zrem(RedisStore::OWNERS, o) }
     end
 
     it "probes the server for LMOVE (Redis 6.2+) and accepts this one" do
       store.ensure_list_move_support!
       store.ensure_list_move_support!
-      redis.exists("joobq:lmove-probe").should eq(0)
+      redis.exists("joobq:v1:lmove-probe").should eq(0)
     end
 
     describe "claiming" do
       it "claims the oldest job first into this process's own list" do
-        redis.rpush(name, "A", "B", "C")
+        redis.rpush(JoobQ::Keys.queue(name), "A", "B", "C")
 
         store.claim_job(name, "w1", Job1).should eq("A")
-        redis.lrange(name, 0, -1).should eq(["B", "C"])
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["B", "C"])
         redis.lrange(owned.call(self_owner), 0, -1).should eq(["A"])
         redis.exists(legacy).should eq(0) # 0.6 never claims into the shared list
       end
 
       it "claims a batch from the head, oldest first, and leaves the newer jobs queued" do
-        redis.rpush(name, "A", "B", "C", "D", "E")
+        redis.rpush(JoobQ::Keys.queue(name), "A", "B", "C", "D", "E")
 
         store.claim_jobs_batch(name, "w1", Job1, 3).should eq(["A", "B", "C"])
-        redis.lrange(name, 0, -1).should eq(["D", "E"])
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["D", "E"])
         redis.llen(owned.call(self_owner)).should eq(3)
       end
 
       it "lists the next job to run first" do
-        redis.rpush(name, "A", "B", "C")
+        redis.rpush(JoobQ::Keys.queue(name), "A", "B", "C")
         store.list_jobs(name).first.should eq("A")
         store.claim_job(name, "w1", Job1).should eq("A")
       end
@@ -60,24 +60,24 @@ module JoobQ
 
     describe "#recover_orphaned_processing" do
       it "returns a dead process's jobs to the head of the queue, in claim order, and deletes its list" do
-        redis.rpush(name, "W1", "W2")               # already waiting
-        seed_claims.call("host:1", ["A", "B", "C"]) # host:1 claimed A, then B, then C
+        redis.rpush(JoobQ::Keys.queue(name), "W1", "W2") # already waiting
+        seed_claims.call("host:1", ["A", "B", "C"])      # host:1 claimed A, then B, then C
         dead.call("host:1")
 
         store.recover_orphaned_processing(name).should eq(3)
-        redis.lrange(name, 0, -1).should eq(["A", "B", "C", "W1", "W2"])
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["A", "B", "C", "W1", "W2"])
         redis.exists(owned.call("host:1")).should eq(0)
       end
 
       it "leaves alone the lists of a queue whose name extends this one (default and default:x)" do
         longer = "#{name}:x"
-        other = "joobq:processing:#{longer}:host:7" # host:7 is LIVE and holds a job of the longer queue
+        other = "joobq:v1:processing:#{longer}:host:7" # host:7 is LIVE and holds a job of the longer queue
         redis.lpush(other, "THEIRS")
         live.call("host:7")
         begin
           store.recover_orphaned_processing(name).should eq(0)
           redis.lrange(other, 0, -1).should eq(["THEIRS"])
-          redis.llen(name).should eq(0)
+          redis.llen(JoobQ::Keys.queue(name)).should eq(0)
           store.processing_queue_size(name).should eq(0)
           store.processing_queue_size(longer).should eq(1)
         ensure
@@ -86,7 +86,7 @@ module JoobQ
       end
 
       it "does not treat glob characters in a queue name as a pattern" do
-        other = "joobq:processing:#{name}zz:host:8"
+        other = "joobq:v1:processing:#{name}zz:host:8"
         redis.lpush(other, "THEIRS")
         dead.call("host:8")
         begin
@@ -103,11 +103,11 @@ module JoobQ
 
         store.recover_orphaned_processing(name).should eq(0)
         redis.lrange(owned.call("host:1"), 0, -1).should eq(["L2", "L1"]) # untouched (head is newest claim)
-        redis.llen(name).should eq(0)
+        redis.llen(JoobQ::Keys.queue(name)).should eq(0)
       end
 
       it "recovers a dead process while leaving a live one alone, with no duplication or loss (crash + restart)" do
-        redis.rpush(name, "WAIT")
+        redis.rpush(JoobQ::Keys.queue(name), "WAIT")
         seed_claims.call("host:1", ["LIVE"]) # a worker still running
         live.call("host:1")
         seed_claims.call("host:2", ["DEAD"]) # a crashed worker
@@ -116,12 +116,12 @@ module JoobQ
         store.recover_orphaned_processing(name).should eq(1)
 
         # DEAD ran once: now at the head of the queue, gone from processing; LIVE untouched.
-        redis.lrange(name, 0, -1).should eq(["DEAD", "WAIT"])
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["DEAD", "WAIT"])
         redis.exists(owned.call("host:2")).should eq(0)
         redis.lrange(owned.call("host:1"), 0, -1).should eq(["LIVE"])
 
         # No copy of any job exists in more than one place.
-        everywhere = (redis.lrange(name, 0, -1) + redis.lrange(owned.call("host:1"), 0, -1) + redis.lrange(owned.call("host:2"), 0, -1)).map(&.as(String))
+        everywhere = (redis.lrange(JoobQ::Keys.queue(name), 0, -1) + redis.lrange(owned.call("host:1"), 0, -1) + redis.lrange(owned.call("host:2"), 0, -1)).map(&.as(String))
         everywhere.sort.should eq(["DEAD", "LIVE", "WAIT"])
       end
 
@@ -131,7 +131,7 @@ module JoobQ
 
         store.recover_orphaned_processing(name, include_self: false).should eq(0) # a live reaper pass
         store.recover_orphaned_processing(name, include_self: true).should eq(2)  # a restart of this process
-        redis.lrange(name, 0, -1).should eq(["X", "Y"])
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["X", "Y"])
       end
 
       it "migrates the legacy shared list only when no other process is live" do
@@ -141,42 +141,42 @@ module JoobQ
         store.recover_orphaned_processing(name).should eq(0) # held back while another owner is live
         dead.call("host:9")
         store.recover_orphaned_processing(name).should eq(2)
-        redis.lrange(name, 0, -1).should eq(["OLD1", "OLD2"])
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["OLD1", "OLD2"])
       end
     end
 
     describe "#requeue_many_from_processing (shutdown)" do
       it "puts abandoned jobs at the head of their queue so they run next, keeping claim order" do
-        redis.rpush(name, "X", "Y")
+        redis.rpush(JoobQ::Keys.queue(name), "X", "Y")
         seed_claims.call(self_owner, ["A", "B"]) # this process claimed A then B
 
         store.requeue_many_from_processing([{name, "A"}, {name, "B"}]).should eq(2)
-        redis.lrange(name, 0, -1).should eq(["A", "B", "X", "Y"])
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["A", "B", "X", "Y"])
         store.claim_job(name, "w1", Job1).should eq("A")
       end
 
       it "keeps claim order across script batches" do
         jobs = (0...(RedisStore::REQUEUE_BATCH + 50)).map { |i| "job-#{i}" }
         jobs.reverse_each { |job| redis.lpush(owned.call(self_owner), job) } # claimed job-0 first
-        redis.rpush(name, "newer")
+        redis.rpush(JoobQ::Keys.queue(name), "newer")
 
         store.requeue_many_from_processing(jobs.map { |job| {name, job} }).should eq(jobs.size)
-        redis.lrange(name, 0, -1).should eq(jobs + ["newer"])
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(jobs + ["newer"])
       end
 
       it "also requeues a job sitting in the legacy shared list" do
         redis.lpush(legacy, "L")
         store.requeue_many_from_processing([{name, "L"}]).should eq(1)
-        redis.lrange(name, 0, -1).should eq(["L"])
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["L"])
       end
     end
 
     it "puts a job bounced for missing keys at the tail (requeue_from_processing)" do
-      redis.rpush(name, "X")
+      redis.rpush(JoobQ::Keys.queue(name), "X")
       redis.lpush(owned.call(self_owner), "A")
 
       store.requeue_from_processing("A", name).should be_true
-      redis.lrange(name, 0, -1).should eq(["X", "A"])
+      redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["X", "A"])
     end
   end
 end

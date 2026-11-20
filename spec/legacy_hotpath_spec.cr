@@ -53,7 +53,7 @@ module JoobQ
       raws.each { |raw| store.schedule_job(raw, 0_i64) }
       store.promote_due_jobs.should be_empty
       store.redis.zcard(RedisStore::DELAYED_SET).should eq(raws.size)
-      store.redis.llen("hotpath").should eq(0)
+      store.redis.llen(JoobQ::Keys.queue("hotpath")).should eq(0)
     end
 
     it "reloads promotion scripts after cache flush and retains source on destination failure" do
@@ -64,9 +64,9 @@ module JoobQ
         store.redis.command(["SCRIPT", "FLUSH"])
         store.promote_due_jobs.should eq([raw])
       end
-      store.redis.llen("hotpath").should eq(2)
+      store.redis.llen(JoobQ::Keys.queue("hotpath")).should eq(2)
       bad = %({"queue":"wrong-type"})
-      store.redis.set("wrong-type", "value")
+      store.redis.set(JoobQ::Keys.queue("wrong-type"), "value")
       store.schedule_job(bad, 0_i64)
       store.promote_due_jobs.should be_empty
       store.redis.zscore(RedisStore::DELAYED_SET, bad).should_not be_nil
@@ -79,15 +79,15 @@ module JoobQ
       store.schedule_job(other, 0_i64)
       store.schedule_job(mine, 1_i64)
       store.process_due_delayed_jobs("hotpath").should eq([other, mine])
-      store.redis.llen("other").should eq(0)
-      store.redis.llen("hotpath").should eq(1)
+      store.redis.llen(JoobQ::Keys.queue("other")).should eq(0)
+      store.redis.llen(JoobQ::Keys.queue("hotpath")).should eq(1)
       store.redis.zscore(RedisStore::DELAYED_SET, other).should_not be_nil
     end
 
     it "honors queue pagination instead of fetching the default 200 jobs" do
       store = JoobQ.store.as(RedisStore)
       queue = Queue(HotpathJob).new("hotpath", 0)
-      8.times { |i| store.redis.rpush("hotpath", i.to_s) }
+      8.times { |i| store.redis.rpush(JoobQ::Keys.queue("hotpath"), i.to_s) }
       queue.jobs(2, 3).should eq(["3", "4", "5"])
       queue.jobs(4, 3).should be_empty
     end
@@ -97,7 +97,7 @@ module JoobQ
       jobs = Array.new(5) { |i| HotpathJob.new(i, ("☃\n\"\\" * (i + 1))) }
       expect_raises(ArgumentError) { store.enqueue_batch(jobs, 2, json_sizes: [1]) }
       expect_raises(ArgumentError) { store.enqueue_batch(jobs, 2, json_sizes: [1, 1, 1, 1, -1]) }
-      store.redis.llen("hotpath").should eq(0)
+      store.redis.llen(JoobQ::Keys.queue("hotpath")).should eq(0)
       store.enqueue_batch(jobs, 2, json_sizes: [0, 1, 4096, 2, 3])
       stored = store.list_jobs("hotpath").map { |raw| HotpathJob.from_json(raw) }
       stored.map(&.index).should eq(jobs.map(&.index))

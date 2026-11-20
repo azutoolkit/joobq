@@ -31,7 +31,8 @@ module JoobQ
   end
 
   # How many jobs the shutdown had to give up on (returned to their queues) because they were still running at the
-  # deadline. Zero after a clean shutdown.
+  # deadline, plus the retained copies (jobs whose outcome Redis could not store) the shutdown itself had to put back.
+  # Zero after a clean shutdown.
   def self.abandoned_jobs : Int32
     @@abandoned.get
   end
@@ -41,11 +42,15 @@ module JoobQ
   # 1. the REST API started by `forge` (no new requests)
   # 2. every scheduler of the configuration, the delayed-job scheduler and the expired-job reaper (no new work)
   # 3. the workers of every queue (they claim nothing more)
-  # 4. the jobs claimed or running, waited for until `timeout` minus `SHUTDOWN_RESERVE` (at most half of `timeout`)
+  # 4. the jobs claimed, running or finishing (cleaning up after themselves), waited for until `timeout` minus
+  #    `SHUTDOWN_RESERVE` (at most half of `timeout`)
   # 5. the jobs still not finished then: each is put back at the head of its queue in one atomic step, so they run
   #    next in the order this process took them (`RedisStore#requeue_many_from_processing`; jobs still settling are
   #    put back a moment later, in front of them), jobs not yet started are never started, and `abandoned_jobs`
   #    counts them
+  #    Then the copies of jobs whose outcome Redis could not store (retained; the owner heartbeat re-drives them
+  #    every second while Redis answers) are put back the same way. `abandoned_jobs` counts the copies this step put
+  #    back (or could not), not those the owner had re-driven already
   # 6. the latency counters (flushed to Redis)
   #
   # What a job does after it was put back: its execution may well go on (a fiber cannot be killed) and finish its
@@ -82,6 +87,7 @@ module JoobQ
         requeue_deadline = {deadline - reserve / 2, Time.instant + SHUTDOWN_GRACE}.max
         step("requeue", requeue_deadline) { requeue_unfinished(requeue_deadline) }
       end
+      step("retained", {deadline, Time.instant + SHUTDOWN_GRACE}.max) { redrive_retained }
       step("latency", {deadline, Time.instant + SHUTDOWN_GRACE}.max) { Latency.stop }
       # Drop this process's liveness last, so any job left in its processing list becomes reclaimable at once by
       # another process rather than waiting out the heartbeat TTL.
@@ -106,6 +112,25 @@ module JoobQ
     late = InFlight.abandon_all(settling: true)
     Log.warn &.emit("Jobs still settling a failure at the deadline were returned to their queues anyway; their retry or dead-letter side effects may have been applied", count: late.size) unless late.empty?
     requeue(late)
+  end
+
+  # Puts the retained copies (jobs whose outcome Redis could not store) back at the head of their queues. Counts as
+  # abandoned only what this step put back, or could not reach: a copy the owner heartbeat re-drove already is no
+  # longer in the list and is not counted.
+  private def self.redrive_retained : Nil
+    return if InFlight.retained.empty?
+
+    moved = 0
+    begin
+      store = config.store
+      moved = store.redrive_retained if store.is_a?(RedisStore)
+    rescue ex
+      Log.error &.emit("Could not return retained jobs to their queues", error: ex.message)
+    end
+    unreachable = InFlight.retained
+    unreachable.each { |(token, _, _)| InFlight.release(token) }
+    @@abandoned.add(moved + unreachable.size)
+    Log.warn &.emit("Jobs whose outcome was not stored were returned to their queues", count: moved, unreachable: unreachable.size) if moved + unreachable.size > 0
   end
 
   private def self.requeue(jobs : Array({String, String})) : Nil
@@ -178,7 +203,7 @@ module JoobQ
   end
 
   # SIGTERM, SIGINT and SIGHUP (`Process.on_terminate` covers all three): shut down, then exit with status 0, or
-  # 3 when jobs had to be abandoned at the deadline. A second signal more than a second after the first (an
+  # 3 when jobs had to be abandoned at the deadline or retained copies had to be put back. A second signal more than a second after the first (an
   # impatient operator; a duplicate sent by a process group or a wrapper arrives together with the first and is
   # ignored) exits at once with status 1.
   def self.trap_termination(timeout : Time::Span) : Nil

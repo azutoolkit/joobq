@@ -22,7 +22,7 @@ sequenceDiagram
   participant R as Redis
   participant F as Job fibers
   W->>R: claim up to worker_batch_size minus in-flight
-  R-->>W: jobs moved to joobq:processing:<queue>
+  R-->>W: jobs moved to joobq:v1:processing:<queue>
   W->>F: spawn one fiber per job
   F->>R: record the outcome (done, retry or dead letter)
   Note over W: paused, full or shutting down: sleep 100 ms and look again
@@ -110,7 +110,7 @@ A job put back at shutdown runs again from the start on the next worker. Its `pe
 {% endhint %}
 
 {% hint style="info" %}
-**JoobQUI.** The Workers page shows each worker process that runs `JoobQ::WorkerRegistry.new.start`, with its heartbeat and the CPU and memory (RSS) it reports. Changing a queue's concurrency from the console stores the new count in Redis (`joobq:queue:<name>:config`).
+**JoobQUI.** The Workers page shows each worker process that runs `JoobQ::WorkerRegistry.new.start`, with its heartbeat and the CPU and memory (RSS) it reports. Changing a queue's concurrency from the console stores the new count in Redis (`joobq:v1:config:<name>`).
 {% endhint %}
 
 ## Next steps

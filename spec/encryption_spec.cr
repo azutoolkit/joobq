@@ -324,8 +324,8 @@ module JoobQ
           SecretJob.performed.should be_empty
           DeadLetterQueue.new(redis).count.should eq 0
           # claimed and put back whole: either in the queue or, for a moment, claimed again
-          eventually { redis.llen("secrets") + JoobQ.store.processing_queue_size("secrets") == 1 }.should be_true
-          redis.hget("joobq:stats:processed", "secrets").should be_nil # a bounce is not a processed job
+          eventually { redis.llen(JoobQ::Keys.queue("secrets")) + JoobQ.store.processing_queue_size("secrets") == 1 }.should be_true
+          redis.hget("joobq:v1:stats:processed", "secrets").should be_nil # a bounce is not a processed job
           redis_dump(redis).should contain("jqe1:a1:")
         ensure
           Encryption.key_backoff = 5.seconds
@@ -378,7 +378,7 @@ module JoobQ
         worker = Worker(SecretJob).new(2, done, queue)
         worker.run
         eventually { SecretJob.performed.size >= members }.should be_true
-        eventually { JoobQ.store.processing_queue_size("secrets") == 0 && redis.llen("secrets") == 0 }.should be_true
+        eventually { JoobQ.store.processing_queue_size("secrets") == 0 && redis.llen(JoobQ::Keys.queue("secrets")) == 0 }.should be_true
         worker.terminate
         SecretJob.performed.should eq [SECRET_TOKEN] * members # each stored retry runs once
       end
@@ -391,14 +391,14 @@ module JoobQ
         queue = Queue(SecretJob).new("secrets", 1)
 
         queue.add_batch_strings([bad, good])
-        redis.llen("secrets").should eq 2
+        redis.llen(JoobQ::Keys.queue("secrets")).should eq 2
 
-        redis.del("secrets")
+        redis.del(JoobQ::Keys.queue("secrets"))
         redis.zadd(RedisStore::DELAYED_SET, 1, bad)
         redis.zadd(RedisStore::DELAYED_SET, 2, good)
         JoobQ.config.schedulers.first.enqueue_due_jobs(current_time: 1.hour.from_now)
         redis.zcard(RedisStore::DELAYED_SET).should eq 0
-        redis.llen("secrets").should eq 2
+        redis.llen(JoobQ::Keys.queue("secrets")).should eq 2
       end
 
       it "writes one dead letter, not two, for an encrypted job failing on its last attempt" do
@@ -434,7 +434,7 @@ module JoobQ
         JoobQ.reset
         JoobQ.config.allow_plaintext_payloads = false
         plain = %({"jid":"#{UUID.random}","queue":"secrets","retries":0,"max_retries":0,"expires":#{Time.utc.to_unix_ms + 100000},"status":"Enqueued","order_id":1,"token":"plain-secret-token"})
-        redis.rpush "secrets", plain
+        redis.rpush JoobQ::Keys.queue("secrets"), plain
         worker = Worker(SecretJob).new(1, Channel(Nil).new, Queue(SecretJob).new("secrets", 1))
         worker.run
         dlq = DeadLetterQueue.new(redis)
@@ -496,7 +496,7 @@ module JoobQ
       it "withholds the payload when it cannot be parsed in a job class with encrypted properties" do
         JoobQ.reset
         broken = %({"jid":"#{UUID.random}","queue":"secrets","token":"plain-secret-xyz","order_id":"not a number"})
-        redis.rpush "secrets", broken
+        redis.rpush JoobQ::Keys.queue("secrets"), broken
         worker = Worker(SecretJob).new(1, Channel(Nil).new, Queue(SecretJob).new("secrets", 1))
         worker.run
         eventually { DeadLetterQueue.new(redis).count == 1 }.should be_true
@@ -528,7 +528,7 @@ module JoobQ
       it "reads a plain job that was queued before encryption" do
         JoobQ.reset
         plain = %({"jid":"#{UUID.random}","queue":"secrets","retries":0,"max_retries":0,"expires":#{Time.utc.to_unix_ms + 100000},"status":"Enqueued","order_id":1,"token":"legacy-plain-token","note":null,"meta":null})
-        redis.rpush "secrets", plain
+        redis.rpush JoobQ::Keys.queue("secrets"), plain
 
         queue = Queue(SecretJob).new("secrets", 1)
         done = Channel(Nil).new

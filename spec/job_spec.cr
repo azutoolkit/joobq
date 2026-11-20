@@ -395,12 +395,12 @@ module JoobQ
     describe ".delay" do
       it "delays job execution" do
         store = JoobQ.store.as(RedisStore)
-        store.clear_queue("joobq:delayed_jobs")
+        store.clear_queue("joobq:v1:delayed_jobs")
 
         jid = ExampleJob.delay(for: 1.hour, x: 1)
 
         jid.should be_a(UUID)
-        store.set_size("joobq:delayed_jobs").should eq(1)
+        store.set_size("joobq:v1:delayed_jobs").should eq(1)
       end
 
       it "marks job as Scheduled" do
@@ -412,12 +412,12 @@ module JoobQ
     describe ".enqueue_at" do
       it "enqueues job at specific time" do
         store = JoobQ.store.as(RedisStore)
-        store.clear_queue("joobq:delayed_jobs")
+        store.clear_queue("joobq:v1:delayed_jobs")
 
         jid = ExampleJob.enqueue_at(2.minutes, x: 10)
 
         jid.should be_a(UUID)
-        store.set_size("joobq:delayed_jobs").should eq(1)
+        store.set_size("joobq:v1:delayed_jobs").should eq(1)
       end
     end
 

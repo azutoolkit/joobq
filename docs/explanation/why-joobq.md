@@ -70,7 +70,7 @@ What you can check for yourself, and where:
 | --- | --- | --- |
 | Compile-time typed jobs | A job with a missing or mistyped argument does not compile | `JoobQ::Job` includes `JSON::Serializable` |
 | Only Redis needed | `shard.yml` lists `redis` and `cron_parser` | joobq `shard.yml` |
-| Failures kept, not lost | A job that keeps failing ends in `joobq:dead_letter` with its error | [Retries, backoff and the DLQ](retries-and-dead-letters.md) |
+| Failures kept, not lost | A job that keeps failing ends in `joobq:v1:dead_letter` with its error | [Retries, backoff and the DLQ](retries-and-dead-letters.md) |
 | Clean deploys | SIGTERM returns unfinished jobs to their queue; exit code 3 says it happened | [Workers and concurrency](workers-and-concurrency.md#shutdown) |
 | Live operations | JoobQUI shows queues, workers and dead letters from the same Redis | [Live observability and metrics](metrics-and-observability.md) |
 

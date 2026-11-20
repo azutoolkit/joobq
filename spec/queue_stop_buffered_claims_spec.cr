@@ -45,7 +45,7 @@ module JoobQ
   describe "stopping a Queue while the dispatcher holds claims no worker received" do
     store = JoobQ.store.as(RedisStore)
     redis = store.redis
-    owned = ->(name : String) { "joobq:processing:#{name}:#{store.owner_id}" }
+    owned = ->(name : String) { "joobq:v1:processing:#{name}:#{store.owner_id}" }
     name = ""
 
     before_each do
@@ -55,7 +55,7 @@ module JoobQ
 
     after_each do
       StopBufferedJob::RELEASE.set(true)
-      redis.del(name, owned.call(name))
+      redis.del(JoobQ::Keys.queue(name), owned.call(name))
     end
 
     it "releases them so the next start recovers and runs them once" do
@@ -107,7 +107,7 @@ module JoobQ
         abandoned = InFlight.abandon_all.select { |(queue, _)| queue == name }
         abandoned.map { |(_, job)| StopBufferedJob.from_json(job).label }.should eq(staged)
         store.requeue_many_from_processing(abandoned).should eq(2)
-        redis.lrange(name, 0, -1).map { |job| StopBufferedJob.from_json(job.to_s).label }.should eq(staged)
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).map { |job| StopBufferedJob.from_json(job.to_s).label }.should eq(staged)
         redis.llen(owned.call(name)).should eq(0)
       ensure
         JoobQ.spec_shut_down(false)

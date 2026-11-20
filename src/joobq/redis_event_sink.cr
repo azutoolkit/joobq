@@ -5,11 +5,11 @@ module JoobQ
   class RedisEventSink
     include EventSink
 
-    STREAM  = "joobq:events"
-    LIVE    = "joobq:events:live"
+    STREAM  = Keys::EVENTS
+    LIVE    = Keys::EVENTS_LIVE
     MAX_LEN = 50_000
 
-    TRIM_LOCK         = "joobq:events:trim_lock"
+    TRIM_LOCK         = Keys::EVENTS_TRIM_LOCK
     TRIM_LOCK_SECONDS = 10
     DEFAULT_MAX_BYTES = 64_i64 * 1024 * 1024
     # The stream is never trimmed below this many entries, whatever they weigh.

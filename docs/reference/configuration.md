@@ -59,13 +59,33 @@ Searched in order: `./joobq.yml`, `./config/joobq.yml`, `./config/joobq.yaml`, `
 | `JOOBQ_API_READER_TOKEN`, `JOOBQ_API_OPERATOR_TOKEN`, `JOOBQ_API_ADMIN_TOKEN` | none | Management API tokens, at least 32 bytes each |
 | `JOOBQ_PAYLOAD_KEYS`, `JOOBQ_PAYLOAD_KEY` | none | `id:key` entries (first one seals) for `encrypted_property` |
 | `JOOBQ_TRAP_SIGNALS` | on | `0`, `false`, `no`: `forge` installs no signal handlers |
-| `JOOBQ_EVENTS_MAX_BYTES` | 64 MiB | Byte cap of the `joobq:events` stream (also capped near 50,000 entries); `0` turns the byte cap off |
+| `JOOBQ_EVENTS_MAX_BYTES` | 64 MiB | Byte cap of the `joobq:v1:events` stream (also capped near 50,000 entries); `0` turns the byte cap off |
 | `LOG_LEVEL` | `info` | Read by `Log.setup_from_env` |
 | `JOOBQ_PRO_LICENSE` | none | Pro licence key |
 | `JOOBQ_PRO_BUILD_ID` | none | Build id of a Pro workflow worker |
 | `CRYSTAL_WORKERS` | Crystal's | Crystal runtime threads (multithreaded builds); JoobQ does not read it |
 
 JoobQUI's own variables are in [Configuration and environment variables](https://joobq-website.onrender.com/docs/reference/configuration-and-env-vars).
+
+## Redis keys
+
+Every key JoobQ writes is under `joobq:v1:`; `JoobQ::Keys` builds the names (`Keys.queue("default")`), so code that reads JoobQ's data should call it rather than build strings. The Delivery runtime keeps its state under `joobq:v1:<namespace>:` and refuses a namespace that equals one of the segments below.
+
+| Key | Type | Contents |
+| --- | --- | --- |
+| `joobq:v1:queue:<queue>` | list | Waiting jobs: producers push to the tail, workers claim from the head |
+| `joobq:v1:processing:<queue>:<host>:<pid>` | list | Jobs claimed by one process (`joobq:v1:processing:<queue>` is the shared list older workers used) |
+| `joobq:v1:processing-owners` | sorted set | Heartbeat of each process that owns a processing list |
+| `joobq:v1:delayed_jobs` | sorted set | Scheduled and retrying jobs |
+| `joobq:v1:dead_letter`, `joobq:v1:dead_letter:counts` | sorted set, hash | Dead jobs and their count per queue |
+| `joobq:v1:stats:<name>` | hash | Counters per queue, and `global` |
+| `joobq:v1:retry_lock:<jid>` | string | Makes one failure schedule one retry |
+| `joobq:v1:paused:<queue>`, `joobq:v1:config:<queue>` | string, hash | Pause flag and desired concurrency |
+| `joobq:v1:worker:<host>:<pid>`, `joobq:v1:workers` | string, sorted set | Worker heartbeat and its index |
+| `joobq:v1:events`, `joobq:v1:events:live` | stream, channel | Lifecycle events |
+| `joobq:v1:error_counts`, `joobq:v1:recent_errors`, `joobq:v1:error_index` | hash, hash, sorted set | Error records |
+
+A stored job carries its format version as `"v"`. See [Recover and migrate](../how-to/recover-and-migrate.md#upgrade-the-keyspace-from-06) to move a 0.6 keyspace.
 
 ## See also
 

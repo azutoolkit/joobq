@@ -1,5 +1,46 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed (upgrade note: the keyspace moved)
+
+- **Every Redis key is under `joobq:v1:`.** 0.6 stored a queue's waiting jobs under the bare queue name (a queue
+  `default` was the Redis key `default`) and everything else under `joobq:` without a version. Now `JoobQ::Keys` names
+  every key (`Keys.queue("default")` is `joobq:v1:queue:default`; processing lists, the delayed set, dead letters,
+  stats, retry locks, error records, workers, events and the delivery-bridge marker follow; the pause and config
+  flags are `joobq:v1:paused:<queue>` and `joobq:v1:config:<queue>`). Code that built these keys by hand (joobqui,
+  joobq-pro) must call `Keys` instead; land joobq-pro (Keys for the delivery-bridge marker, stats, error counts and the
+  bare queue list it reads) and joobqui together with this release. Until joobq-pro moves, `Queue#start` also reads the
+  0.6 marker `joobq:delivery-bridge:<queue>` (`Keys.legacy_delivery_bridge`, removed at 1.0), so the guard against a
+  legacy worker on a leased queue stays on. `Delivery::Ledger`, `Journal` and `Backup` refuse a new delivery namespace named like one of these families (`events`,
+  `config`, `queue`, `stats`, `worker`, `workers`, `paused`, `processing`, ...); a namespace of that name that already holds
+  delivery data keeps working and logs a warning.
+- **Upgrade with every JoobQ process stopped, then run `JoobQ.migrate_keyspace!(queues: [...])` once.** It renames the
+  bare lists of the queues you name and every `joobq:` key into the new namespace, refuses while another process has a
+  live heartbeat in either namespace, and reports `renamed: 0` and `merged: 0` when run again. Where the new version
+  already created a key (a start before the migration), it merges: the stale owner, worker and event keys are dropped,
+  sorted sets are united, counters added, and old list items go to the head of the new list; a key whose new name is
+  of another type is left and listed in `skipped`. The order is: stop every process, migrate, then start. A version that finds 0.6 keys logs an error at the first `Queue#start`; it does not read them. Running 0.6
+  and this version against one Redis at the same time is not supported.
+- **Stored jobs carry a format version, `"v": 1`.** A reader refuses a greater version with
+  `JoobQ::UnsupportedJobVersion` (a `JSON::ParseException`, so the worker dead-letters the payload unread and whole, and logs a
+  message naming the version; redrive it after upgrading). A job without `v` is a 0.6 job and is read as before.
+
+### Fixed
+
+- **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the
+  worker could not remove the job's copy from its own processing list (or could not store a failure), and nothing
+  returned the copy until the process was restarted: the heartbeat that protects the list came back by itself. The
+  claim is now kept as `retained` in `InFlight` (it stays counted while the cleanup runs, and turns retained in one
+  step when the cleanup fails), and the owner heartbeat loop puts each retained copy back at the head of its queue
+  (`RedisStore#redrive_retained`, one atomic script per copy, oldest claim first, at most once per copy; a copy
+  another process already reclaimed is forgotten). `Store#cleanup_job` and `#mark_job_completed` now return `false`
+  instead of `nil` after logging, and the abstract signatures say `Bool`. **A job that succeeded but whose cleanup could
+  not be stored runs again after an outage**: delivery stays at-least-once, so jobs must be safe to run twice.
+- **Shutdown counts the retained copies it has to put back.** A copy still retained at shutdown is returned to its queue
+  in a step of its own and counted in `JoobQ.abandoned_jobs`, so the process exits with status 3 (it used to exit 0 with
+  `abandoned_jobs: 0`). A copy the owner had already re-driven is not counted.
+
 ## 0.7.2
 
 ### Fixed

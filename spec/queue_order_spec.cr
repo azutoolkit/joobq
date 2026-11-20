@@ -26,7 +26,7 @@ module JoobQ
       previous_batch_size = JoobQ.config.worker_batch_size
       JoobQ.config.worker_batch_size = 1
       redis = JoobQ.store.as(RedisStore).redis
-      keys = [OrderRecordingJob::QUEUE, "joobq:processing:#{OrderRecordingJob::QUEUE}"]
+      keys = [OrderRecordingJob::QUEUE, "joobq:v1:processing:#{OrderRecordingJob::QUEUE}"]
       keys.each { |key| redis.del(key) }
       OrderRecordingJob::RAN.clear
 

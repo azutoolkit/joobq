@@ -163,7 +163,7 @@ A Core throttle in each of five processes allows five times the limit. A Pro per
 {% endhint %}
 
 {% hint style="info" %}
-**JoobQUI.** When a partner asks you to stop altogether, pause the queue from the console's Queues page. The pause flag lives in Redis (`joobq:queue:<name>:paused`), so workers in every process stop claiming within about half a second.
+**JoobQUI.** When a partner asks you to stop altogether, pause the queue from the console's Queues page. The pause flag lives in Redis (`joobq:v1:paused:<name>`), so workers in every process stop claiming within about half a second.
 {% endhint %}
 
 ## Next steps

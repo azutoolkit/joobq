@@ -18,9 +18,9 @@ module JoobQ
     @mutex = Sync::Mutex.new
 
     # Redis keys for error storage
-    private ERROR_COUNTS_KEY  = "joobq:error_counts"
-    private RECENT_ERRORS_KEY = "joobq:recent_errors"
-    private ERROR_INDEX_KEY   = "joobq:error_index"
+    private ERROR_COUNTS_KEY  = Keys::ERROR_COUNTS
+    private RECENT_ERRORS_KEY = Keys::RECENT_ERRORS
+    private ERROR_INDEX_KEY   = Keys::ERROR_INDEX
 
     # Flag to track if Redis data has been loaded
     @redis_loaded : Bool = false

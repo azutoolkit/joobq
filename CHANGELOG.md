@@ -2,7 +2,7 @@
 
 ## 0.8.1
 
-A patch release: one data-loss fix in the keyspace migration. Nothing else changes.
+A patch release: one data-loss fix in the keyspace migration, and a test-only CI change.
 
 ### Fixed
 
@@ -18,6 +18,13 @@ A patch release: one data-loss fix in the keyspace migration. Nothing else chang
   those names while its `joobq:v1:queue:<name>` list already existed, its 0.6 jobs were dropped: check that queue and
   enqueue them again from your source of truth (the 0.6 list is gone from Redis; a backup or RDB snapshot from before the
   migration still holds it).
+
+### Changed (CI)
+
+- **The delivery batch renewal spec no longer races the clock (#76).** "renews completed handlers while another handler in
+  their batch is blocked" used a 300 ms lease and a fixed 450 ms sleep and failed on slow Redis legs. It now uses a 2 s
+  lease, waits for the renewed deadlines in Redis, holds the claims past their original deadlines, and gives its final
+  waits a window that scales with the lease. Test only; no source change.
 
 ## 0.8.0
 

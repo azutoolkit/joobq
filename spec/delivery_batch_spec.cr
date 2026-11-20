@@ -117,8 +117,9 @@ describe "bounded durable delivery batches" do
   end
 
   it "renews completed handlers while another handler in their batch is blocked" do
+    # A lease with room for CI scheduling/AOF stalls; the waits below follow Redis deadlines, not a fixed sleep (#76).
     runtime = JoobQ::Delivery::Runtime.new(JoobQ::RedisStore.instance, "batch-wait-#{UUID.random}",
-      capacity: 2, batch_size: 2, lease: 300.milliseconds, poll: 1.millisecond, repair_every: 20.milliseconds)
+      capacity: 2, batch_size: 2, lease: 2.seconds, poll: 1.millisecond, repair_every: 20.milliseconds)
     count = 0
     blocked = Channel(Nil).new(1)
     release = Channel(Nil).new(1)
@@ -130,17 +131,33 @@ describe "bounded durable delivery batches" do
       end
       JoobQ::Delivery::Outcome.new
     end
-    runtime.admit_many("work", [{"a", "one"}, {"b", "two"}])
+    ids = ["a", "b"]
+    runtime.admit_many("work", ids.map { |id| {id, "payload"} })
     runtime.start
     select
     when blocked.receive
     when timeout(5.seconds)
       fail "second handler did not enter"
     end
-    sleep 450.milliseconds
+    initial = ledger.resolve_many(ids).map(&.not_nil!)
+    initial.all? { |record| record.state.leased? && record.attempt == 1 }.should be_true
+    eventually(runtime.lease * 3) do
+      ledger.resolve_many(ids).each_with_index.all? do |record, index|
+        record && record.state.leased? && record.attempt == 1 &&
+          record.token == initial[index].token && record.lease_until > initial[index].lease_until
+      end
+    end.should be_true
+
+    # Hold both claims past their original deadlines: without renewal the lease of the finished handler would have
+    # lapsed, and merely lengthening the lease cannot make a missing renewal pass.
+    hold_until = Time.unix_ms(initial.max_of(&.lease_until)) + runtime.lease / 2
+    sleep({hold_until - Time.utc, Time::Span.zero}.max)
     ledger.claim_many("competitor", 2).should be_empty
+    ledger.resolve_many(ids).each_with_index.all? do |record, index|
+      record && record.state.leased? && record.attempt == 1 && record.token == initial[index].token
+    end.should be_true
     release.send(nil)
-    eventually { ledger.resolve_many(["a", "b"]).all? { |r| r.try(&.state.completed?) && r.try(&.attempt) == 1 } }.should be_true
+    eventually(runtime.lease * 5) { ledger.resolve_many(ids).all? { |r| r.try(&.state.completed?) && r.try(&.attempt) == 1 } }.should be_true
     runtime.stop(2.seconds).clean.should be_true
   ensure
     release.try { |channel| select

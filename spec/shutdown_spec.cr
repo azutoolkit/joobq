@@ -575,6 +575,17 @@ module JoobQ
         end
       end
 
+      it "counts a retained copy (an outcome that was not stored) as abandoned: returns it to its queue and exits 3" do
+        with_probe("retained", {"PROBE_TIMEOUT" => "2"}) do |process, queue, dir, redis|
+          wait_for_files(dir, "started-", 1)
+          process.signal(Signal::TERM)
+          exit_of(process, 30.seconds).exit_code.should eq(3)
+
+          redis.llen(queue).should eq(1)
+          JoobQ.processing_depth(redis, queue).should eq(0)
+        end
+      end
+
       it "exits 1 at once on a second signal, a second or more after the first" do
         with_probe("stuck", {"PROBE_JOBS" => "1", "PROBE_TIMEOUT" => "30"}) do |process, _, dir, _|
           wait_for_files(dir, "started-", 1)

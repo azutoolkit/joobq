@@ -240,7 +240,7 @@ module JoobQ
           )
         end
       ensure
-        if InFlight.finished(token)
+        if InFlight.finished(token, retain: !keys_missing && !outcome_stored)
           # Shutdown already put this job back on its queue; another process may hold it now, so the
           # processing list is not touched
           Log.warn &.emit("Job outlived the shutdown deadline; it was returned to its queue", queue: @queue.name, worker_id: @worker_id)
@@ -256,7 +256,7 @@ module JoobQ
             # Use standard cleanup for failed or unparseable jobs
             @queue.cleanup_job_processing_pipelined(@worker_id, job)
           else
-            Log.error &.emit("Job outcome was not stored; retaining processing copy", queue: @queue.name, worker_id: @worker_id)
+            Log.error &.emit("Job outcome was not stored; retaining processing copy for re-drive", queue: @queue.name, worker_id: @worker_id)
           end
         end
       end

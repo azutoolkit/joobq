@@ -13,12 +13,17 @@ module JoobQ
   # job now. The handling asks `settle` before its first side effect: the answer and the move to `settling` are
   # one step under the lock, so shutdown either abandoned the job before (the handling does nothing) or finds it
   # settling and waits for it instead of requeuing it while a retry is being scheduled.
+  #
+  # A job whose outcome could not be stored (Redis was away when it ended) is `retained`: nothing runs for it any
+  # more, but its copy is still in this process's own processing list. The owner re-drives it
+  # (`RedisStore#redrive_retained`) and `abandon_all` returns it at shutdown, so it is counted as abandoned.
   module InFlight
     enum State
       Claimed
       Running
       Settling
       Abandoned
+      Retained
     end
 
     record Entry, queue : String, job : String, state : State, fiber : UInt64? = nil
@@ -33,14 +38,14 @@ module JoobQ
     # Specs only: called, outside the lock, right after a fiber moved to `settling`.
     class_property after_settle : Proc(Nil)? = nil
 
-    # Jobs claimed, running or settling (abandoned ones are not counted).
+    # Jobs claimed, running or settling (abandoned and retained ones are not counted).
     def self.count : Int32
-      @@lock.synchronize { @@jobs.count { |_, entry| !entry.state.abandoned? } }
+      @@lock.synchronize { @@jobs.count { |_, entry| active?(entry) } }
     end
 
     # True while this process has a claim of *queue* that is claimed, running or settling (abandoned ones do not count).
     def self.any?(queue : String) : Bool
-      @@lock.synchronize { @@jobs.any? { |_, entry| entry.queue == queue && !entry.state.abandoned? } }
+      @@lock.synchronize { @@jobs.any? { |_, entry| entry.queue == queue && active?(entry) } }
     end
 
     # Registers freshly claimed jobs, one token each in the order given. Call it as soon as the claim returns.
@@ -69,12 +74,38 @@ module JoobQ
     end
 
     # The claim's fiber ends. True when shutdown had abandoned it (the job is already back on its queue: leave the
-    # processing list alone).
-    def self.finished(token : Int64) : Bool
+    # processing list alone). With `retain` the claim is kept as `retained` instead of dropped (its outcome was not
+    # stored, so its copy stays in the processing list); an abandoned claim is dropped either way.
+    def self.finished(token : Int64, retain : Bool = false) : Bool
       @@lock.synchronize do
-        entry = @@jobs.delete(token)
-        entry.try(&.fiber).try { |fiber| @@fibers.delete(fiber) if @@fibers[fiber]? == token }
-        entry.try(&.state.abandoned?) || false
+        entry = @@jobs[token]?
+        next false unless entry
+
+        entry.fiber.try { |fiber| @@fibers.delete(fiber) if @@fibers[fiber]? == token }
+        if retain && !entry.state.abandoned?
+          @@jobs[token] = Entry.new(entry.queue, entry.job, State::Retained)
+        else
+          @@jobs.delete(token)
+        end
+        entry.state.abandoned?
+      end
+    end
+
+    # The retained copies as {token, queue, job}, oldest claim first.
+    def self.retained : Array({Int64, String, String})
+      @@lock.synchronize do
+        @@jobs.compact_map { |token, entry| {token, entry.queue, entry.job} if entry.state.retained? }.sort_by(&.first)
+      end
+    end
+
+    # Forgets a retained copy once it was put back (or found gone). False when it was not retained any more
+    # (shutdown took it first).
+    def self.release(token : Int64) : Bool
+      @@lock.synchronize do
+        next false unless @@jobs[token]?.try(&.state.retained?)
+
+        @@jobs.delete(token)
+        true
       end
     end
 
@@ -131,6 +162,10 @@ module JoobQ
         sleep 10.milliseconds
       end
       true
+    end
+
+    private def self.active?(entry : Entry) : Bool
+      !entry.state.abandoned? && !entry.state.retained?
     end
 
     # Specs only: forgets everything.

@@ -21,6 +21,8 @@ module JoobQ
     OWNER_ID   = /\A[^:]+:[^:]+\z/
     private OWNER_TTL  = 30.seconds
     private OWNER_BEAT = 10.seconds
+    # How soon the heartbeat loop looks again while a retained copy is still waiting to be re-driven
+    private REDRIVE_RETRY = 1.second
 
     # The configured store when it is a RedisStore, so classes that default to it talk to the same Redis as the
     # queues. Only before any configuration exists (or for another Store) is a store built from ENV.
@@ -321,12 +323,14 @@ module JoobQ
     end
 
     # Starts this process's liveness heartbeat (idempotent, process-wide). `Queue#start` calls it before claiming,
-    # so every processing list a 0.6 process owns has a live heartbeat while the process runs.
+    # so every processing list a 0.6 process owns has a live heartbeat while the process runs. The same loop
+    # re-drives the copies of jobs whose outcome could not be stored (`redrive_retained`).
     def start_owner_heartbeat : Nil
       beat_owner
       @owner_heartbeat.start do
         beat_owner
-        OWNER_BEAT
+        redrive_retained
+        InFlight.retained.empty? ? OWNER_BEAT : REDRIVE_RETRY
       end
     end
 
@@ -586,6 +590,20 @@ module JoobQ
             Log.error &.emit("Could not requeue a job", queue: queue_name, error: ex2.message)
           end
         end
+      end
+      put_back
+    end
+
+    # Puts the copies this process retained (jobs whose outcome it could not store) back at the head of their queues,
+    # oldest claim first, each in one atomic step, and returns how many were put back. A copy another process (or
+    # shutdown) already reclaimed is no longer in the list and counts for nothing; either way it is forgotten, so a
+    # copy is re-driven at most once. If Redis fails, the copy stays retained for the next pass.
+    def redrive_retained : Int32
+      put_back = 0
+      InFlight.retained.reverse_each do |(token, queue_name, job_json)|
+        moved = redis.eval(REQUEUE_MANY, requeue_keys(queue_name), [job_json]).as(Int).to_i
+        InFlight.release(token)
+        put_back += moved
       end
       put_back
     end

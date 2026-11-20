@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the
+  worker logged "Job outcome was not stored" and left the copy in the process's own processing list, where nothing
+  returned it until the process was restarted (the heartbeat that protects the list came back by itself). The copy is
+  now kept as `retained` in `InFlight`, and the owner heartbeat loop puts each retained copy back at the head of its
+  queue (`RedisStore#redrive_retained`, one atomic script per copy, at most once per copy; a copy another process
+  already reclaimed is forgotten). A job can therefore run again after an outage: delivery stays at-least-once.
+- **Shutdown counts retained copies as abandoned.** A copy still retained at shutdown is returned to its queue, counted
+  in `JoobQ.abandoned_jobs` and the process exits with status 3, where it used to exit 0 with `abandoned_jobs: 0`.
+
 ## 0.7.2
 
 ### Fixed

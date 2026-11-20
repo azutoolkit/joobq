@@ -77,7 +77,7 @@ module JoobQ
 
       reserve = {SHUTDOWN_RESERVE, timeout / 2}.min
       wait_for = {deadline - reserve - Time.instant, Time::Span.zero}.max
-      unless InFlight.wait(wait_for)
+      unless InFlight.wait(wait_for) && InFlight.retained.empty?
         # the requeue gets the first half of the reserve, the latency flush the second; each at least a grace period
         requeue_deadline = {deadline - reserve / 2, Time.instant + SHUTDOWN_GRACE}.max
         step("requeue", requeue_deadline) { requeue_unfinished(requeue_deadline) }

@@ -115,6 +115,8 @@ jobs:
         run: python3 scripts/run_integration.py ${{ matrix.connection == 'url' && '--url' || '' }}
       - name: Redis restart smoke
         run: python3 scripts/redis_restart_smoke.py
+      - name: Redis outage smoke (a live process re-drives retained copies)
+        run: python3 scripts/redis_outage_smoke.py
 
   book:
     name: Documentation book

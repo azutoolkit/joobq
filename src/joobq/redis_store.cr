@@ -608,8 +608,9 @@ module JoobQ
       put_back
     end
 
-    # Removes a finished job from the processing list and counts it as processed
-    def cleanup_job(job_json : String, queue_name : String) : Nil
+    # Removes a finished job from the processing list and counts it as processed. False (after logging) when Redis
+    # could not take it.
+    def cleanup_job(job_json : String, queue_name : String) : Bool
       redis.pipelined do |pipe|
         # Remove the job from this process's list (and the legacy shared list, for a migrated or seeded job)
         pipe.lrem(processing_queue(queue_name), 0, job_json)
@@ -624,11 +625,13 @@ module JoobQ
         queue: queue_name,
         job_id: logging_job_id(job_json)
       )
+      true
     rescue ex
       Log.error &.emit("Error cleaning up job",
         queue: queue_name,
         error: ex.message
       )
+      false
     end
 
     # Batch job cleanup for high performance
@@ -636,8 +639,9 @@ module JoobQ
       @pipeline.cleanup_jobs_batch(job_jsons, queue_name)
     end
 
-    # Mark job as completed with statistics
-    def mark_job_completed(job_json : String, queue_name : String) : Nil
+    # Mark job as completed with statistics. False (after logging) when Redis could not take it: the copy is then still
+    # in the processing list.
+    def mark_job_completed(job_json : String, queue_name : String) : Bool
       redis.pipelined do |pipe|
         # Remove the job from this process's list (and the legacy shared list, for a migrated or seeded job)
         pipe.lrem(processing_queue(queue_name), 0, job_json)
@@ -654,11 +658,13 @@ module JoobQ
         queue: queue_name,
         job_id: logging_job_id(job_json)
       )
+      true
     rescue ex
       Log.error &.emit("Error marking job as completed",
         queue: queue_name,
         error: ex.message
       )
+      false
     end
 
     # Called only inside lazy debug log blocks; normal completion never parses a second JSON tree.

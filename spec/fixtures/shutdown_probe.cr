@@ -91,7 +91,8 @@ when "retained"
   store.redis.lpush("joobq:processing:#{ENV["PROBE_QUEUE"]}:#{store.owner_id}", job)
   token = JoobQ::InFlight.claimed(ENV["PROBE_QUEUE"], [job]).first
   JoobQ::InFlight.begin_run(token)
-  JoobQ::InFlight.finished(token, retain: true)
+  JoobQ::InFlight.finished(token)
+  JoobQ::InFlight.retain(ENV["PROBE_QUEUE"], job)
   File.write(File.join(ENV["PROBE_DIR"], "started-retained"), "run\n")
   # not `forge`: it starts the queues, and a started queue recovers this process's own list at once
   JoobQ.trap_termination((ENV["PROBE_TIMEOUT"]? || "15").to_f.seconds)

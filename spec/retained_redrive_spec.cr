@@ -14,8 +14,8 @@ module JoobQ
     retain = ->(job : String) do
       token = InFlight.claimed(name, [job]).first
       InFlight.begin_run(token)
-      InFlight.finished(token, retain: true).should be_false
-      token
+      InFlight.finished(token).should be_false
+      InFlight.retain(name, job)
     end
 
     before_each do

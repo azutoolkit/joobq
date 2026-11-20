@@ -506,20 +506,22 @@ module JoobQ
 
     # Pipelined job cleanup for improved performance
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
-    def cleanup_job_processing_pipelined(worker_id : String, job_json : String) : Nil
+    def cleanup_job_processing_pipelined(worker_id : String, job_json : String) : Bool
       store.cleanup_job(job_json, name)
     rescue ex
       Log.error &.emit("Error in pipelined job cleanup", queue: name, worker: worker_id,
         job_data_length: job_json.size, error: ex.message)
+      false
     end
 
     # Enhanced cleanup for successfully completed jobs
     # IMPORTANT: job_json must be the FULL job JSON string, not just the job ID
-    def cleanup_completed_job_pipelined(worker_id : String, job_json : String) : Nil
+    def cleanup_completed_job_pipelined(worker_id : String, job_json : String) : Bool
       store.mark_job_completed(job_json, name)
     rescue ex
       Log.error &.emit("Error in completed job cleanup", queue: name, worker: worker_id,
         job_data_length: job_json.size, error: ex.message)
+      false
     end
 
     # Verify that a job has been properly removed from processing queue

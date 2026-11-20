@@ -9,7 +9,9 @@
   returned it until the process was restarted (the heartbeat that protects the list came back by itself). The copy is
   now kept as `retained` in `InFlight`, and the owner heartbeat loop puts each retained copy back at the head of its
   queue (`RedisStore#redrive_retained`, one atomic script per copy, at most once per copy; a copy another process
-  already reclaimed is forgotten). A job can therefore run again after an outage: delivery stays at-least-once.
+  already reclaimed is forgotten). The same holds when the cleanup of a finished job fails
+  (`Store#cleanup_job` and `#mark_job_completed` now return `false` instead of `nil` after logging, and the abstract
+  signatures say `Bool`). A job can therefore run again after an outage: delivery stays at-least-once.
 - **Shutdown counts retained copies as abandoned.** A copy still retained at shutdown is returned to its queue, counted
   in `JoobQ.abandoned_jobs` and the process exits with status 3, where it used to exit 0 with `abandoned_jobs: 0`.
 

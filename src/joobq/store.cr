@@ -155,8 +155,8 @@ module JoobQ
     abstract def queue_size(queue_name : String) : Int64
     abstract def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
     abstract def enqueue_batch(jobs : Array(JoobQ::Job), batch_size : Int32) : Nil
-    abstract def cleanup_job(job_json : String, queue_name : String) : Nil
-    abstract def mark_job_completed(job_json : String, queue_name : String) : Nil
+    abstract def cleanup_job(job_json : String, queue_name : String) : Bool
+    abstract def mark_job_completed(job_json : String, queue_name : String) : Bool
     abstract def verify_job_removed_from_processing?(job_id : String, queue_name : String) : Bool
     abstract def processing_queue_size(queue_name : String) : Int64
     abstract def cleanup_jobs_batch(job_jsons : Array(String), queue_name : String) : Nil

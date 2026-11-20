@@ -240,7 +240,7 @@ module JoobQ
           )
         end
       ensure
-        if InFlight.finished(token, retain: !keys_missing && !outcome_stored)
+        if InFlight.finished(token)
           # Shutdown already put this job back on its queue; another process may hold it now, so the
           # processing list is not touched
           Log.warn &.emit("Job outlived the shutdown deadline; it was returned to its queue", queue: @queue.name, worker_id: @worker_id)
@@ -251,15 +251,23 @@ module JoobQ
             requeue_for_missing_keys(job)
           elsif outcome_stored && job_completed_successfully && parsed_job
             # Use enhanced cleanup for successfully completed jobs
-            @queue.cleanup_completed_job_pipelined(@worker_id, job)
+            retain(job) unless @queue.cleanup_completed_job_pipelined(@worker_id, job)
           elsif outcome_stored
             # Use standard cleanup for failed or unparseable jobs
-            @queue.cleanup_job_processing_pipelined(@worker_id, job)
+            retain(job) unless @queue.cleanup_job_processing_pipelined(@worker_id, job)
           else
             Log.error &.emit("Job outcome was not stored; retaining processing copy for re-drive", queue: @queue.name, worker_id: @worker_id)
+            InFlight.retain(@queue.name, job)
           end
         end
       end
+    end
+
+    # The cleanup of a finished job failed (Redis was away): its copy is still in this process's processing list, so
+    # it is kept for the owner heartbeat to re-drive (`RedisStore#redrive_retained`).
+    private def retain(job : String) : Nil
+      Log.error &.emit("Job cleanup was not stored; retaining processing copy for re-drive", queue: @queue.name, worker_id: @worker_id)
+      InFlight.retain(@queue.name, job)
     end
 
     # Monotonic milliseconds since the process started (a wall clock step must not stretch or cut the pause).

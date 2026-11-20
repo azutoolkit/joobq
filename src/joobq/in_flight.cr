@@ -74,20 +74,22 @@ module JoobQ
     end
 
     # The claim's fiber ends. True when shutdown had abandoned it (the job is already back on its queue: leave the
-    # processing list alone). With `retain` the claim is kept as `retained` instead of dropped (its outcome was not
-    # stored, so its copy stays in the processing list); an abandoned claim is dropped either way.
-    def self.finished(token : Int64, retain : Bool = false) : Bool
+    # processing list alone).
+    def self.finished(token : Int64) : Bool
       @@lock.synchronize do
-        entry = @@jobs[token]?
-        next false unless entry
+        entry = @@jobs.delete(token)
+        entry.try(&.fiber).try { |fiber| @@fibers.delete(fiber) if @@fibers[fiber]? == token }
+        entry.try(&.state.abandoned?) || false
+      end
+    end
 
-        entry.fiber.try { |fiber| @@fibers.delete(fiber) if @@fibers[fiber]? == token }
-        if retain && !entry.state.abandoned?
-          @@jobs[token] = Entry.new(entry.queue, entry.job, State::Retained)
-        else
-          @@jobs.delete(token)
-        end
-        entry.state.abandoned?
+    # Keeps the copy of a job whose outcome could not be stored (the claim has `finished`, but Redis refused the
+    # cleanup or the outcome), so the owner re-drives it. Returns the token that `release` takes.
+    def self.retain(queue : String, job : String) : Int64
+      @@lock.synchronize do
+        token = (@@next += 1)
+        @@jobs[token] = Entry.new(queue, job, State::Retained)
+        token
       end
     end
 

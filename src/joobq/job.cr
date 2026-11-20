@@ -98,6 +98,10 @@ module JoobQ
   # ```
   #
   module Job
+    # The version of the stored job's format, written as `v`. A reader refuses a job with a greater version
+    # (`UnsupportedJobVersion`); a job with none was written by 0.6 and is read as it always was.
+    FORMAT_VERSION = 1
+
     enum Status
       Completed
       Dead
@@ -120,6 +124,10 @@ module JoobQ
       property expires : Int64 = JoobQ.config.expires.from_now.to_unix_ms
       property status : Status = Status::Enqueued
 
+      # The version of this job's stored format (see `Job::FORMAT_VERSION`)
+      @[JSON::Field(key: "v")]
+      property format_version : Int32 = ::JoobQ::Job::FORMAT_VERSION
+
       @[JSON::Field(emit_null: true)]
       property error : NamedTuple(
         failed_at: String,
@@ -134,6 +142,11 @@ module JoobQ
 
       @[JSON::Field(ignore: true)]
       property enqueue_time = Time.instant
+
+      protected def after_initialize
+        super
+        raise ::JoobQ::UnsupportedJobVersion.new(@format_version) if @format_version > ::JoobQ::Job::FORMAT_VERSION
+      end
 
       # The plain values of this job's encrypted properties (see `JoobQ::Encryption`); empty, and free, for a job
       # without any. Used to keep them out of the errors the library records.

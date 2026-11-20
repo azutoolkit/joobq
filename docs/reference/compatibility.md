@@ -58,8 +58,8 @@ JoobQ uses [semantic versioning](https://semver.org). The public API is what [Pu
 | Crystal API | The members on [Public API](public-api.md): names, argument names and types, return types |
 | Configuration | YAML keys, `JOOBQ_*` and `REDIS_*` variables and `JoobQ.configure` properties of [Configuration](configuration.md), with their meaning; a changed default counts as a change |
 | HTTP management API | Paths, methods, roles, status codes and JSON field names of [Core API](core-api.md); a new field may be added |
-| Redis keyspace | Key names and types under `joobq:v1:` (`JoobQ::Keys`). A different layout gets a new prefix and a migration; the old one is never reused for other data |
-| Job format | The stored job's `"v"` field. A reader accepts every version up to its own and refuses a greater one. A new format version is a breaking change |
+| Redis keyspace | The layout of the keys under `joobq:v1:` (names and types), for data compatibility; the Crystal classes that build them (`JoobQ::Keys`, `JoobQ::RedisStore`) are not frozen. A different layout gets a new prefix and a migration; the old one is never reused for other data |
+| Job format | The stored job's `"v"` field, for data compatibility. A reader accepts every version up to its own and refuses a greater one. A new format version is a breaking change |
 | Error codes | A `JQ-nnn` code keeps its meaning; a code no longer raised is kept, never renumbered or reused |
 
 **Not covered:** Preview features (`JoobQ::Delivery::Runtime`, workflow pages marked Preview), members marked `:nodoc:`, log message text, benchmark numbers, the text of error messages (use the `JQ-` code), the exact timing of background loops, and warnings the compiler prints.

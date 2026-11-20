@@ -6,7 +6,7 @@ description: The public Crystal API of JoobQ Core that is frozen for 1.0, what i
 
 *Reference · Core*
 
-This page is the list the [compatibility policy](compatibility.md) refers to. A member in a table below is **frozen**: within a major version its name, argument names, argument types and return type do not change, and it is not removed. Anything not listed here is not frozen, whether or not it is public in the source. The details of each member are on [Core API](core-api.md) and [Configuration](configuration.md). A spec (`spec/public_surface_spec.cr`) fails when a member listed here does not exist.
+This page is the list the [compatibility policy](compatibility.md) refers to. A member in a table below is **frozen**: within a major version its name, argument names, argument types and return type do not change, and it is not removed (except where a row says otherwise). Anything not listed here is not frozen, whether or not it is public in the source. The details of each member are on [Core API](core-api.md) and [Configuration](configuration.md). A spec (`spec/public_surface_spec.cr`) fails when a member listed here does not exist.
 
 Before 1.0 the freeze is a promise about the shape of 1.0: a 0.x release may still change a frozen member, and says so in the changelog under **Changed (breaking)**.
 
@@ -28,7 +28,7 @@ Before 1.0 the freeze is a promise about the shape of 1.0: a 0.x release may sti
 | `Job#max_retries` | Retry limit |
 | `Job#expires` | Expiry, Unix milliseconds |
 | `Job#status` | `Job::Status`: `Completed`, `Dead`, `Enqueued`, `Expired`, `Retrying`, `Running`, `Scheduled` |
-| `Job#error` | The last failure record, `nil` if none |
+| `Job#error` | The last failure record, `nil` if none. Only its existence and `nil` are frozen: its type is an anonymous named tuple whose fields have changed, so read it by field name and expect additions |
 | `Job#past_expiration?` | True once `expires` has passed |
 
 `JoobQ::NonRetryableError` (raise it to dead-letter without retrying), `JoobQ::UnknownQueue` and the `encrypted_property` macro are frozen too.
@@ -110,7 +110,7 @@ The block macros `queue name, workers, JobClass, throttle` and `register_job Job
 | `JoobQ::Events.subscribe` | Receive lifecycle events |
 | `JoobQ::ManagementPolicy.from_env` | Management API tokens from the environment |
 
-The HTTP management routes, their roles and their JSON shapes ([Core API](core-api.md)), the `joobq:v1:` Redis keyspace and the stored job format (`"v": 1`) are frozen as well.
+The HTTP management routes, their roles and their JSON field names ([Core API](core-api.md)) are frozen as well. So are two **data formats**, so that data written by one version is read by the next: the layout of the `joobq:v1:` Redis keys (names and types) and the stored job's `"v"` field (a reader accepts every version up to its own). That freezes the data, not the Crystal API that writes it: `JoobQ::RedisStore`, `JoobQ::Keys` and the other store classes are not frozen (see below), so code that builds keys by hand or calls the store directly is not covered.
 
 ## Deprecated
 

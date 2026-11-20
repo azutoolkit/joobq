@@ -28,6 +28,12 @@
 
 ### Fixed
 
+- **`Configure#setup_schedulers_from_config` is removed (refs #42).** It was public and documented with an example, but
+  its cron and recurring blocks only logged "Would enqueue ..." at debug level, so a YAML `schedulers:` entry never ran
+  and nothing said so. JoobQ Core still parses the section into `config.scheduler_configs` (JoobQUI's schedule catalog
+  and worker read it) and never fires it; to run a schedule from your own code use the scheduler DSL
+  (`config.scheduler { cron "..." { ... } }`). A caller of the removed method now fails to compile instead of scheduling
+  nothing. Whether Core should ever fire YAML schedulers is still open on #42.
 - **`POST /joobq/jobs` fails loudly instead of answering 201 for a job it dropped (#48).** The route kept its shape
   (`{queue, job_type, data}`) but fed the whole body to the lenient `Queue#add`, which parsed it as the job itself,
   swallowed the error and returned nothing, so the client got `201` with an empty `job_id` and no job. It now uses the

@@ -24,7 +24,7 @@ flowchart LR
   S[Pro workflow schedule] -->|leader starts a run| WF[workflow run]
 ```
 
-`Job.schedule(every:)` and the scheduler DSL's `every` and `cron` are loops in the process that registers them. They call `perform` (or your block) directly, starting at once for `every`: no queue, no retry, no dead letter, and two processes that register the same schedule both run it. Core loads the YAML `schedulers:` section but never fires it (`setup_schedulers_from_config` only logs "Would enqueue" at debug level, and `forge` does not call it); JoobQUI's worker process is what fires it.
+`Job.schedule(every:)` and the scheduler DSL's `every` and `cron` are loops in the process that registers them. They call `perform` (or your block) directly, starting at once for `every`: no queue, no retry, no dead letter, and two processes that register the same schedule both run it. Core parses the YAML `schedulers:` section into `config.scheduler_configs` but never fires it (the `setup_schedulers_from_config` that only logged "Would enqueue" was removed, and `forge` does not read the section); a host such as JoobQUI's worker process fires it, or you do with the scheduler DSL (`config.scheduler { cron ...; every ... }`).
 
 ## Example
 
@@ -84,7 +84,7 @@ Every failure was only logged. To keep retries, make the recurring callback enqu
 | `Job.schedule(every:, **args)` | `Time::Span` | none | Calls `perform` every span in this process, first call at once |
 | `config.scheduler { every ...; cron "..." { } }` | DSL | none | Interval and cron loops in this process |
 | `config.time_location` | `Time::Location` | `America/New_York` | Time zone of the scheduler DSL's cron patterns (set by YAML `timezone`); the process zone is not changed |
-| YAML `schedulers:` | YAML | none | Loaded, never fired by Core; fired by `joobqui-selfhosted --worker` |
+| YAML `schedulers:` | YAML | none | Parsed into `config.scheduler_configs`, never fired by Core; fired by `joobqui-selfhosted --worker` or your own code |
 | Pro `overlap` | `OverlapPolicy` | `Skip` | `Skip`, `BufferOne`, `AllowAll` or `CancelPrevious` when the previous run is still open |
 | Pro `catchup_window_ms` | `Int64` | `60000` | How late a missed fire time may still start |
 | Pro `timezone` | `String` | `"UTC"` | Time zone of the workflow schedule |

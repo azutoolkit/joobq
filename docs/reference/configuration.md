@@ -43,7 +43,7 @@ Searched in order: `./joobq.yml`, `./config/joobq.yml`, `./config/joobq.yaml`, `
 | `pipeline` | `batch_size`, `timeout`, `max_commands` |
 | `features` | `rest_api`, `stats` (booleans) |
 | `error_monitoring` | `alert_thresholds`, `time_window`, `max_recent_errors` |
-| `schedulers` | list of `{timezone, cron_jobs: [{pattern, job, args}], recurring_jobs: [{interval, job, args}]}`: loaded but never fired by Core |
+| `schedulers` | list of `{timezone, cron_jobs: [{pattern, job, args}], recurring_jobs: [{interval, job, args}]}`: parsed into `config.scheduler_configs` for a host to read, never fired by Core |
 
 ## Environment variables
 

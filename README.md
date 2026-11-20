@@ -212,6 +212,10 @@ JoobQ.configure do
 end
 ```
 
+The YAML `schedulers:` section is parsed into `config.scheduler_configs`, but JoobQ Core never fires it: nothing is
+scheduled or enqueued from it. A host that reads it (such as JoobQUI's worker) fires it; in your own code schedule with
+the scheduler DSL, `config.scheduler { cron "*/5 * * * *" { ... } }`.
+
 ### Configuration Properties
 
 The `JoobQ::Configure` struct provides several properties that can be customized to configure the JoobQ system:

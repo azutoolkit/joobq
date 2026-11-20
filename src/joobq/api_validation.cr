@@ -129,23 +129,29 @@ module JoobQ
       result
     end
 
-    # Query parameter validation for error endpoints
-    def self.validate_error_query_params(params : HTTP::Params) : ValidationResult
+    # Largest `limit` a list route accepts; a larger one is answered with 400, never read from Redis.
+    MAX_LIST_LIMIT = 100
+
+    # Query parameter validation for list routes (`limit`, 1 to `MAX_LIST_LIMIT`)
+    def self.validate_list_query_params(params : HTTP::Params) : ValidationResult
       result = ValidationResult.new(true)
 
-      # Validate limit parameter
       if limit_param = params["limit"]?
-        begin
-          limit = limit_param.to_i
-          if limit < 1 || limit > 100
-            result.add_error("limit", "Limit must be between 1 and 100", JSON::Any.new(limit), "out_of_range")
+        if limit = limit_param.to_i?
+          if limit < 1 || limit > MAX_LIST_LIMIT
+            result.add_error("limit", "Limit must be between 1 and #{MAX_LIST_LIMIT}", JSON::Any.new(limit.to_i64), "out_of_range")
           end
-        rescue
+        else
           result.add_error("limit", "Limit must be a valid integer", JSON::Any.new(limit_param), "invalid_type")
         end
       end
 
       result
+    end
+
+    # Query parameter validation for error endpoints
+    def self.validate_error_query_params(params : HTTP::Params) : ValidationResult
+      validate_list_query_params(params)
     end
 
     # Validate error type parameter

@@ -256,6 +256,9 @@ module JoobQ
 
     Log = ::Log.for("API")
 
+    # Entries of the delayed set `GET /joobq/jobs/retrying` scans for retrying jobs, whatever `limit` is.
+    RETRYING_SCAN_WINDOW = 1000
+
     ENDPOINTS = {
       {method: "POST", path: "/joobq/jobs"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
@@ -660,14 +663,21 @@ module JoobQ
       {method: "GET", path: "/joobq/jobs/retrying"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
 
+        query_validation = APIValidation.validate_list_query_params(context.request.query_params)
+        unless query_validation.success?
+          context.response.status_code = 400
+          context.response.print(query_validation.error_response.to_json)
+          return
+        end
+
         limit = context.request.query_params["limit"]?.try(&.to_i) || 50
         queue_name = context.request.query_params["queue"]?
 
         begin
           redis_store = RedisStore.instance
 
-          # Get delayed jobs directly from Redis store
-          all_delayed_jobs = redis_store.list_sorted_set_jobs(RedisStore::DELAYED_SET, 1, [limit, 1000].max)
+          # Scan a fixed window of the delayed set (the retrying jobs among them are returned, at most `limit`)
+          all_delayed_jobs = redis_store.list_sorted_set_jobs(RedisStore::DELAYED_SET, 1, RETRYING_SCAN_WINDOW)
 
           # Filter for retrying jobs (jobs with retrying status)
           retrying_jobs = all_delayed_jobs.select do |job_json|
@@ -711,14 +721,21 @@ module JoobQ
       {method: "GET", path: "/joobq/jobs/dead"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
 
+        query_validation = APIValidation.validate_list_query_params(context.request.query_params)
+        unless query_validation.success?
+          context.response.status_code = 400
+          context.response.print(query_validation.error_response.to_json)
+          return
+        end
+
         limit = context.request.query_params["limit"]?.try(&.to_i) || 50
         queue_name = context.request.query_params["queue"]?
 
         begin
           redis_store = RedisStore.instance
 
-          # Use cached dead jobs to reduce Redis load
-          cached_dead_jobs = redis_store.redis.zrange(Keys::DEAD_LETTER, 0, [limit, 100].max - 1).map(&.as(String))
+          # Read a fixed window of the dead letter set, never more than the largest `limit`
+          cached_dead_jobs = redis_store.redis.zrange(Keys::DEAD_LETTER, 0, APIValidation::MAX_LIST_LIMIT - 1).map(&.as(String))
 
           dead_jobs = cached_dead_jobs.select do |job_json|
             if queue_name

@@ -82,6 +82,8 @@ Off by default (`rest_api_enabled = false`). With it on, `forge` listens on `127
 | `POST` | `/joobq/jobs/:job_id/retry` | operator |
 | `POST` | `/joobq/pipeline/stats/reset` | admin |
 
+The list routes (`/joobq/jobs/retrying`, `/joobq/jobs/dead`, `/joobq/errors/recent`) take `?limit=N`, an integer from 1 to 100 (default 50, 20 for errors). Anything else, a non-integer, zero, a negative or more than 100, answers `400` with `validation_errors` naming `limit`; nothing is read from Redis. `/joobq/jobs/retrying` looks for retrying jobs in the first 1000 entries of the delayed set and `/joobq/jobs/dead` in the first 100 dead letters, whatever the limit.
+
 JoobQ ships no OpenAPI file for these routes. Pro adds routes to the same API when its metrics middleware starts: see [Pro API](pro-api.md).
 
 ## See also

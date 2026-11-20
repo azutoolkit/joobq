@@ -28,6 +28,11 @@
 
 ### Fixed
 
+- **Management API list limits are validated and capped (#54).** `GET /joobq/jobs/retrying?limit=N` and
+  `/joobq/jobs/dead?limit=N` used `.max` where a cap was meant, so a reader token could make Redis return an unbounded
+  number of entries, and `?limit=abc` or `?limit=-1` raised out of the handler. `limit` must now be an integer from 1 to
+  100 (`APIValidation::MAX_LIST_LIMIT`, the bound `/joobq/errors/recent` already had), else `400` with the reason; the
+  routes read a fixed window of Redis whatever the limit. **A client that sent `limit` above 100 now gets `400`.**
 - **The `timezone` setting applies, and no longer changes the process zone (#44).** `config.time_location = "UTC"`
   (also YAML `timezone` and `JOOBQ_TIMEZONE`) used to set the process-wide `Time::Location.local` and never store the
   zone, so `config.time_location` and every `Scheduler.new` default stayed `America/New_York`. It now stores the zone for

@@ -87,7 +87,7 @@ module JoobQ
         requeue_deadline = {deadline - reserve / 2, Time.instant + SHUTDOWN_GRACE}.max
         step("requeue", requeue_deadline) { requeue_unfinished(requeue_deadline) }
       end
-      step("retained", {deadline, Time.instant + SHUTDOWN_GRACE}.max) { redrive_retained }
+      step("retained", {deadline, Time.instant + SHUTDOWN_GRACE}.max) { drain_retained }
       step("latency", {deadline, Time.instant + SHUTDOWN_GRACE}.max) { Latency.stop }
       # Drop this process's liveness last, so any job left in its processing list becomes reclaimable at once by
       # another process rather than waiting out the heartbeat TTL.
@@ -117,16 +117,11 @@ module JoobQ
   # Puts the retained copies (jobs whose outcome Redis could not store) back at the head of their queues. Counts as
   # abandoned only what this step put back, or could not reach: a copy the owner heartbeat re-drove already is no
   # longer in the list and is not counted.
-  private def self.redrive_retained : Nil
+  def self.drain_retained : Nil
     return if InFlight.retained.empty?
 
-    moved = 0
-    begin
-      store = config.store
-      moved = store.redrive_retained if store.is_a?(RedisStore)
-    rescue ex
-      Log.error &.emit("Could not return retained jobs to their queues", error: ex.message)
-    end
+    store = config.store
+    moved = store.is_a?(RedisStore) ? store.redrive_retained.moved : 0
     unreachable = InFlight.retained
     unreachable.each { |(token, _, _)| InFlight.release(token) }
     @@abandoned.add(moved + unreachable.size)

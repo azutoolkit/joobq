@@ -32,12 +32,12 @@ module JoobQ
       redis.lpush(own, "A")
       retain.call("A")
 
-      store.redrive_retained.should eq(1)
+      store.redrive_retained.moved.should eq(1)
       redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["A", "waiting"])
       redis.llen(own).should eq(0)
       InFlight.retained.should be_empty
 
-      store.redrive_retained.should eq(0)
+      store.redrive_retained.moved.should eq(0)
       redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["A", "waiting"])
     end
 
@@ -45,14 +45,14 @@ module JoobQ
       redis.lpush(own, "A", "B", "C")
       %w[A B C].each { |job| retain.call(job) }
 
-      store.redrive_retained.should eq(3)
+      store.redrive_retained.moved.should eq(3)
       redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["A", "B", "C"])
     end
 
     it "does nothing for a copy another process already reclaimed, and forgets it" do
       retain.call("A")
 
-      store.redrive_retained.should eq(0)
+      store.redrive_retained.moved.should eq(0)
       redis.exists(JoobQ::Keys.queue(name)).should eq(0)
       InFlight.retained.should be_empty
     end
@@ -69,6 +69,36 @@ module JoobQ
       ensure
         store.stop_owner_heartbeat
       end
+    end
+
+    it "reports what it put back and what it could not reach when Redis fails part-way" do
+      redis.lpush(own, "A", "B", "C")
+      %w[A B C].each { |job| retain.call(job) }
+      RedisStore.spec_fail_job = "B" # C is re-driven first (the newest claim goes first), then B fails
+
+      result = store.redrive_retained
+
+      result.moved.should eq(1)
+      result.failed.should eq(2) # B and the older A: not reached
+      InFlight.retained.map(&.[2]).should eq(["A", "B"])
+      redis.lrange(Keys.queue(name), 0, -1).should eq(["C"])
+
+      RedisStore.spec_fail_job = nil
+      store.redrive_retained.moved.should eq(2)
+      redis.lrange(Keys.queue(name), 0, -1).should eq(["A", "B", "C"])
+    end
+
+    it "makes shutdown count exactly the copies it put back plus the ones it could not reach" do
+      redis.lpush(own, "A", "B", "C")
+      %w[A B C].each { |job| retain.call(job) }
+      RedisStore.spec_fail_job = "B"
+      before = JoobQ.abandoned_jobs
+
+      JoobQ.drain_retained
+
+      (JoobQ.abandoned_jobs - before).should eq(3) # C put back, B and A unreachable
+      InFlight.retained.should be_empty
+      RedisStore.spec_fail_job = nil
     end
 
     it "does not count a retained copy as running" do
@@ -132,6 +162,13 @@ end
 # Specs only: a store whose cleanup of a finished job fails, as it does while Redis is away. The copy stays in the list.
 class JoobQ::RedisStore
   class_property spec_cleanup_fails = false
+  # the job whose re-drive raises, as a Redis error does when the connection drops
+  class_property spec_fail_job : String? = nil
+
+  def redrive_one(queue_name : String, job_json : String) : Int32
+    raise Redis::Error.new("connection lost") if job_json == @@spec_fail_job
+    previous_def
+  end
 
   def mark_job_completed(job_json : String, queue_name : String) : Bool
     return false if @@spec_cleanup_fails
@@ -189,7 +226,7 @@ module JoobQ
       InFlight.retained.should be_empty
       redis.llen(Keys.processing(name, store.owner_id)).should eq(0)
       redis.llen(Keys.queue(name)).should eq(1) # run again: at-least-once
-      store.redrive_retained.should eq(0)
+      store.redrive_retained.moved.should eq(0)
     end
 
     it "reads a 0.6 job (no format version) through a worker, and finishes it" do

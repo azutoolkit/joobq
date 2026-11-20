@@ -42,12 +42,12 @@ module JoobQ
     # Specs only: called, outside the lock, right after a fiber moved to `settling`.
     class_property after_settle : Proc(Nil)? = nil
 
-    # Jobs claimed, running or settling (abandoned and retained ones are not counted).
+    # Jobs claimed, running, settling or finishing (cleaning up after the fiber ended); abandoned and retained ones are not counted.
     def self.count : Int32
       @@lock.synchronize { @@jobs.count { |_, entry| active?(entry) } }
     end
 
-    # True while this process has a claim of *queue* that is claimed, running or settling (abandoned ones do not count).
+    # True while this process has a claim of *queue* that is claimed, running, settling or finishing (abandoned and retained ones do not count).
     def self.any?(queue : String) : Bool
       @@lock.synchronize { @@jobs.any? { |_, entry| entry.queue == queue && active?(entry) } }
     end
@@ -181,7 +181,7 @@ module JoobQ
       end
     end
 
-    # Waits until no job is claimed, running or settling, or `timeout` passes. True when the process went quiet.
+    # Waits until no job is claimed, running, settling or finishing, or `timeout` passes. True when the process went quiet.
     def self.wait(timeout : Time::Span) : Bool
       deadline = Time.instant + timeout
       while count > 0

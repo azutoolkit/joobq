@@ -100,20 +100,35 @@ module JoobQ
         redis.command(["ZUNIONSTORE", new, "2", new, old, "AGGREGATE", "MAX"])
       when "hash"
         merge_hash(redis, old, new, COUNTERS.matches?(family))
+        return true # the script deleted *old* with the merge
       end
       redis.del(old)
       true
     end
 
-    private def self.merge_hash(redis : Redis::PooledClient, old : String, new : String, counters : Bool) : Nil
-      redis.hgetall(old).each do |field, value|
-        field, value = field.to_s, value.to_s
-        if counters && (count = value.to_i64?)
-          redis.hincrby(new, field, count)
-        else
-          redis.hsetnx(new, field, value)
+    # Folds hash *old* into *new* and deletes it in one script, so a run that is interrupted has either done all of it
+    # or none, and a re-run cannot add a counter twice. With *counters*, an integer field is added to the new value;
+    # a field that is not an integer on either side (or whose sum overflows) keeps the new value, and a field the new
+    # hash lacks is copied. The script never raises.
+    MERGE_HASH = <<-LUA
+      local old = redis.call('HGETALL', KEYS[1])
+      for i = 1, #old, 2 do
+        local field, value = old[i], old[i + 1]
+        local added = false
+        if ARGV[1] == '1' and string.match(value, '^-?%d+$') then
+          local current = redis.call('HGET', KEYS[2], field)
+          if current and string.match(current, '^-?%d+$') then
+            added = pcall(redis.call, 'HINCRBY', KEYS[2], field, value)
+          end
         end
+        if not added then redis.call('HSETNX', KEYS[2], field, value) end
       end
+      redis.call('DEL', KEYS[1])
+      return 1
+    LUA
+
+    def self.merge_hash(redis : Redis::PooledClient, old : String, new : String, counters : Bool) : Nil
+      redis.eval(MERGE_HASH, [old, new], [counters ? "1" : "0"])
     end
 
     @@warned = Atomic(Bool).new(false)

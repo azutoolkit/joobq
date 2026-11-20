@@ -20,7 +20,16 @@ class HookedVersionJob
   end
 end
 
+class SubclassedVersionJob < HookedVersionJob
+end
+
 describe "the job format version" do
+  it "is checked for a subclass of a job class" do
+    SubclassedVersionJob.from_json(SubclassedVersionJob.new.to_json).should be_a(SubclassedVersionJob)
+    future = JSON.parse(SubclassedVersionJob.new.to_json).as_h.merge({"v" => JSON::Any.new(2_i64)}).to_json
+    expect_raises(JoobQ::UnsupportedJobVersion) { SubclassedVersionJob.from_json(future) }
+  end
+
   it "is checked for a job class that defines its own after_initialize, whose hook still runs" do
     job = HookedVersionJob.from_json(HookedVersionJob.new.to_json)
     job.hooked.should be_true

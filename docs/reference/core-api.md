@@ -77,12 +77,12 @@ Off by default (`rest_api_enabled = false`). With it on, `forge` listens on `127
 | `GET` | `/joobq/jobs/retrying`, `/joobq/jobs/dead` | reader |
 | `GET` | `/joobq/errors/stats`, `/joobq/errors/recent`, `/joobq/errors/by-type`, `/joobq/errors/by-queue` | reader |
 | `GET` | `/joobq/pipeline/health`, `/joobq/pipeline/stats` | reader |
-| `POST` | `/joobq/jobs` (deprecated; `{queue, job_type, data, retries?, delay?}`, `422` when `job_type` or `data` do not fit the queue's job class) | operator |
+| `POST` | `/joobq/jobs` (deprecated; `{queue, job_type, data, retries?, delay?}`, `422` when `job_type` or `data` do not fit the queue's job class, or `data` sets `jid`, `queue`, `retries`, `max_retries`, `expires`, `status`, `v` or `error`) | operator |
 | `POST` | `/joobq/queues/:queue_name/reprocess` | operator |
 | `POST` | `/joobq/jobs/:job_id/retry` | operator |
 | `POST` | `/joobq/pipeline/stats/reset` | admin |
 
-The list routes (`/joobq/jobs/retrying`, `/joobq/jobs/dead`, `/joobq/errors/recent`) take `?limit=N`, an integer from 1 to 100 (default 50, 20 for errors). Anything else, a non-integer, zero, a negative or more than 100, answers `400` with `validation_errors` naming `limit`; nothing is read from Redis. `/joobq/jobs/retrying` looks for retrying jobs in the first 1000 entries of the delayed set and `/joobq/jobs/dead` in the first 100 dead letters, whatever the limit.
+The list routes (`/joobq/jobs/retrying`, `/joobq/jobs/dead`, `/joobq/errors/recent`) take `?limit=N`, an integer from 1 to 100 (default 50, 20 for errors). Anything else, a non-integer, zero, a negative or more than 100, answers `400` with `validation_errors` naming `limit`; nothing is read from Redis. `/joobq/jobs/retrying` looks for retrying jobs in the first 1000 entries of the delayed set and `/joobq/jobs/dead` in the 100 newest dead letters, whatever the limit. There is no offset: with `?queue=X`, dead jobs of `X` older than those 100 entries are not listed (`JoobQ::DeadLetterQueue.new.page(offset: 0, limit: 50, queue: "X")` pages through all of them).
 
 JoobQ ships no OpenAPI file for these routes. Pro adds routes to the same API when its metrics middleware starts: see [Pro API](pro-api.md).
 

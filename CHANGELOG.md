@@ -40,19 +40,23 @@
   strict `Queue#add!` with `data` as the job's JSON: a `data` that does not fit the job class, or a `job_type` that is
   not the queue's, answers `422` and enqueues nothing; `job_id` is the stored job's id. The HTML escaping of `data`
   (`&` became `&amp;`) is gone: arguments reach `perform` unchanged. `retries` and `delay` (validated before, ignored)
-  are applied; `priority` is still validated and has no effect. The route stays deprecated.
+  are applied (`retries` also sets `max_retries`; `delay` 0 enqueues at once); `priority` is still validated and has no effect. `data` is the job's own JSON, so it may not carry the job's bookkeeping fields `jid`, `queue`, `retries`, `max_retries`, `expires`, `status`, `v` or `error`: one of them answers `422` naming the key (they would walk around the bounds on `retries` and `delay`). The route stays deprecated.
 - **Management API list limits are validated and capped (#54).** `GET /joobq/jobs/retrying?limit=N` and
   `/joobq/jobs/dead?limit=N` used `.max` where a cap was meant, so a reader token could make Redis return an unbounded
   number of entries, and `?limit=abc` or `?limit=-1` raised out of the handler. `limit` must now be an integer from 1 to
   100 (`APIValidation::MAX_LIST_LIMIT`, the bound `/joobq/errors/recent` already had), else `400` with the reason; the
-  routes read a fixed window of Redis whatever the limit. **A client that sent `limit` above 100 now gets `400`.**
+  routes read a fixed window of Redis whatever the limit. **A client that sent `limit` above 100 now gets `400`.** Known limit: there is no offset, and with `?queue=X` the dead-letter route filters the 100 newest dead letters, so older dead jobs of `X` behind other queues' entries are not listed (`JoobQ::DeadLetterQueue.new.page(offset: 0, limit: 50, queue: "X")` pages through all of them).
 - **The `timezone` setting applies, and no longer changes the process zone (#44).** `config.time_location = "UTC"`
   (also YAML `timezone` and `JOOBQ_TIMEZONE`) used to set the process-wide `Time::Location.local` and never store the
   zone, so `config.time_location` and every `Scheduler.new` default stayed `America/New_York`. It now stores the zone for
   JoobQ's own cron computations and leaves `Time::Location.local` alone; it also takes a `Time::Location`. Merging YAML
-  sources keeps the zone of the last source that set one. Code that relied on the process zone changing must set
-  `Time::Location.local` itself.
-
+  sources keeps the zone of the last source that set one. **Upgrade note: cron schedules shift.** Until now every
+  `config.scheduler { cron ... }` pattern ran in New York time whatever `timezone` said. A deployment whose
+  configuration says another zone now fires in that zone: `config/joobq.production.yml` and `config/joobq.test.yml`
+  say `UTC`, so their cron patterns fire in UTC and the job key changes from `"<pattern>:America/New_York"` to
+  `"<pattern>:UTC"`. The `azu_cli` joobq initializer template (`config.time_location = "UTC"`) now yields UTC cron times
+  too. Check each cron pattern against the zone you configured, or set `timezone: "America/New_York"` to keep the old
+  times. Code that relied on the process zone changing must set `Time::Location.local` itself.
 - **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the
   worker could not remove the job's copy from its own processing list (or could not store a failure), and nothing
   returned the copy until the process was restarted: the heartbeat that protects the list came back by itself. The

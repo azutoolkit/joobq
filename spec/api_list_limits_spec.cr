@@ -18,7 +18,7 @@ module JoobQ
       JoobQ.reset
     end
 
-    {"/joobq/jobs/retrying", "/joobq/jobs/dead"}.each do |path|
+    {"/joobq/jobs/retrying", "/joobq/jobs/dead", "/joobq/errors/recent"}.each do |path|
       describe "GET #{path}" do
         it "answers 400 for a limit that is not an integer" do
           status, body = get.call("#{path}?limit=abc")

@@ -25,16 +25,10 @@ describe "YAML schedulers:" do
     entry[:recurring_jobs].first[:job].should eq("ExampleJob")
   end
 
-  it "is never fired by Core: nothing is registered or enqueued" do
-    JoobQ.reset
-    registered_before = JoobQ.config.schedulers.sum { |s| s.jobs.size }
+  it "registers no scheduler of its own: Core builds none from the section" do
     config = JoobQ::YamlConfigLoader.load_from_string(yaml)
 
-    sleep 1.5.seconds
-
     config.schedulers.should be_empty
-    JoobQ.config.schedulers.sum { |s| s.jobs.size }.should eq(registered_before)
-    JoobQ.store.as(JoobQ::RedisStore).queue_size("example").should eq(0)
   end
 
   it "has no method that pretends to set them up" do

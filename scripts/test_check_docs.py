@@ -50,6 +50,21 @@ class DocumentationChecks(unittest.TestCase):
             page.write_text('no table\n')
             self.assertIn('no `JoobQ (Core)` row', '\n'.join(compatibility_errors(root)))
 
+    def test_compatibility_page_names_the_pro_version_when_its_checkout_is_there(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'joobq'
+            pro = Path(directory) / 'pro'
+            (root / 'docs' / 'reference').mkdir(parents=True)
+            pro.mkdir()
+            (root / 'shard.yml').write_text('name: joobq\nversion: 0.7.2\n')
+            (pro / 'shard.yml').write_text('name: joobq_pro\nversion: 0.7.5\n')
+            page = root / 'docs' / 'reference' / 'compatibility.md'
+            page.write_text('| JoobQ (Core) | 0.7.2 | `joobq/shard.yml` |\n| JoobQ Pro | 0.7.4, needs `joobq >= 0.7.2` | `joobq-pro/shard.yml` |\n')
+            self.assertIn('documents JoobQ Pro 0.7.4, needs `joobq >= 0.7.2`, joobq-pro/shard.yml declares 0.7.5', '\n'.join(compatibility_errors(root, pro)))
+            page.write_text('| JoobQ (Core) | 0.7.2 | `joobq/shard.yml` |\n| JoobQ Pro | 0.7.5, needs `joobq >= 0.7.2` | `joobq-pro/shard.yml` |\n')
+            self.assertEqual([], compatibility_errors(root, pro))
+            self.assertEqual([], compatibility_errors(root, Path(directory) / 'absent'))
+
     def test_nodoc_must_start_its_comment(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

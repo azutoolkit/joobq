@@ -13,11 +13,13 @@ Every page of these docs describes the versions below. A page that says somethin
 | Component | Version | Source |
 | --- | --- | --- |
 | JoobQ (Core) | 0.7.2, tag `v0.7.2` | `joobq/shard.yml` |
-| JoobQ Pro | 0.7.4, needs `joobq >= 0.7.2, < 0.8.0` | `joobq-pro/shard.yml` |
+| JoobQ Pro | 0.7.5, needs `joobq >= 0.7.2, < 0.8.0` | `joobq-pro/shard.yml` |
 | JoobQUI | `master` of `azutoolkit/joobqui` | |
 | Azu CLI | 0.1.62, tag `v0.1.62` | `azu_cli/shard.yml` |
 
-`scripts/check_docs.py` fails when the JoobQ (Core) row differs from `version:` in `shard.yml`, so a release that does not update this page does not pass the docs check.
+`scripts/check_docs.py` fails when the JoobQ (Core) row differs from `version:` in `shard.yml`, so a release that does not update this page does not pass the docs check. It checks the JoobQ Pro row the same way against `shard.yml` of a `joobq-pro` checkout next to this repository (or the one `JOOBQ_PRO_CHECKOUT` names) and skips that row when there is none, so Pro's version, JoobQUI's and Azu CLI's rows are otherwise unchecked.
+
+The next release, the one that carries the breaking changes now under *Unreleased* in the changelog (the `joobq:v1:` keyspace move, `allow_plaintext_payloads` defaulting to `false`, redacted API payloads, the removal of `JoobQ.scheduler`), is **0.8.0** under the policy below. Its Core row changes with it, and JoobQ Pro's `joobq >= 0.7.2, < 0.8.0` constraint must be widened before it ships.
 
 ## Supported versions
 

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+This section holds breaking changes (the keyspace move, the `allow_plaintext_payloads` default, redacted API payloads, the
+removal of `JoobQ.scheduler`), so the next release is **0.8.0**, not a patch. Before it ships, JoobQ Pro's
+`joobq >= 0.7.2, < 0.8.0` constraint must be widened and the Core row of
+[docs/reference/compatibility.md](docs/reference/compatibility.md) changed to 0.8.0 (the docs check enforces the second).
+
 ### Changed (upgrade note: the keyspace moved)
 
 - **Every Redis key is under `joobq:v1:`.** 0.6 stored a queue's waiting jobs under the bare queue name (a queue

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check GitBook navigation, relative links, markup, and executable examples."""
 import argparse
+import os
 from collections import Counter
 from pathlib import Path
 import re
@@ -112,22 +113,32 @@ def nodoc_errors(root):
     return errors
 
 
-def compatibility_errors(root):
-    """The version docs/reference/compatibility.md documents for JoobQ (Core) is the one in shard.yml."""
+def row_errors(page_text, label, manifest, source, required):
+    """The version in the `label` row of the versions table is the one in `manifest` (a shard.yml)."""
+    declared = re.search(r"^version:\s*(\S+)\s*$", manifest.read_text(), re.M)
+    row = re.search(rf"^\| {re.escape(label)} \| ([^|]+)\|", page_text, re.M)
+    if not declared:
+        return [f"{manifest}: no version"]
+    if not row:
+        return [f"docs/reference/compatibility.md: no `{label}` row in the versions table"] if required else []
+    documented = re.match(r"\s*(\d+\.\d+\.\d+)(?:,\s*tag `v(\d+\.\d+\.\d+)`)?", row[1])
+    if not documented or {documented[1], documented[2] or documented[1]} != {declared[1]}:
+        return [f"docs/reference/compatibility.md documents {label} {row[1].strip()}, {source} declares {declared[1]}"]
+    return []
+
+
+def compatibility_errors(root, pro_checkout=None):
+    """docs/reference/compatibility.md names the shard.yml version of JoobQ (Core), and of JoobQ Pro when its checkout is at hand."""
     manifest = root / "shard.yml"
     page = root / "docs" / "reference" / "compatibility.md"
     if not manifest.is_file() or not page.is_file():
         return []
-    declared = re.search(r"^version:\s*(\S+)\s*$", manifest.read_text(), re.M)
-    row = re.search(r"^\| JoobQ \(Core\) \| ([^|]+)\|", page.read_text(), re.M)
-    if not declared:
-        return ["shard.yml: no version"]
-    if not row:
-        return ["docs/reference/compatibility.md: no `JoobQ (Core)` row in the versions table"]
-    documented = re.match(r"\s*(\d+\.\d+\.\d+)(?:,\s*tag `v(\d+\.\d+\.\d+)`)?", row[1])
-    if not documented or {documented[1], documented[2] or documented[1]} != {declared[1]}:
-        return [f"docs/reference/compatibility.md documents JoobQ (Core) {row[1].strip()}, shard.yml declares {declared[1]}"]
-    return []
+    text = page.read_text()
+    errors = row_errors(text, "JoobQ (Core)", manifest, "shard.yml", True)
+    pro = Path(pro_checkout or os.environ.get("JOOBQ_PRO_CHECKOUT") or root.parent / "joobq-pro") / "shard.yml"
+    if pro.is_file():
+        errors += row_errors(text, "JoobQ Pro", pro, "joobq-pro/shard.yml", False)
+    return errors
 
 
 def check(root):

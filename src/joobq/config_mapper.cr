@@ -93,6 +93,14 @@ module JoobQ
         config.worker_batch_size = worker_batch_size.as_i
       end
 
+      if owner_ttl = settings["owner_ttl"]?
+        config.owner_ttl = parse_time_span(owner_ttl.as_s)
+      end
+
+      if reaper_interval = settings["reaper_interval"]?
+        config.reaper_interval = parse_time_span(reaper_interval.as_s)
+      end
+
       if timezone = settings["timezone"]?
         config.time_location = timezone.as_s
       end

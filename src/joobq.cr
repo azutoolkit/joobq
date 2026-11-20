@@ -212,6 +212,7 @@ module JoobQ
   # once that has finished.
   def self.forge(trap_signals : Bool = trap_signals_default?, shutdown_timeout : Time::Span = SHUTDOWN_TIMEOUT)
     Log.info { "JoobQ starting..." }
+    config.validate_recovery_timing
     trap_termination(shutdown_timeout) if trap_signals
 
     config.schedulers.each do |scheduler|

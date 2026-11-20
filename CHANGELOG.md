@@ -26,6 +26,15 @@
   `JoobQ::UnsupportedJobVersion` (a `JSON::ParseException`, so the worker dead-letters the payload unread and whole, and logs a
   message naming the version; redrive it after upgrading). A job without `v` is a 0.6 job and is read as before.
 
+### Added
+
+- **The crash-recovery time is a setting.** `owner_ttl` (how long a heartbeat counts as alive, default 30 s, 1 s to 1 h)
+  and `reaper_interval` (default 30 s, 100 ms up to `owner_ttl`) are `Configure` properties, `settings` keys in YAML and
+  the environment variables `JOOBQ_OWNER_TTL` and `JOOBQ_REAPER_INTERVAL`. A process's jobs are back on their queue at
+  most `owner_ttl + reaper_interval` after it was killed. The heartbeat now beats at a third of the TTL, at most every
+  10 s. Values outside the range, or an interval longer than the TTL, raise `ConfigValidationError` when the YAML is
+  loaded, from the environment, and in `forge`. Defaults are unchanged.
+
 ### Fixed
 
 - **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the

@@ -18,9 +18,12 @@ module JoobQ
     OWNERS = Keys::PROCESSING_OWNERS
     # The shape of an owner id: `<host>:<pid>`, exactly one colon. Recovery tells a queue's own processing lists
     # from those of a queue whose name merely starts with it by this shape.
-    OWNER_ID   = /\A[^:]+:[^:]+\z/
-    private OWNER_TTL  = 30.seconds
-    private OWNER_BEAT = 10.seconds
+    OWNER_ID = /\A[^:]+:[^:]+\z/
+    # How long a process's last heartbeat counts as alive. `Configure#owner_ttl` sets it (see `owner_ttl=`).
+    DEFAULT_OWNER_TTL = 30.seconds
+    # The longest gap between two beats; a shorter TTL beats at a third of it (`owner_beat`).
+    MAX_OWNER_BEAT  = 10.seconds
+    OWNER_TTL_RANGE = 1.second..1.hour
     # How soon the heartbeat loop looks again while a retained copy is still waiting to be re-driven
     private REDRIVE_RETRY = 1.second
 
@@ -70,6 +73,27 @@ module JoobQ
     # that restarts gets a new pid and so a new id, which leaves its old list orphaned for recovery. Settable so a
     # spec can act as several processes against one Redis.
     getter owner_id : String = "#{System.hostname}:#{Process.pid}"
+
+    # How long after its last beat a process is judged dead and its processing lists are reclaimed. A crashed process's
+    # jobs are back on their queue at most `owner_ttl` plus the reaper interval after the crash (30 s + 30 s by
+    # default). Between 1 second and 1 hour; `Configure#owner_ttl=` sets it on the configured store.
+    getter owner_ttl : Time::Span = DEFAULT_OWNER_TTL
+
+    def owner_ttl=(ttl : Time::Span) : Time::Span
+      self.class.check_owner_ttl(ttl)
+      @owner_ttl = ttl
+    end
+
+    def self.check_owner_ttl(ttl : Time::Span) : Nil
+      return if OWNER_TTL_RANGE.includes?(ttl)
+      raise ConfigValidationError.new("owner_ttl must be between #{OWNER_TTL_RANGE.begin} and #{OWNER_TTL_RANGE.end}, got #{ttl}")
+    end
+
+    # The pause between two heartbeats: a third of the TTL, at most 10 seconds, so a process misses two beats before it
+    # is judged dead.
+    def owner_beat : Time::Span
+      {MAX_OWNER_BEAT, @owner_ttl / 3}.min
+    end
 
     # Keeps the batch-cleanup pipeline on the same owner id, so a spec that poses as another process cleans up the
     # list it claimed into.
@@ -330,7 +354,7 @@ module JoobQ
       @owner_heartbeat.start do
         beat_owner
         redrive_retained
-        InFlight.retained.empty? ? OWNER_BEAT : REDRIVE_RETRY
+        InFlight.retained.empty? ? owner_beat : REDRIVE_RETRY
       end
     end
 
@@ -356,9 +380,9 @@ module JoobQ
 
     # Owner ids whose heartbeat is within the TTL. Lapsed entries are pruned as they are read. Liveness is scored by
     # the Redis clock, so recovery does not depend on the worker and reaper clocks agreeing. A process paused (GC,
-    # starvation) longer than OWNER_TTL can still be judged dead and have its jobs recovered, so jobs stay idempotent.
+    # starvation) longer than `owner_ttl` can still be judged dead and have its jobs recovered, so jobs stay idempotent.
     def live_owners(key : String = OWNERS) : Set(String)
-      cutoff = redis_now_ms - OWNER_TTL.total_milliseconds.to_i64
+      cutoff = redis_now_ms - @owner_ttl.total_milliseconds.to_i64
       redis.zremrangebyscore(key, "-inf", cutoff)
       redis.zrange(key, 0, -1).map(&.as(String)).to_set
     end

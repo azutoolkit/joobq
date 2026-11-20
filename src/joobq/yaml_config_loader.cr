@@ -122,6 +122,7 @@ module JoobQ
 
       # Apply environment variable overrides
       apply_env_overrides(config, environment)
+      config.validate_recovery_timing
 
       config
     end
@@ -197,6 +198,10 @@ module JoobQ
           config.time_location = value
         when "worker_batch_size"
           config.worker_batch_size = value.to_i
+        when "owner_ttl"
+          config.owner_ttl = parse_time_span(value)
+        when "reaper_interval"
+          config.reaper_interval = parse_time_span(value)
         when "pipeline_batch_size"
           config.pipeline_batch_size = value.to_i
         when "pipeline_timeout"
@@ -231,6 +236,8 @@ module JoobQ
       merged.failed_ttl = base.failed_ttl
       merged.dead_letter_ttl = base.dead_letter_ttl
       merged.worker_batch_size = base.worker_batch_size
+      merged.owner_ttl = override.owner_ttl == Configure::DEFAULT_OWNER_TTL ? base.owner_ttl : override.owner_ttl
+      merged.reaper_interval = override.reaper_interval == Configure::DEFAULT_REAPER_INTERVAL ? base.reaper_interval : override.reaper_interval
       merged.pipeline_batch_size = base.pipeline_batch_size
       merged.pipeline_timeout = base.pipeline_timeout
       merged.pipeline_max_commands = base.pipeline_max_commands

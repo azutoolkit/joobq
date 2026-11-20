@@ -21,7 +21,8 @@ description: Every JoobQ Core setting (JoobQ.configure properties, YAML keys, JO
 | `rest_api_enabled` | `Bool` | `false` | Starts the management API in `forge` |
 | `stats_enabled` | `Bool` | `true` | |
 | `time_location` | `Time::Location` | `America/New_York` | Time zone of `scheduler` cron patterns |
-| `reaper_interval`, `reaper_scan_limit` | `Time::Span`, `Int32` | `30.seconds`, `1000` | Expired-job reaper |
+| `reaper_interval`, `reaper_scan_limit` | `Time::Span`, `Int32` | `30.seconds`, `1000` | Expired-job reaper; it also reclaims dead processes' jobs. `reaper_interval` is 100 ms to `owner_ttl` |
+| `owner_ttl` | `Time::Span` | `30.seconds` | How long after its last beat a process counts as dead (1 second to 1 hour); also `owner_ttl` in YAML settings and `JOOBQ_OWNER_TTL`. A crashed process's jobs are back on their queue at most `owner_ttl + reaper_interval` after the crash (60 s by default) |
 | `pipeline_batch_size`, `pipeline_timeout`, `pipeline_max_commands` | `Int32`, `Float64`, `Int32` | `100`, `1.0`, `1000` | Batch size ≤ max commands |
 | `middlewares` | `Array(Middleware)` | `[Throttle, Retry, Timeout]` | Add Pro middleware here |
 | `store` | `Store` | `RedisStore.from_env` | |
@@ -36,7 +37,7 @@ Searched in order: `./joobq.yml`, `./config/joobq.yml`, `./config/joobq.yaml`, `
 
 | Key under `joobq:` | Contents |
 | --- | --- |
-| `settings` | `default_queue`, `retries`, `retry_jitter`, `expires`, `timeout`, `failed_ttl`, `dead_letter_ttl`, `worker_batch_size`, `timezone` |
+| `settings` | `default_queue`, `retries`, `retry_jitter`, `expires`, `timeout`, `failed_ttl`, `dead_letter_ttl`, `worker_batch_size`, `owner_ttl`, `reaper_interval`, `timezone` |
 | `queues` | `<name>: {job_class, workers, throttle: {limit, period}}` |
 | `redis` | `host`, `port`, `password`, `pool_size`, `pool_timeout`, `url`, `tls_verify`, `ca_file` |
 | `middlewares` | list of `{type: throttle|retry|timeout}` |

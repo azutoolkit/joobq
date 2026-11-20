@@ -269,7 +269,8 @@ module JoobQ
         job["max_retries"] = retries
       end
 
-      if delay = payload["delay"]?.try(&.as_i?)
+      delay = payload["delay"]?.try(&.as_i?) || 0
+      if delay > 0
         queue.add_delayed(job.to_json, delay.seconds.from_now)
       else
         queue.add!(job.to_json)

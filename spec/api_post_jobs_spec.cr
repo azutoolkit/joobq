@@ -66,14 +66,40 @@ module JoobQ
       post_jobs.call(%({"queue":"example","job_type":"ExampleJob","data":{"x":1},"retries":7}))[0].should eq(201)
 
       stored = JoobQ.store.as(RedisStore).dequeue("example", ExampleJob).not_nil!
-      ExampleJob.from_json(stored).retries.should eq(7)
+      job = ExampleJob.from_json(stored)
+      job.retries.should eq(7)
+      job.max_retries.should eq(7)
     end
 
-    it "lands the job on the queue named in the request" do
-      post_jobs.call(%({"queue":"example","job_type":"ExampleJob","data":{"x":1,"queue":"elsewhere"}}))[0].should eq(201)
+    it "refuses retries and delay outside their bounds" do
+      [%("retries":11), %("retries":-1), %("delay":-1), %("delay":86401)].each do |field|
+        status, _ = post_jobs.call(%({"queue":"example","job_type":"ExampleJob","data":{"x":1},#{field}}))
+        status.should eq(422)
+      end
+      JoobQ.store.as(RedisStore).queue_size("example").should eq(0)
+      JoobQ.store.set_size(RedisStore::DELAYED_SET).should eq(0)
+    end
+
+    it "accepts the bounds themselves" do
+      post_jobs.call(%({"queue":"example","job_type":"ExampleJob","data":{"x":1},"retries":10,"delay":86400}))[0].should eq(201)
+      post_jobs.call(%({"queue":"example","job_type":"ExampleJob","data":{"x":1},"retries":0}))[0].should eq(201)
+    end
+
+    it "enqueues at once when delay is 0" do
+      post_jobs.call(%({"queue":"example","job_type":"ExampleJob","data":{"x":1},"delay":0}))[0].should eq(201)
 
       JoobQ.store.as(RedisStore).queue_size("example").should eq(1)
-      JoobQ.store.as(RedisStore).queue_size("elsewhere").should eq(0)
+      JoobQ.store.set_size(RedisStore::DELAYED_SET).should eq(0)
+    end
+
+    it "refuses the job's own bookkeeping fields inside data, naming the key" do
+      %w(jid queue retries max_retries expires status v error).each do |key|
+        status, body = post_jobs.call(%({"queue":"example","job_type":"ExampleJob","data":{"x":1,"#{key}":1}}))
+
+        status.should eq(422)
+        body.to_json.should contain(key)
+      end
+      JoobQ.store.as(RedisStore).queue_size("example").should eq(0)
     end
   end
 end

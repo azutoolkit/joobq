@@ -50,6 +50,10 @@ module JoobQ
       end
     end
 
+    # Fields every job carries for JoobQ's own bookkeeping. `data` is the job's JSON, so a client must not set them there:
+    # `retries` and `delay` of the request are bounded, and these would walk around the bounds.
+    RESERVED_JOB_FIELDS = %w(jid queue retries max_retries expires status v error)
+
     # Job enqueue validation
     def self.validate_job_enqueue(payload : JSON::Any) : ValidationResult
       result = ValidationResult.new(true)
@@ -80,7 +84,11 @@ module JoobQ
       end
 
       if payload["data"]?
-        unless payload["data"].as_h?
+        if data = payload["data"].as_h?
+          (RESERVED_JOB_FIELDS & data.keys).each do |key|
+            result.add_error("data", "Job data cannot set '#{key}': it belongs to JoobQ", JSON::Any.new(key), "reserved_field")
+          end
+        else
           result.add_error("data", "Job data must be an object")
         end
       else

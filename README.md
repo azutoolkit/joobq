@@ -542,7 +542,8 @@ Content-Type: application/json
 
 `queue` and `job_type` must name a queue and the job class it runs. `data` is the job's own JSON (its arguments,
 passed on unchanged). `retries` (0 to 10) and `delay` in seconds (0 to 86400) are optional. `priority` is validated and
-has no effect. `data` that does not fit the job class answers `422` and nothing is enqueued.
+has no effect. `data` that does not fit the job class answers `422` and nothing is enqueued; so does a `data` that sets
+`jid`, `queue`, `retries`, `max_retries`, `expires`, `status`, `v` or `error` (use the request's own `retries` and `delay`).
 
 **Response:**
 

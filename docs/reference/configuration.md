@@ -28,7 +28,7 @@ description: Every JoobQ Core setting (JoobQ.configure properties, YAML keys, JO
 | `payload_encryption(current, previous)` | method | none | Keys for `encrypted_property`; otherwise read from `JOOBQ_PAYLOAD_KEYS` |
 | `allow_plaintext_payloads` | `Bool` | `false` | A worker refuses an `encrypted_property` value that is not sealed (the job is dead-lettered without its payload). Changed from `true` in this release; set `true` only while draining jobs stored before the property was encrypted |
 | `redact_api_payloads` | `Bool` | `true` | The management API replaces the value of an argument whose name matches `redacted_payload_keys` with `[REDACTED]` (`/joobq/jobs/retrying`, `/joobq/jobs/dead`, `/joobq/errors/*`) |
-| `redacted_payload_keys` | `Array(String)` | `password`, `passwd`, `pwd`, `passphrase`, `secret`, `token`, `api_key`, `authorization`, `bearer`, `jwt`, `credential`, `private_key`, `cookie`, `card_number` | Name fragments, matched case-insensitively with `-`, `_` and spaces ignored (`privateKey` matches), at any depth. `auth` and `pass` are left out: they would hide `author` and `passenger_count` |
+| `redacted_payload_keys` | `Array(String)` | `password`, `passwd`, `pwd`, `passphrase`, `secret`, `token`, `api_key`, `authorization`, `bearer`, `jwt`, `credential`, `private_key`, `cookie`, `card_number` | Name fragments, matched case-insensitively on letters and digits only (`privateKey`, `private.key` and `Private-Key` match), at any depth. `auth` and `pass` are left out: they would hide `author` and `passenger_count` |
 
 Inside the block: `queue name, workers, JobClass, throttle = nil` (workers 1 to 1000), `scheduler(tz) { every ...; cron "..." { } }`, `register_job JobClass`, `error_monitoring(...)`.
 

@@ -5,8 +5,9 @@ module JoobQ
   # carries the real arguments. Values of `encrypted_property` are sealed in the stored job and the API never opens
   # them.
   #
-  # Matching is a case-insensitive substring of the name with `-`, `_` and spaces removed on both sides, so
-  # `privateKey`, `private_key` and `Private-Key` are all hidden by the entry `private_key`. A fragment also hides
+  # Matching is a case-insensitive substring of the name reduced to its letters and digits on both sides (compatibility-normalized, lower-cased), so
+  # `privateKey`, `private_key`, `Private-Key`, `private.key` and `private<zero-width space>key` are all hidden by the
+  # entry `private_key`. A fragment also hides
   # longer names that contain it (`token` hides `tokenizer`); `auth` and `pass` are not in the default list because
   # they would hide `author` and `passenger_count`. Set the list with `config.redacted_payload_keys`, or switch the
   # whole thing off with `config.redact_api_payloads = false` (readers then see every plain argument).
@@ -78,7 +79,7 @@ module JoobQ
     end
 
     private def self.normalize(name : String) : String
-      name.downcase.delete("-_ ")
+      name.unicode_normalize(:nfkc).downcase.gsub(/[^\p{L}\p{N}]/, "")
     end
   end
 end

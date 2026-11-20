@@ -208,6 +208,17 @@ module JoobQ
       redacted["author"].as_s.should eq("j")
     end
 
+    it "ignores every character that is not a letter or digit when matching" do
+      any = JSON.parse({"pass.word" => "a", "pass\tword" => "b", "pass\u200Bword" => "c", "ｐａｓｓｗｏｒｄ" => "d", "api.key" => "e", "TOKEN!" => "f", "pass.port" => "g"}.to_json)
+
+      redacted = PayloadRedaction.redact(any)
+
+      ["pass.word", "pass\tword", "pass\u200Bword", "ｐａｓｓｗｏｒｄ", "api.key", "TOKEN!"].each do |name|
+        redacted[name].as_s.should eq(PayloadRedaction::REDACTED)
+      end
+      redacted["pass.port"].as_s.should eq("g")
+    end
+
     it "withholds the raw text of an unparseable job's dead-letter stub" do
       raw = %({"jid":"x","password":"hunter2-correct-horse","note":"truncated)
       stub = {"jid" => "j1", "queue" => "example", "status" => "Dead", "original_job_data" => raw}

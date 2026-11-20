@@ -43,7 +43,7 @@ removal of `JoobQ.scheduler`), so the next release is **0.8.0**, not a patch. Be
   `job_data` of `/joobq/errors/recent`, `/by-type` and `/by-queue` returned every plain argument to the reader role. The
   value of an argument whose name contains one of `config.redacted_payload_keys` (default `password`, `passwd`, `pwd`,
   `passphrase`, `secret`, `token`, `api_key`, `authorization`, `bearer`, `jwt`, `credential`, `private_key`, `cookie`,
-  `card_number`; case-insensitive, `-`, `_` and spaces ignored so `privateKey` matches, any depth) is now `[REDACTED]` in
+  `card_number`; case-insensitive, only letters and digits compared, so `privateKey` and `private.key` match, any depth) is now `[REDACTED]` in
   the answer, for every role. `auth` and `pass` are not in the list: they would hide `author` and `passenger_count`. The
   raw `original_job_data` of an unparseable job's dead-letter stub is always withheld, and text that cannot be parsed
   is withheld rather than shown. Stored jobs are untouched, so retries

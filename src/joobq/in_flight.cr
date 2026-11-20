@@ -152,6 +152,31 @@ module JoobQ
       allowed
     end
 
+    # The raw copy the current fiber's claim holds in this process's processing list, while the job runs or applies a
+    # failure outcome; nil for a fiber that is not running a claimed job (a caller outside a worker, or a worker
+    # already cleaning up). The store fences the failure outcome on it (see `RedisStore#settle_claim`).
+    def self.current_job : String?
+      @@lock.synchronize do
+        token = @@fibers[Fiber.current.object_id]? || next nil
+        entry = @@jobs[token]? || next nil
+        entry.job if entry.state.running? || entry.state.settling?
+      end
+    end
+
+    # The current fiber's claim was reclaimed by another process (its copy is gone from this process's processing
+    # list): the execution becomes inert, like one abandoned at shutdown, because the process that reclaimed the job
+    # owns it now. Nothing of it is scheduled, counted or removed afterwards.
+    def self.fence : Nil
+      @@lock.synchronize do
+        token = @@fibers[Fiber.current.object_id]? || next
+        entry = @@jobs[token]? || next
+        next if entry.state.retained?
+
+        @@jobs[token] = Entry.new(entry.queue, entry.job, State::Abandoned, entry.fiber)
+        @@any_abandoned.set(true)
+      end
+    end
+
     # Whether the job being executed by the current fiber was abandoned by shutdown. Read only, and cheap enough
     # for the hot path: false without taking a lock until some job has been abandoned.
     def self.abandoned? : Bool

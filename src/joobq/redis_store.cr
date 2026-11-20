@@ -104,6 +104,8 @@ module JoobQ
     end
 
     @owner_heartbeat = BackgroundLoop.new("processing_owner")
+    # Whether this process has published a heartbeat since it started it (a first beat has no predecessor to compare)
+    @beating = false
     @list_move_checked = Atomic(Bool).new(false)
     # Endpoint and timeouts kept so a queue dispatcher can mint its own dedicated blocking connection (a BLMOVE
     # holds its connection for the block, so it must not take one from the shared pool).
@@ -361,6 +363,7 @@ module JoobQ
     # Stops the heartbeat and drops this process's owner entry, so recovery on another process can reclaim this
     # process's lists at once rather than waiting out the TTL. A crash skips this and the entry lapses after the TTL.
     def stop_owner_heartbeat : Nil
+      @beating = false
       @owner_heartbeat.stop
       redis.zrem(OWNERS, @owner_id)
     rescue ex
@@ -374,8 +377,21 @@ module JoobQ
       (parts[0].as(String).to_i64 * 1000) + (parts[1].as(String).to_i64 // 1000)
     end
 
+    # Publishes this process's heartbeat. A beat that finds the previous one older than `owner_ttl` (or gone: a reader
+    # pruned it) means recovery may have judged this process dead and returned its jobs to their queues: it is logged,
+    # and the claims it held settle as fenced (see `SETTLE`).
     def beat_owner : Nil
-      redis.zadd(OWNERS, redis_now_ms, @owner_id)
+      now = redis_now_ms
+      previous = redis.zscore(OWNERS, @owner_id).try(&.to_f.to_i64)
+      redis.zadd(OWNERS, now, @owner_id)
+      warn_lapsed(previous.try { |last| now - last }) if @beating && (previous.nil? || now - previous > @owner_ttl.total_milliseconds)
+      @beating = true
+    end
+
+    private def warn_lapsed(silent_ms : Int64?) : Nil
+      Log.warn &.emit("This process's heartbeat lapsed; another process may have reclaimed the jobs it held, and what it " \
+                      "finishes of them is dropped (they may run twice)",
+        owner: @owner_id, silent_seconds: silent_ms.try { |ms| ms / 1000.0 }, heartbeat_ttl_seconds: @owner_ttl.total_seconds)
     end
 
     # Owner ids whose heartbeat is within the TTL. Lapsed entries are pruned as they are read. Liveness is scored by
@@ -493,8 +509,14 @@ module JoobQ
 
     # Scored by time of death like every other dead-letter writer, so entries sort
     # and age consistently; `expiration_time` is kept for the Store interface.
+    # Inside a worker, only while this process still holds the claim (see `settle_claim`).
     def mark_as_dead(job : Job, expiration_time : Int64) : Nil
-      DeadLetterQueue.add(redis, Time.utc.to_unix_ms, [job.to_json])
+      member = job.to_json
+      if claimed = InFlight.current_job
+        dead_letter_if_held(claimed, member, job.queue, Time.utc.to_unix_ms)
+      else
+        DeadLetterQueue.add(redis, Time.utc.to_unix_ms, [member])
+      end
     end
 
     def schedule(job : Job, delay_in_ms : Int64, delay_set : String = DELAYED_SET) : Nil
@@ -644,19 +666,69 @@ module JoobQ
       redis.eval(REQUEUE_MANY, requeue_keys(queue_name), [job_json]).as(Int).to_i
     end
 
-    # Removes a finished job from the processing list and counts it as processed. False (after logging) when Redis
-    # could not take it.
-    def cleanup_job(job_json : String, queue_name : String) : Bool
-      redis.pipelined do |pipe|
-        # Remove the job from this process's list (and the legacy shared list, for a migrated or seeded job)
-        pipe.lrem(processing_queue(queue_name), 0, job_json)
-        pipe.lrem(legacy_processing_queue(queue_name), 0, job_json)
-
-        # Update statistics
-        pipe.hincrby(Keys.stat("processed"), queue_name, 1)
-        pipe.hincrby(Keys.stat("total_processed"), "global", 1)
+    # What settling a finished claim does, in one atomic step: take one copy of the job off this process's processing
+    # list (or the legacy shared list) and, only if it was there, count it. KEYS: own list, legacy list, processed,
+    # total processed, completed, total completed; ARGV: the job, its queue, "1" to count it completed too.
+    #
+    # This is the fence. The copy in this process's list is the claim, and recovery takes it away (LMOVE) when it
+    # judges this process dead, so a process whose heartbeat lapsed (frozen, partitioned) and whose list another
+    # process reclaimed finds the copy gone: the script counts nothing and answers 0. The two steps (reclaim, settle)
+    # are each atomic, so a claim is counted by whoever holds the copy, never by both.
+    SETTLE = <<-LUA
+      local removed = redis.call('LREM', KEYS[1], 1, ARGV[1])
+      if removed == 0 then removed = redis.call('LREM', KEYS[2], 1, ARGV[1]) end
+      if removed == 0 then return 0 end
+      redis.call('HINCRBY', KEYS[3], ARGV[2], 1)
+      redis.call('HINCRBY', KEYS[4], 'global', 1)
+      if ARGV[3] == '1' then
+        redis.call('HINCRBY', KEYS[5], ARGV[2], 1)
+        redis.call('HINCRBY', KEYS[6], 'global', 1)
       end
+      return 1
+    LUA
 
+    # Settles a finished claim (`SETTLE`). A claim another process reclaimed is refused with a warning and counts
+    # nothing: it is settled as far as this process is concerned (nothing to retain or re-drive), and the process that
+    # holds the job counts it when it ends. Raises when Redis fails.
+    private def settle_claim(job_json : String, queue_name : String, completed : Bool) : Nil
+      keys = [processing_queue(queue_name), legacy_processing_queue(queue_name), Keys.stat("processed"), Keys.stat("total_processed"),
+              Keys.stat("completed"), Keys.stat("total_completed")]
+      return unless redis.eval(SETTLE, keys, [job_json, queue_name, completed ? "1" : "0"]) == 0
+
+      warn_reclaimed(queue_name, job_json)
+    end
+
+    # The warning for a claim whose copy is gone: this process's heartbeat lapsed and another process took its jobs.
+    def warn_reclaimed(queue_name : String, job_json : String) : Nil
+      Log.warn &.emit("Another process reclaimed this job after this process's heartbeat lapsed; its outcome is dropped " \
+                      "and it is not counted again (the job may run twice)",
+        queue: queue_name, owner: @owner_id, job_id: logging_job_id(job_json), heartbeat_ttl_seconds: @owner_ttl.total_seconds)
+    end
+
+    # Fences the current fiber's claim: its execution is inert from here on (`InFlight.fence`).
+    private def fence_claim(queue_name : String, job_json : String) : Nil
+      InFlight.fence
+      warn_reclaimed(queue_name, job_json)
+    end
+
+    # Whether this process's processing list (or the legacy shared list) still holds the claimed copy. A read, so it
+    # fences only when nothing is written between the check and the settlement (an unparseable payload).
+    def claim_held?(queue_name : String, job_json : String) : Bool
+      !redis.command(["LPOS", processing_queue(queue_name), job_json]).nil? ||
+        !redis.command(["LPOS", legacy_processing_queue(queue_name), job_json]).nil?
+    end
+
+    private def dead_letter_if_held(claimed : String, member : String, queue_name : String, score : Int64) : Bool
+      return true if DeadLetterQueue.add_if_held(redis, score, member, claimed, processing_queue(queue_name), legacy_processing_queue(queue_name))
+
+      fence_claim(queue_name, claimed)
+      false
+    end
+
+    # Removes a finished job from the processing list and counts it as processed, unless another process reclaimed it
+    # (`SETTLE`). False (after logging) when Redis could not take it.
+    def cleanup_job(job_json : String, queue_name : String) : Bool
+      settle_claim(job_json, queue_name, completed: false)
       Log.debug &.emit("Job cleanup successful",
         queue: queue_name,
         job_id: logging_job_id(job_json)
@@ -675,21 +747,10 @@ module JoobQ
       @pipeline.cleanup_jobs_batch(job_jsons, queue_name)
     end
 
-    # Mark job as completed with statistics. False (after logging) when Redis could not take it: the copy is then still
-    # in the processing list.
+    # Mark job as completed with statistics, unless another process reclaimed it (`SETTLE`). False (after logging) when
+    # Redis could not take it: the copy is then still in the processing list.
     def mark_job_completed(job_json : String, queue_name : String) : Bool
-      redis.pipelined do |pipe|
-        # Remove the job from this process's list (and the legacy shared list, for a migrated or seeded job)
-        pipe.lrem(processing_queue(queue_name), 0, job_json)
-        pipe.lrem(legacy_processing_queue(queue_name), 0, job_json)
-
-        # Update completion statistics
-        pipe.hincrby(Keys.stat("completed"), queue_name, 1)
-        pipe.hincrby(Keys.stat("total_completed"), "global", 1)
-        pipe.hincrby(Keys.stat("processed"), queue_name, 1)
-        pipe.hincrby(Keys.stat("total_processed"), "global", 1)
-      end
-
+      settle_claim(job_json, queue_name, completed: true)
       Log.debug &.emit("Job marked as completed",
         queue: queue_name,
         job_id: logging_job_id(job_json)
@@ -959,10 +1020,15 @@ module JoobQ
       job_json = job.to_json
       retry_lock_key = Keys.retry_lock(job.jid)
 
-      # Persist the destination before acknowledging the source. If either write fails,
-      # retain a recoverable copy; duplicates still require a fenced settlement protocol.
-      DeadLetterQueue.add(redis, current_timestamp, [job_json])
-      remove_job_from_processing_by_id(job.jid.to_s, queue_name)
+      # Persist the destination before acknowledging the source. If either write fails, retain a recoverable copy.
+      if claimed = InFlight.current_job
+        # In a worker: dead-letter only while this process still holds the claim, and leave the copy for the worker's
+        # cleanup (`settle_claim`), which removes it and counts the job.
+        return unless dead_letter_if_held(claimed, job_json, queue_name, current_timestamp)
+      else
+        DeadLetterQueue.add(redis, current_timestamp, [job_json])
+        remove_job_from_processing_by_id(job.jid.to_s, queue_name)
+      end
 
       redis.pipelined do |pipe|
         # Clean up retry lock if it exists
@@ -992,25 +1058,12 @@ module JoobQ
       schedule_time = Time.local.to_unix_ms + delay_ms
       job_json = job.to_json
 
-      # Store the retry first, then take the job off the processing list: a failure in between leaves the job
-      # in processing (to be reclaimed or dead-lettered), never in neither place.
-      redis.pipelined do |pipe|
-        # Add to delayed queue with future timestamp
-        pipe.zadd(DELAYED_SET, schedule_time, job_json)
-
-        # Update statistics
-        pipe.hincrby(Keys.stat("retries"), queue_name, 1)
-        pipe.hincrby(Keys.stat("total_retries"), "global", 1)
-      end
-
-      # Remove job by ID from processing queue (more reliable than JSON match). The retry is stored by now, so a
-      # failure here must not report the retry as failed: the caller would dead-letter the job as well, leaving it
-      # both scheduled and dead. The copy left in processing is removed by the worker's cleanup, or recovered.
-      begin
-        remove_job_from_processing_by_id(job.jid.to_s, queue_name)
-      rescue ex
-        Log.warn &.emit("Retry stored, but the failed copy could not be taken off the processing list",
-          job_id: job.jid.to_s, queue: queue_name, error: ex.message)
+      if claimed = InFlight.current_job
+        # In a worker: schedule the retry only while this process still holds the claim, in one step; the copy is left
+        # for the worker's cleanup (`settle_claim`), which removes it and counts the job. False once it was reclaimed.
+        return false unless retry_if_held(claimed, job_json, queue_name, schedule_time)
+      else
+        store_retry_then_release(job, job_json, queue_name, schedule_time)
       end
 
       Events.emit("job.retrying") { {jid: job.jid.to_s, queue: queue_name, delay_ms: delay_ms} }
@@ -1029,6 +1082,46 @@ module JoobQ
         error: ex.message
       )
       false
+    end
+
+    # Schedules a retry, one step, only while the claimed copy is in this process's processing list (KEYS: own list,
+    # legacy list, delayed set, retries, total retries; ARGV: the claimed copy, the due time, the retry, the queue).
+    RETRY_IF_HELD = <<-LUA
+      if redis.call('LPOS', KEYS[1], ARGV[1]) == false and redis.call('LPOS', KEYS[2], ARGV[1]) == false then
+        return 0
+      end
+      redis.call('ZADD', KEYS[3], ARGV[2], ARGV[3])
+      redis.call('HINCRBY', KEYS[4], ARGV[4], 1)
+      redis.call('HINCRBY', KEYS[5], 'global', 1)
+      return 1
+    LUA
+
+    private def retry_if_held(claimed : String, job_json : String, queue_name : String, schedule_time : Int64) : Bool
+      keys = [processing_queue(queue_name), legacy_processing_queue(queue_name), DELAYED_SET, Keys.stat("retries"), Keys.stat("total_retries")]
+      return true if redis.eval(RETRY_IF_HELD, keys, [claimed, schedule_time.to_s, job_json, queue_name]) == 1
+
+      fence_claim(queue_name, claimed)
+      false
+    end
+
+    # Store the retry first, then take the job off the processing list: a failure in between leaves the job in
+    # processing (to be reclaimed or dead-lettered), never in neither place.
+    private def store_retry_then_release(job : Job, job_json : String, queue_name : String, schedule_time : Int64) : Nil
+      redis.pipelined do |pipe|
+        pipe.zadd(DELAYED_SET, schedule_time, job_json)
+        pipe.hincrby(Keys.stat("retries"), queue_name, 1)
+        pipe.hincrby(Keys.stat("total_retries"), "global", 1)
+      end
+
+      # Remove job by ID from processing queue (more reliable than JSON match). The retry is stored by now, so a
+      # failure here must not report the retry as failed: the caller would dead-letter the job as well, leaving it
+      # both scheduled and dead. The copy left in processing is removed by the worker's cleanup, or recovered.
+      begin
+        remove_job_from_processing_by_id(job.jid.to_s, queue_name)
+      rescue ex
+        Log.warn &.emit("Retry stored, but the failed copy could not be taken off the processing list",
+          job_id: job.jid.to_s, queue: queue_name, error: ex.message)
+      end
     end
 
     # Schedule delayed retry - simplified version of move_to_retry

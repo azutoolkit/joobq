@@ -27,12 +27,6 @@ module JoobQ
   end
 end
 
-class JoobQ::Worker(T)
-  def test_unparseable(job_json : String, error : Exception) : Nil
-    handle_unparseable_job(job_json, error)
-  end
-end
-
 PROBE_BINARY = File.join(Dir.tempdir, "joobq-shutdown-probe-#{Random::Secure.hex(4)}")
 Spec.after_suite { File.delete?(PROBE_BINARY) }
 
@@ -172,6 +166,8 @@ module JoobQ
         queue = JoobQ.queues["example"]
         job = ExampleJob.new
         job.retries = retries
+        owned_list = JoobQ::Keys.processing("example", JoobQ.store.as(JoobQ::RedisStore).owner_id)
+        JoobQ.store.as(JoobQ::RedisStore).redis.rpush(owned_list, job.to_json) # a claim is the copy in the process's own list
         token = InFlight.claimed("example", [job.to_json]).first
         done = Channel(Nil).new
         spawn do
@@ -185,6 +181,7 @@ module JoobQ
         sleep 30.milliseconds
         InFlight.abandon_all if abandon
         done.receive
+        JoobQ.store.as(JoobQ::RedisStore).redis.del(owned_list)
         job.jid.to_s
       end
 
@@ -223,8 +220,10 @@ module JoobQ
       after_each { InFlight.clear }
 
       # Runs the block in a fiber that runs a claimed job, abandoning the claim first when asked.
-      run_claimed = ->(abandon : Bool, body : -> Nil) do
-        token = InFlight.claimed("example", ["{}"]).first
+      run_claimed = ->(abandon : Bool, body : -> Nil, raw : String) do
+        owned_list = JoobQ::Keys.processing("example", JoobQ.store.as(JoobQ::RedisStore).owner_id)
+        JoobQ.store.as(JoobQ::RedisStore).redis.rpush(owned_list, raw) # a claim is the copy in the process's own list
+        token = InFlight.claimed("example", [raw]).first
         ready = Channel(Nil).new
         go = Channel(Nil).new
         done = Channel(Nil).new
@@ -243,6 +242,7 @@ module JoobQ
         InFlight.abandon_all if abandon
         go.send(nil)
         done.receive
+        JoobQ.store.as(JoobQ::RedisStore).redis.del(owned_list)
       end
 
       it "settle is true for a fiber that runs no claimed job" do
@@ -272,7 +272,7 @@ module JoobQ
 
       it "settle after an abandonment answers false, once" do
         saw = Channel(Bool).new(1)
-        run_claimed.call(true, -> { saw.send(InFlight.settle); nil })
+        run_claimed.call(true, -> { saw.send(InFlight.settle); nil }, "{}")
         saw.receive.should be_false
       end
 
@@ -290,7 +290,7 @@ module JoobQ
         run_claimed.call(false, -> do
           JoobQ::Middleware::Retry.new.call(job, queue, "w", Proc(Nil).new { raise "boom" })
           nil
-        end)
+        end, "{}")
         taken.should be_empty
         scheduled = redis.zrange("joobq:v1:delayed_jobs", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
         scheduled.size.should eq(1)
@@ -309,7 +309,7 @@ module JoobQ
             run_claimed.call(abandon, -> do
               ErrorHandler.handle_job_error(job, queue, Exception.new("bad"), "w", schedule: true)
               nil
-            end)
+            end, "{}")
             sleep 300.milliseconds
             seen = [] of String
             loop do
@@ -346,7 +346,7 @@ module JoobQ
           run_claimed.call(abandon, -> do
             JoobQ::Middleware::Timeout.new.call(job, queue, "w", -> { })
             nil
-          end)
+          end, "{}")
           dead = redis.zrange("joobq:v1:dead_letter", 0, -1).select { |e| e.to_s.includes?(job.jid.to_s) }
           dead.empty?.should eq(abandon)
           redis.zrem("joobq:v1:dead_letter", dead) unless dead.empty?
@@ -362,7 +362,7 @@ module JoobQ
           run_claimed.call(abandon, -> do
             worker.test_unparseable("{\"jid\": \"not-a-job", Exception.new("bad json"))
             nil
-          end)
+          end, "{\"jid\": \"not-a-job")
           (redis.zcard("joobq:v1:dead_letter") - before).should eq(abandon ? 0 : 1)
         end
         redis.zremrangebyscore("joobq:v1:dead_letter", "-inf", "+inf")

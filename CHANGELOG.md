@@ -45,6 +45,19 @@
 
 ### Fixed
 
+- **A process frozen past the heartbeat TTL no longer settles jobs another process reclaimed.** After `owner_ttl` of
+  silence recovery moves a process's jobs back to their queue; when that process woke up it still completed its copies,
+  and every job counted twice (`joobq:v1:stats:completed` = 20 for 10 jobs) while a failure could schedule a second
+  retry or a second dead letter. A claim is now the copy in the process's own processing list, and the settlement
+  scripts act only while they still hold it: completion and cleanup (`RedisStore#mark_job_completed`, `#cleanup_job`) remove
+  the copy and count in one step, and inside a worker `move_to_retry`, `move_to_dead_letter` and `mark_as_dead` write only
+  if the copy is still there (and leave its removal to the cleanup). A refused claim makes its execution inert
+  (`InFlight.fence`, as for an abandoned one), logs `Another process reclaimed this job after this process's heartbeat
+  lapsed`, and counts nothing; a heartbeat that finds the previous one older than the TTL logs `This process's heartbeat
+  lapsed`. The job body still ran twice: delivery stays at-least-once. Behaviour changes: `mark_job_completed` and
+  `cleanup_job` count only when they remove the copy (they answer `true` either way), and they remove one copy, not
+  every identical one; a retry or dead letter written inside a worker leaves the processing copy to the cleanup.
+  `RedisStore#claim_held?` reads whether a claim is still held.
 - **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the
   worker could not remove the job's copy from its own processing list (or could not store a failure), and nothing
   returned the copy until the process was restarted: the heartbeat that protects the list came back by itself. The

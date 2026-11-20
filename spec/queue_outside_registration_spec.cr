@@ -32,7 +32,7 @@ module JoobQ
       started.each(&.stop!)
       started.clear
       JoobQ.queues.delete(name)
-      redis.del(name, "joobq:processing:#{name}:#{store.owner_id}", "joobq:worker:outside-host:1")
+      redis.del(JoobQ::Keys.queue(name), "joobq:processing:#{name}:#{store.owner_id}", "joobq:worker:outside-host:1")
       redis.zrem(WorkerRegistry::INDEX, "outside-host:1")
     end
 
@@ -42,8 +42,8 @@ module JoobQ
 
       jid = JoobQ.enqueue(name, OutsideJob.new(name).to_json)
 
-      redis.llen(name).should eq(1)
-      redis.lrange(name, 0, -1).first.to_s.should contain(jid)
+      redis.llen(JoobQ::Keys.queue(name)).should eq(1)
+      redis.lrange(JoobQ::Keys.queue(name), 0, -1).first.to_s.should contain(jid)
       JoobQ[name].should be(queue)
       JoobQ.queues.keys.should contain(name)
       JoobQ.config.queues.has_key?(name).should be_true
@@ -58,7 +58,7 @@ module JoobQ
 
       JoobQ.enqueue(name, OutsideJob.new(name).to_json)
 
-      eventually { OutsideJob::RAN.get == 1 && redis.llen(name) == 0 }.should be_true
+      eventually { OutsideJob::RAN.get == 1 && redis.llen(JoobQ::Keys.queue(name)) == 0 }.should be_true
       eventually { redis.llen("joobq:processing:#{name}:#{store.owner_id}") == 0 }.should be_true
       OutsideJob::RAN.get.should eq(1)
     end

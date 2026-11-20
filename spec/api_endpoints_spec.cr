@@ -187,7 +187,7 @@ module JoobQ
           # Move from dead letter to main queue using atomic operations
           store.redis.pipelined do |pipe|
             pipe.zrem("joobq:dead_letter", job_to_retry.as(String))
-            pipe.lpush(queue_name, job_to_retry.as(String))
+            pipe.lpush(JoobQ::Keys.queue(queue_name), job_to_retry.as(String))
           end
 
           # Verify move immediately (pipelined operations are atomic)
@@ -246,7 +246,7 @@ module JoobQ
 
           store.redis.pipelined do |pipe|
             pipe.zrem("joobq:dead_letter", job_to_retry.as(String))
-            pipe.lpush(queue_name, job_to_retry.as(String))
+            pipe.lpush(JoobQ::Keys.queue(queue_name), job_to_retry.as(String))
           end
 
           # Verify it went to the correct queue immediately (pipelined operations are atomic)

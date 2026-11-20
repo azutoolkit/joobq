@@ -34,11 +34,11 @@ module JoobQ
       # Process results (Redis pipelined returns results in order)
       results = @redis.pipelined do |pipe|
         queue_names.each do |queue_name|
-          pipe.llen(queue_name)                          # Queue size
-          pipe.llen(processing_queue(queue_name))        # Processing size
-          pipe.zcard("#{queue_name}:failed")             # Failed count
-          pipe.zcard("#{queue_name}:dead_letter")        # Dead letter count
-          pipe.hget("joobq:stats:processed", queue_name) # Processed count
+          pipe.llen(Keys.queue(queue_name))                   # Queue size
+          pipe.llen(processing_queue(queue_name))             # Processing size
+          pipe.zcard("#{Keys.queue(queue_name)}:failed")      # Failed count
+          pipe.zcard("#{Keys.queue(queue_name)}:dead_letter") # Dead letter count
+          pipe.hget("joobq:stats:processed", queue_name)      # Processed count
         end
       end
 
@@ -83,7 +83,7 @@ module JoobQ
       results = @redis.pipelined do |pipe|
         # Queue sizes for all configured queues
         JoobQ.queues.each do |queue_name, _|
-          pipe.llen(queue_name)
+          pipe.llen(Keys.queue(queue_name))
           pipe.llen(processing_queue(queue_name))
         end
 
@@ -259,7 +259,7 @@ module JoobQ
     private def get_queued_jobs_count : Int32
       queue_counts = @redis.pipelined do |pipe|
         JoobQ.queues.each do |queue_name, _|
-          pipe.llen(queue_name)
+          pipe.llen(Keys.queue(queue_name))
         end
       end
       queue_counts.sum { |count| count.as(Int64).to_i }

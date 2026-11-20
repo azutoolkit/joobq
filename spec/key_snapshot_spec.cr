@@ -2,15 +2,15 @@ require "./spec_helper"
 
 module JoobQ
   # Golden snapshot: the exact Redis keys each operation creates on an empty DB.
-  # Guards a future key-namespace change, which must leave these defaults identical.
+  # Guards the key namespace: a change to any name here is a change of the on-disk layout.
   describe "Redis key snapshot" do
     redis = -> { JoobQ.store.as(RedisStore).redis }
     keys = -> { redis.call.keys("*").map(&.to_s).sort! }
 
-    it "enqueue writes the bare queue list (queue keys carry no joobq: prefix)" do
+    it "enqueue writes the queue list inside the joobq:v1: namespace" do
       JoobQ.store.enqueue(ExampleJob.new(1))
 
-      keys.call.should eq(["example"])
+      keys.call.should eq(["joobq:v1:queue:example"])
     end
 
     it "a delayed schedule writes the delayed sorted set" do

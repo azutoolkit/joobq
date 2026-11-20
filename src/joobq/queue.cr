@@ -350,7 +350,7 @@ module JoobQ
         # Still serialize typed jobs (including encryption converters); size is only a buffer capacity hint.
         redis_store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size, json_sizes: json_sizes)
         if raw_jobs = unreadable
-          redis_store.redis.multi { |multi| raw_jobs.each { |job_str| multi.rpush(name, job_str) } }
+          redis_store.redis.multi { |multi| raw_jobs.each { |job_str| multi.rpush(Keys.queue(name), job_str) } }
         end
       else
         store.enqueue_batch(job_objects, JoobQ.config.pipeline_batch_size)

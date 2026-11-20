@@ -36,7 +36,7 @@ when "seed"
     raise "settlement failed" unless ledger.settle(claim, state, 5.minutes).applied?
   end
 when "verify"
-  ready = store.redis.lrange("restart_probe", 0, -1)
+  ready = store.redis.lrange(JoobQ::Keys.queue("restart_probe"), 0, -1)
   # The seed ran in another process, so its claimed jobs are in its own list (joobq:processing:restart_probe:<owner>).
   processing = [] of Redis::RedisValue
   cursor = 0_i64

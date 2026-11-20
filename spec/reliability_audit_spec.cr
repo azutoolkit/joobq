@@ -118,18 +118,18 @@ module JoobQ
 
       it "are not recovered while the crashed owner's last heartbeat is younger than 30 s, and go to the head once it is older" do
         crashed = "crashed-host:4242"
-        redis.rpush("example", "WAITING")
+        redis.rpush(JoobQ::Keys.queue("example"), "WAITING")
         claimed = ExampleJob.new(1).to_json
         redis.lpush(list_of.call("example", crashed), claimed)
 
         # SIGKILL skips stop_owner_heartbeat: the entry stays with its last beat
         redis.zadd(RedisStore::OWNERS, store.redis_now_ms - 29_000, crashed)
         store.recover_orphaned_processing("example").should eq(0)
-        redis.lrange("example", 0, -1).should eq(["WAITING"])
+        redis.lrange(JoobQ::Keys.queue("example"), 0, -1).should eq(["WAITING"])
 
         redis.zadd(RedisStore::OWNERS, store.redis_now_ms - 31_000, crashed)
         store.recover_orphaned_processing("example").should eq(1)
-        redis.lrange("example", 0, -1).should eq([claimed, "WAITING"])
+        redis.lrange(JoobQ::Keys.queue("example"), 0, -1).should eq([claimed, "WAITING"])
         redis.zscore(RedisStore::OWNERS, crashed).should be_nil # pruned as it was read
       end
 
@@ -141,11 +141,11 @@ module JoobQ
 
         # what Queue#start does for this (new) process
         store.move_job_back_to_queue("example", include_self: true).should be_false
-        redis.llen("example").should eq(0)
+        redis.llen(JoobQ::Keys.queue("example")).should eq(0)
 
         redis.zadd(RedisStore::OWNERS, store.redis_now_ms - 31_000, crashed)
         ExpiredJobReaper.new(store: store, interval: 1.hour).reap_once
-        redis.lrange("example", 0, -1).should eq([claimed])
+        redis.lrange(JoobQ::Keys.queue("example"), 0, -1).should eq([claimed])
         redis.exists(list_of.call("example", crashed)).should eq(0)
       end
 
@@ -160,7 +160,7 @@ module JoobQ
 
         store.recover_orphaned_processing("example").should eq(1)
         store.promote_due_jobs(Time.utc, queue_name: "example")
-        copies = redis.lrange("example", 0, -1).count { |raw| JSON.parse(raw.to_s)["jid"] == original.jid.to_s }
+        copies = redis.lrange(JoobQ::Keys.queue("example"), 0, -1).count { |raw| JSON.parse(raw.to_s)["jid"] == original.jid.to_s }
         copies.should eq(2)
       end
     end
@@ -193,7 +193,7 @@ module JoobQ
 
       it "a payload that is not JSON is dead-lettered as a stub and the next job runs" do
         queue = Queue(AuditMixedJob).new("audit_mixed", 1)
-        redis.rpush("audit_mixed", %({"jid": "not-a-job))
+        redis.rpush(JoobQ::Keys.queue("audit_mixed"), %({"jid": "not-a-job))
         JoobQ.add(AuditMixedJob.new)
         worker = Worker(AuditMixedJob).new(1, Channel(Nil).new, queue)
         worker.run
@@ -208,7 +208,7 @@ module JoobQ
 
       it "has no class check: another class's payload whose fields fit runs as the queue's class, with its defaults" do
         queue = Queue(AuditMixedJob).new("audit_mixed", 1)
-        redis.rpush("audit_mixed", AuditOtherJob.new.to_json)
+        redis.rpush(JoobQ::Keys.queue("audit_mixed"), AuditOtherJob.new.to_json)
         worker = Worker(AuditMixedJob).new(1, Channel(Nil).new, queue)
         worker.run
 
@@ -222,7 +222,7 @@ module JoobQ
         queue = Queue(AuditStrictJob).new("audit_strict", 1)
         foreign = AuditMixedJob.new
         foreign.queue = "audit_strict"
-        redis.rpush("audit_strict", foreign.to_json)
+        redis.rpush(JoobQ::Keys.queue("audit_strict"), foreign.to_json)
         worker = Worker(AuditStrictJob).new(1, Channel(Nil).new, queue)
         worker.run
 
@@ -273,7 +273,7 @@ module JoobQ
         job = ExampleJob.new(7)
         JoobQ.add(job)
         JoobQ.add(job)
-        redis.lrange("example", 0, -1).count { |raw| JSON.parse(raw.to_s)["jid"] == job.jid.to_s }.should eq(2)
+        redis.lrange(JoobQ::Keys.queue("example"), 0, -1).count { |raw| JSON.parse(raw.to_s)["jid"] == job.jid.to_s }.should eq(2)
       end
     end
 

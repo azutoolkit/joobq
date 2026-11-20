@@ -90,7 +90,7 @@ end
 module JoobQ
   describe "failure lifecycle" do
     redis = JoobQ.store.as(RedisStore).redis
-    idle = -> { JoobQ.store.processing_queue_size("lifecycle") == 0 && redis.llen("lifecycle") == 0 }
+    idle = -> { JoobQ.store.processing_queue_size("lifecycle") == 0 && redis.llen(JoobQ::Keys.queue("lifecycle")) == 0 }
 
     before_each do
       JoobQ.reset

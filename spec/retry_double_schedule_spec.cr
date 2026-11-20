@@ -54,7 +54,7 @@ module JoobQ
   describe "failed jobs" do
     redis = JoobQ.store.as(RedisStore).redis
     dlq = DeadLetterQueue.new(redis)
-    idle = -> { JoobQ.store.processing_queue_size("flaky") == 0 && redis.llen("flaky") == 0 }
+    idle = -> { JoobQ.store.processing_queue_size("flaky") == 0 && redis.llen(JoobQ::Keys.queue("flaky")) == 0 }
 
     before_each do
       JoobQ.reset

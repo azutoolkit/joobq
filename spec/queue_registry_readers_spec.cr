@@ -24,7 +24,7 @@ module JoobQ
           redis.zrem(RedisStore::DELAYED_SET, raw.to_s) if raw.to_s.includes?(name)
         end
         redis.keys("joobq:*#{name}*").each { |key| redis.del(key.to_s) }
-        redis.del(name)
+        redis.del(JoobQ::Keys.queue(name))
       end
       redis.zrem(RedisStore::OWNERS, "host:dead")
       names.clear

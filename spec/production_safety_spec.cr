@@ -21,7 +21,7 @@ module JoobQ
       store = JoobQ.config.store.as(RedisStore)
       job = ExampleJob.new(1).to_json
       store.schedule_job(job, 0_i64)
-      store.redis.set("example", "wrong-type")
+      store.redis.set(Keys.queue("example"), "wrong-type")
       store.process_due_delayed_jobs("example")
       store.redis.zscore(RedisStore::DELAYED_SET, job).should_not be_nil
     end
@@ -49,11 +49,11 @@ module JoobQ
       store = JoobQ.config.store.as(RedisStore)
       raw = "not-json"
       store.redis.set(DeadLetterQueue::KEY, "wrong-type")
-      store.redis.rpush("example", raw)
+      store.redis.rpush(JoobQ::Keys.queue("example"), raw)
       queue = Queue(ExampleJob).new("example", 1)
       worker = Worker(ExampleJob).new(1, Channel(Nil).new(1), queue)
       worker.run
-      eventually { store.redis.llen("example") == 0 }.should be_true
+      eventually { store.redis.llen(JoobQ::Keys.queue("example")) == 0 }.should be_true
       eventually { worker.in_progress == 0 }.should be_true
       store.redis.lrange("joobq:processing:example:#{store.owner_id}", 0, -1).should eq([raw])
     ensure
@@ -81,7 +81,7 @@ module JoobQ
           fail "scheduler did not finish"
         end
       end
-      jobs = store.redis.lrange("audit_due", 0, -1)
+      jobs = store.redis.lrange(JoobQ::Keys.queue("audit_due"), 0, -1)
       jobs.size.should eq(1)
       JSON.parse(jobs.first.as(String))["id"].as_i64.should eq(Int64::MAX)
       store.redis.zcard(RedisStore::DELAYED_SET).should eq(0)

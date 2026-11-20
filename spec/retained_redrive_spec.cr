@@ -20,25 +20,25 @@ module JoobQ
 
     before_each do
       InFlight.clear
-      redis.del(name, own)
+      redis.del(JoobQ::Keys.queue(name), own)
     end
     after_each do
       InFlight.clear
-      redis.del(name, own)
+      redis.del(JoobQ::Keys.queue(name), own)
     end
 
     it "puts a retained copy back at the head of its queue, and a second pass does nothing" do
-      redis.rpush(name, "waiting")
+      redis.rpush(JoobQ::Keys.queue(name), "waiting")
       redis.lpush(own, "A")
       retain.call("A")
 
       store.redrive_retained.should eq(1)
-      redis.lrange(name, 0, -1).should eq(["A", "waiting"])
+      redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["A", "waiting"])
       redis.llen(own).should eq(0)
       InFlight.retained.should be_empty
 
       store.redrive_retained.should eq(0)
-      redis.lrange(name, 0, -1).should eq(["A", "waiting"])
+      redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["A", "waiting"])
     end
 
     it "keeps claim order when several copies are retained" do
@@ -46,14 +46,14 @@ module JoobQ
       %w[A B C].each { |job| retain.call(job) }
 
       store.redrive_retained.should eq(3)
-      redis.lrange(name, 0, -1).should eq(["A", "B", "C"])
+      redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["A", "B", "C"])
     end
 
     it "does nothing for a copy another process already reclaimed, and forgets it" do
       retain.call("A")
 
       store.redrive_retained.should eq(0)
-      redis.exists(name).should eq(0)
+      redis.exists(JoobQ::Keys.queue(name)).should eq(0)
       InFlight.retained.should be_empty
     end
 
@@ -63,8 +63,8 @@ module JoobQ
       store.stop_owner_heartbeat
       store.start_owner_heartbeat
       begin
-        50.times { break if redis.llen(name) == 1; sleep 50.milliseconds }
-        redis.lrange(name, 0, -1).should eq(["A"])
+        50.times { break if redis.llen(JoobQ::Keys.queue(name)) == 1; sleep 50.milliseconds }
+        redis.lrange(JoobQ::Keys.queue(name), 0, -1).should eq(["A"])
         redis.llen(own).should eq(0)
       ensure
         store.stop_owner_heartbeat

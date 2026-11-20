@@ -82,7 +82,7 @@ module JoobQ
 
       @redis.pipelined do |pipe|
         queue_names.each do |queue_name|
-          pipe.del(queue_name)
+          pipe.del(Keys.queue(queue_name))
         end
       end
       track_pipeline_operation(queue_names.size, true)
@@ -102,7 +102,7 @@ module JoobQ
 
       results = @redis.pipelined do |pipe|
         queue_names.each do |queue_name|
-          pipe.llen(queue_name)
+          pipe.llen(Keys.queue(queue_name))
         end
       end
 

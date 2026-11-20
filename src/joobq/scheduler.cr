@@ -161,7 +161,7 @@ module JoobQ
 
     private def enqueue_raw_jobs(queue_name : String, jobs : Array(String), current_time : Time)
       jobs.each do |job_data|
-        JoobQ.store.redis.rpush(queue_name, job_data)
+        JoobQ.store.redis.rpush(Keys.queue(queue_name), job_data)
       rescue ex : Exception
         handle_scheduler_error(ex, job_data, current_time)
       end

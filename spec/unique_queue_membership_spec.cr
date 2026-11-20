@@ -132,7 +132,7 @@ module JoobQ
         job_json = job.to_json
 
         # Artificially add job to MULTIPLE locations (shouldn't happen, but test cleanup)
-        store.redis.lpush(queue_name, job_json)
+        store.redis.lpush(JoobQ::Keys.queue(queue_name), job_json)
         store.redis.lpush("joobq:processing:#{queue_name}", job_json)
         store.redis.zadd(RedisStore::DELAYED_SET, Time.local.to_unix_ms, job_json)
 
@@ -145,7 +145,7 @@ module JoobQ
         store.move_to_dead_letter(job, queue_name)
 
         # Manually clean up other locations for this test
-        store.redis.lrem(queue_name, 0, job_json)
+        store.redis.lrem(JoobQ::Keys.queue(queue_name), 0, job_json)
         store.redis.zrem(RedisStore::DELAYED_SET, job_json)
 
         # Verify it's ONLY in dead letter queue
@@ -233,7 +233,7 @@ module JoobQ
 
         # Verify each job is in exactly one location
         # Job 1
-        main_queue_jobs = store.redis.lrange("example", 0, -1)
+        main_queue_jobs = store.redis.lrange(JoobQ::Keys.queue("example"), 0, -1)
         main_queue_jobs.any? { |j| j.as(String).includes?(job1.jid.to_s) }.should be_true
 
         # Job 2

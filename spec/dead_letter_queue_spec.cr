@@ -125,7 +125,8 @@ module JoobQ
 
     it "keeps an entry whose queue name is not a queue, instead of losing it" do
       # a key of another type: pushing onto it fails, and a script that already removed the entry would lose it
-      jid = seed.call(1, DeadLetterQueue::KEY, 1000_i64)
+      redis.call.set(Keys.queue("wrong_type_queue"), "not a list")
+      jid = seed.call(1, "wrong_type_queue", 1000_i64)
 
       outcome = dlq.redrive([jid])
 
@@ -133,6 +134,7 @@ module JoobQ
       outcome.unredrivable.should eq([jid])
       dlq.find(jid).should_not be_nil
       dlq.count.should eq(1)
+      redis.call.del(Keys.queue("wrong_type_queue"))
     end
 
     it "filters by queue" do
@@ -151,7 +153,7 @@ module JoobQ
       outcome.succeeded.should eq(1)
       outcome.missing.should eq(["missing-jid"])
       dlq.count.should eq(0)
-      pushed = JSON.parse(redis.call.lrange("example", 0, -1).first.to_s)
+      pushed = JSON.parse(redis.call.lrange(JoobQ::Keys.queue("example"), 0, -1).first.to_s)
       pushed["jid"].as_s.should eq(jid)
       pushed["status"].as_s.should eq("enqueued")
       pushed["retries"].as_i.should eq(pushed["max_retries"].as_i)
@@ -171,7 +173,7 @@ module JoobQ
       end
 
       8.times.sum { results.receive }.should eq(1)
-      redis.call.llen("example").should eq(1)
+      redis.call.llen(JoobQ::Keys.queue("example")).should eq(1)
     end
 
     it "purges selected entries and all entries of a queue" do
@@ -196,7 +198,7 @@ module JoobQ
       outcome.succeeded.should eq(0)
       outcome.unredrivable.should eq(["stub-1"])
       dlq.count.should eq(1)
-      redis.call.llen("example").should eq(0)
+      redis.call.llen(JoobQ::Keys.queue("example")).should eq(0)
     end
 
     it "reaches entries beyond any scan chunk" do
@@ -222,7 +224,7 @@ module JoobQ
 
       dlq.redrive([job.jid.to_s])
 
-      pushed = JSON.parse(redis.call.lrange("example", 0, -1).first.to_s)
+      pushed = JSON.parse(redis.call.lrange(JoobQ::Keys.queue("example"), 0, -1).first.to_s)
       pushed["expires"].as_i64.should be > Time.utc.to_unix_ms
     end
 

@@ -51,7 +51,7 @@ module JoobQ::Delivery
     private def inventory
       entries = {} of String => Tuple(String, String, State, Int64)
       @source_entries = 0
-      [@queue, "joobq:processing:#{@queue}"].each do |key|
+      [Keys.queue(@queue), "joobq:processing:#{@queue}"].each do |key|
         offset = 0
         loop do
           page = @redis.lrange(key, offset, offset + 99)

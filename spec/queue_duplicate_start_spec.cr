@@ -50,7 +50,7 @@ module JoobQ
 
     after_each do
       DuplicateStartJob::RELEASE.set(true)
-      redis.del(name, owned.call(name))
+      redis.del(JoobQ::Keys.queue(name), owned.call(name))
     end
 
     it "does not re-queue the first instance's in-flight job" do
@@ -67,12 +67,12 @@ module JoobQ
         # A re-queued job would run a second time (B's workers claim it) while the first is still blocked.
         eventually(400.milliseconds) { DuplicateStartJob.runs("blocker") > 1 }.should be_false
         redis.llen(owned.call(name)).should eq(1)
-        redis.llen(name).should eq(0)
+        redis.llen(JoobQ::Keys.queue(name)).should eq(0)
 
         DuplicateStartJob::RELEASE.set(true)
         eventually { redis.llen(owned.call(name)) == 0 }.should be_true
         DuplicateStartJob.runs("blocker").should eq(1)
-        redis.llen(name).should eq(0)
+        redis.llen(JoobQ::Keys.queue(name)).should eq(0)
       ensure
         DuplicateStartJob::RELEASE.set(true)
         a.stop!

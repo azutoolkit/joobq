@@ -380,7 +380,7 @@ module JoobQ
         scheduler = DelayedJobScheduler.new(store)
         scheduler.start
         eventually { store.queue_size("example") == 1 && store.set_size(RedisStore::DELAYED_SET) == 0 }.should be_true
-        JSON.parse(store.redis.lindex("example", 0).as(String))["jid"].as_s.should eq(job.jid.to_s)
+        JSON.parse(store.redis.lindex(JoobQ::Keys.queue("example"), 0).as(String))["jid"].as_s.should eq(job.jid.to_s)
       ensure
         scheduler.try(&.stop)
       end

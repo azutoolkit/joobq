@@ -170,7 +170,7 @@ module JoobQ
     end
 
     def clear_queue(queue_name : String) : Nil
-      redis.del(queue_name)
+      redis.del(Keys.queue(queue_name))
     end
 
     # Optimized method to clear multiple queues in a single pipeline
@@ -196,7 +196,7 @@ module JoobQ
     end
 
     def enqueue(job : Job) : String
-      redis.rpush job.queue, job.to_json
+      redis.rpush Keys.queue(job.queue), job.to_json
       Events.emit("job.enqueued") { {jid: job.jid.to_s, queue: job.queue} }
 
       Log.debug &.emit("Job enqueued", job_id: job.jid.to_s, queue: job.queue)
@@ -225,7 +225,7 @@ module JoobQ
                         else
                           job.to_json
                         end
-              pipe.rpush job.queue, payload
+              pipe.rpush Keys.queue(job.queue), payload
             end
           end
           total_enqueued += batch_jobs.size
@@ -256,7 +256,7 @@ module JoobQ
       processing_key = processing_queue(queue_name)
 
       # The shard has no `blmove`; the raw command is sent as is.
-      if job_data = redis.command(["BLMOVE", queue_name, processing_key, "LEFT", "LEFT", BLOCKING_TIMEOUT.to_s]).as?(String)
+      if job_data = redis.command(["BLMOVE", Keys.queue(queue_name), processing_key, "LEFT", "LEFT", BLOCKING_TIMEOUT.to_s]).as?(String)
         Log.debug &.emit("Job dequeued", queue: queue_name, job_data_length: job_data.size)
         return job_data
       end
@@ -281,7 +281,7 @@ module JoobQ
     # block on stop — is raised, not swallowed, so the dispatcher can tell "empty" from "Redis is down" and back off
     # on the latter instead of reconnect-storming.
     def blocking_claim(queue_name : String, connection : Redis) : String?
-      connection.command(["BLMOVE", queue_name, processing_queue(queue_name), "LEFT", "LEFT", BLOCKING_TIMEOUT.to_s]).as?(String)
+      connection.command(["BLMOVE", Keys.queue(queue_name), processing_queue(queue_name), "LEFT", "LEFT", BLOCKING_TIMEOUT.to_s]).as?(String)
     end
 
     # Claims up to `batch_size` jobs from the head of the queue without blocking, oldest first (the order the replies
@@ -292,7 +292,7 @@ module JoobQ
 
       redis.pipelined do |pipe|
         batch_size.times do
-          pipe.command(["LMOVE", queue_name, processing_key, "LEFT", "LEFT"])
+          pipe.command(["LMOVE", Keys.queue(queue_name), processing_key, "LEFT", "LEFT"])
         end
       end.each do |result|
         if result && !result.to_s.empty?
@@ -385,7 +385,7 @@ module JoobQ
     def drain_processing_list(list_key : String, queue_name : String) : Int64
       moved = 0_i64
       loop do
-        count = redis.eval(RECOVER_PROCESSING, [list_key, queue_name], [RECOVER_BATCH.to_s]).as(Int64)
+        count = redis.eval(RECOVER_PROCESSING, [list_key, Keys.queue(queue_name)], [RECOVER_BATCH.to_s]).as(Int64)
         moved += count
         break if count < RECOVER_BATCH
       end
@@ -506,7 +506,7 @@ module JoobQ
     end
 
     def queue_size(queue_name : String) : Int64
-      redis.llen(queue_name)
+      redis.llen(Keys.queue(queue_name))
     end
 
     def set_size(set_name : String) : Int64
@@ -543,7 +543,7 @@ module JoobQ
     # Not counted as processed. Used for a job bounced for missing encryption keys, which should not come straight
     # back.
     def requeue_from_processing(job_json : String, queue_name : String) : Bool
-      redis.eval(REQUEUE, [processing_queue(queue_name), legacy_processing_queue(queue_name), queue_name], [job_json]) == 1
+      redis.eval(REQUEUE, [processing_queue(queue_name), legacy_processing_queue(queue_name), Keys.queue(queue_name)], [job_json]) == 1
     end
 
     # `REQUEUE` to the head of the queue, for many jobs in one script. KEYS are (self list, legacy list, queue) per
@@ -568,7 +568,7 @@ module JoobQ
     REQUEUE_BATCH = 100
 
     private def requeue_keys(queue_name : String) : Array(String)
-      [processing_queue(queue_name), legacy_processing_queue(queue_name), queue_name]
+      [processing_queue(queue_name), legacy_processing_queue(queue_name), Keys.queue(queue_name)]
     end
 
     # Returns jobs abandoned at shutdown, given as {queue, job} pairs in claim order, to the head of their queues so
@@ -678,7 +678,7 @@ module JoobQ
     def list_jobs(queue_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
       start_index = (page_number - 1) * page_size
       end_index = start_index + page_size - 1
-      redis.lrange(queue_name, start_index, end_index).map &.as(String)
+      redis.lrange(Keys.queue(queue_name), start_index, end_index).map &.as(String)
     end
 
     def list_sorted_set_jobs(set_name : String, page_number : Int32 = 1, page_size : Int32 = 200) : Array(String)
@@ -713,11 +713,11 @@ module JoobQ
       # Process results (Redis pipelined returns results in order)
       results = redis.pipelined do |pipe|
         queue_names.each do |queue_name|
-          pipe.llen(queue_name)                          # Queue size
-          pipe.llen(processing_queue(queue_name))        # Processing size
-          pipe.zcard("#{queue_name}:failed")             # Failed count
-          pipe.zcard("#{queue_name}:dead_letter")        # Dead letter count
-          pipe.hget("joobq:stats:processed", queue_name) # Processed count
+          pipe.llen(Keys.queue(queue_name))                   # Queue size
+          pipe.llen(processing_queue(queue_name))             # Processing size
+          pipe.zcard("#{Keys.queue(queue_name)}:failed")      # Failed count
+          pipe.zcard("#{Keys.queue(queue_name)}:dead_letter") # Dead letter count
+          pipe.hget("joobq:stats:processed", queue_name)      # Processed count
         end
       end
 
@@ -1039,7 +1039,7 @@ module JoobQ
         begin
           next if queue_name && SerializedJob.queue_name(raw) != queue_name
           destination, payload = SerializedJob.for_enqueue(raw)
-          if promote_due([delay_set, destination], [raw, payload, now]) == 1
+          if promote_due([delay_set, Keys.queue(destination)], [raw, payload, now]) == 1
             moved << raw
           end
         rescue ex
@@ -1076,7 +1076,7 @@ module JoobQ
       }
 
       # Check main queue
-      main_jobs = redis.lrange(queue_name, 0, -1)
+      main_jobs = redis.lrange(Keys.queue(queue_name), 0, -1)
       locations["main_queue"] = main_jobs.count { |j| j.as(String).includes?(job_jid) }
 
       # Check processing (every owner of the queue, plus the legacy shared list)
@@ -1151,7 +1151,7 @@ module JoobQ
       # Search in main locations: delayed set, dead letter, and main queues
       locations = [DELAYED_SET, DEAD_LETTER]
       JoobQ.queues.each do |queue_name, _|
-        locations << queue_name
+        locations << Keys.queue(queue_name)
       end
 
       locations.each do |location|

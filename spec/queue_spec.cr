@@ -33,16 +33,16 @@ module JoobQ
         redis.rpush("joobq:processing:#{name}", %({"jid":"a"}))
 
         queue.start
-        redis.llen(name).should eq(1) # the first start puts the stranded job back
+        redis.llen(JoobQ::Keys.queue(name)).should eq(1) # the first start puts the stranded job back
 
         redis.rpush("joobq:processing:#{name}", %({"jid":"b"})) # a job a worker is processing right now
         queue.start
-        redis.llen(name).should eq(1) # a second start leaves it alone
+        redis.llen(JoobQ::Keys.queue(name)).should eq(1) # a second start leaves it alone
         redis.llen("joobq:processing:#{name}").should eq(1)
 
         queue.stop!
         queue.start
-        redis.llen(name).should eq(2) # after a stop, starting again reprocesses as the first start did
+        redis.llen(JoobQ::Keys.queue(name)).should eq(2) # after a stop, starting again reprocesses as the first start did
       ensure
         queue.try(&.stop!)
         [name, "joobq:processing:#{name}"].each { |key| redis.try(&.del(key)) } if name
@@ -113,7 +113,7 @@ module JoobQ
         result = example.add("not json")
         result.should be_nil
         example.size.should eq(0)
-        JoobQ.store.as(RedisStore).redis.llen("example").should eq(0)
+        JoobQ.store.as(RedisStore).redis.llen(JoobQ::Keys.queue("example")).should eq(0)
       end
 
       it "current behaviour: swallows valid JSON of the wrong shape, returns nil and enqueues nothing" do
@@ -122,7 +122,7 @@ module JoobQ
         result = example.add(%({"x": "not an int"}))
         result.should be_nil
         example.size.should eq(0)
-        JoobQ.store.as(RedisStore).redis.llen("example").should eq(0)
+        JoobQ.store.as(RedisStore).redis.llen(JoobQ::Keys.queue("example")).should eq(0)
       end
     end
 

@@ -48,7 +48,7 @@ module JoobQ
           # expired ones are then reaped by the waiting scan below.
           recovered = redis_store.recover_orphaned_processing(queue_name)
 
-          reaped_waiting = scan_and_reap_queue(redis_store, queue_name)
+          reaped_waiting = scan_and_reap_queue(redis_store, Keys.queue(queue_name), stats_queue: queue_name)
 
           # Reap expired jobs only from the legacy shared list. A live process's own list is left to that process
           # (its Timeout middleware), so the reaper never dead-letters a job a worker is still running; a crashed

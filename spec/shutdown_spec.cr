@@ -62,7 +62,7 @@ def with_probe(mode : String, extra = {} of String => String, &)
       process.signal(Signal::KILL) rescue nil
       process.wait rescue nil
     end
-    redis.del(queue, "joobq:processing:#{queue}")
+    redis.del(JoobQ::Keys.queue(queue), "joobq:processing:#{queue}")
     FileUtils.rm_rf(dir)
   end
 end
@@ -420,15 +420,15 @@ module JoobQ
           entries = [{qa, "a1"}, {qa, "missing"}, {qb, "b1"}, {qa, "a2"}]
 
           store.requeue_many_from_processing(entries).should eq(3)
-          redis.lrange(qa, 0, -1).map(&.to_s).sort.should eq(["a1", "a2"])
-          redis.lrange(qb, 0, -1).should eq(["b1"])
+          redis.lrange(JoobQ::Keys.queue(qa), 0, -1).map(&.to_s).sort.should eq(["a1", "a2"])
+          redis.lrange(JoobQ::Keys.queue(qb), 0, -1).should eq(["b1"])
           redis.llen("joobq:processing:#{qa}").should eq(0)
 
           store.requeue_many_from_processing(entries).should eq(0) # nothing is queued twice
-          redis.llen(qa).should eq(2)
+          redis.llen(JoobQ::Keys.queue(qa)).should eq(2)
           store.requeue_many_from_processing([] of {String, String}).should eq(0)
         ensure
-          redis.del(qa, qb, "joobq:processing:#{qa}", "joobq:processing:#{qb}")
+          redis.del(JoobQ::Keys.queue(qa), qb, "joobq:processing:#{qa}", "joobq:processing:#{qb}")
         end
       end
 
@@ -442,11 +442,11 @@ module JoobQ
           redis.rpush("joobq:processing:#{good}", "g1")
 
           store.requeue_many_from_processing([{bad, "x"}, {good, "g1"}]).should eq(1)
-          redis.lrange(good, 0, -1).should eq(["g1"])
+          redis.lrange(JoobQ::Keys.queue(good), 0, -1).should eq(["g1"])
           redis.ping.should eq("PONG") # the connection still answers in step
           redis.get("joobq:processing:#{bad}").should eq("not a list")
         ensure
-          redis.del(good, bad, "joobq:processing:#{good}", "joobq:processing:#{bad}")
+          redis.del(JoobQ::Keys.queue(good), JoobQ::Keys.queue(bad), "joobq:processing:#{good}", "joobq:processing:#{bad}")
         end
       end
     end
@@ -552,7 +552,7 @@ module JoobQ
           exit_of(process, 30.seconds).exit_code.should eq(0)
           (Time.instant - started).should be < 14.seconds
           File.exists?(File.join(dir, "done")).should be_true
-          redis.llen(queue).should eq(0)
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(0)
           redis.llen("joobq:processing:#{queue}").should eq(0)
         end
       end
@@ -566,7 +566,7 @@ module JoobQ
           exit_of(process, 30.seconds).exit_code.should eq(3)
           (Time.instant - started).should be < 8.seconds
 
-          redis.llen(queue).should eq(5)
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(5)
           redis.llen("joobq:processing:#{queue}").should eq(0)
           sleep 500.milliseconds # nothing is left to run them again
           files = Dir.glob(File.join(dir, "started-*"))
@@ -581,7 +581,7 @@ module JoobQ
           process.signal(Signal::TERM)
           exit_of(process, 30.seconds).exit_code.should eq(3)
 
-          redis.llen(queue).should eq(1)
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(1)
           JoobQ.processing_depth(redis, queue).should eq(0)
         end
       end
@@ -615,13 +615,13 @@ module JoobQ
               exit_of(process, 10.seconds)
 
               redis.llen(list).should eq(1)
-              redis.llen(queue).should eq(0)
+              redis.llen(JoobQ::Keys.queue(queue)).should eq(0)
               redis.zscore(RedisStore::OWNERS, owner).should_not be_nil
               store = JoobQ.store.as(RedisStore)
               store.recover_orphaned_processing(queue).should eq(0)
               redis.zadd(RedisStore::OWNERS, store.redis_now_ms - 31_000, owner) # as if 31 s had passed
               store.recover_orphaned_processing(queue).should eq(1)
-              redis.llen(queue).should eq(1)
+              redis.llen(JoobQ::Keys.queue(queue)).should eq(1)
               redis.exists(list).should eq(0)
             ensure
               redis.del(list)
@@ -634,7 +634,7 @@ module JoobQ
       it "does not schedule a requeued job a second time when its abandoned execution fails afterwards" do
         with_probe("failing", {"PROBE_TIMEOUT" => "1"}) do |process, queue, dir, redis|
           exit_of(process, 30.seconds).exit_code.should eq(0)
-          redis.llen(queue).should eq(1)
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(1)
           jid = File.basename(Dir.glob(File.join(dir, "started-*")).first).sub("started-", "")
           # the job raised after the shutdown gave up on it (the probe lives on for that), and nothing was scheduled
           File.exists?(File.join(dir, "raised")).should be_true
@@ -649,7 +649,7 @@ module JoobQ
           exit_of(process, 30.seconds).exit_code.should eq(0)
           File.exists?(File.join(dir, "finished")).should be_true # the abandoned execution did finish
           File.read(File.join(dir, "completed-events")).should eq("0")
-          redis.llen(queue).should eq(1) # the requeued copy is untouched
+          redis.llen(JoobQ::Keys.queue(queue)).should eq(1) # the requeued copy is untouched
           redis.llen("joobq:processing:#{queue}").should eq(0)
           redis.hget("joobq:stats:processed", queue).should be_nil
         end

@@ -14,15 +14,19 @@ module JoobQ
   # one step under the lock, so shutdown either abandoned the job before (the handling does nothing) or finds it
   # settling and waits for it instead of requeuing it while a retry is being scheduled.
   #
-  # A job whose outcome could not be stored (Redis was away when it ended) is `retained`: nothing runs for it any
-  # more, but its copy is still in this process's own processing list. The owner re-drives it
-  # (`RedisStore#redrive_retained`) and `abandon_all` returns it at shutdown, so it is counted as abandoned.
+  # When the fiber ends, the claim is `finishing` while the worker cleans up (removes the copy from the processing
+  # list, counts the job): it still counts as in flight, so shutdown waits for the cleanup. `done` then forgets the
+  # claim, or, when Redis refused the cleanup (it was away), keeps it as `retained` under the same token: nothing
+  # runs for it any more, but its copy is still in this process's own processing list. The owner re-drives it
+  # (`RedisStore#redrive_retained`, oldest claim first); `abandon_all` leaves retained claims alone, and shutdown
+  # drains them in a step of their own that counts what it really put back.
   module InFlight
     enum State
       Claimed
       Running
       Settling
       Abandoned
+      Finishing
       Retained
     end
 
@@ -73,8 +77,40 @@ module JoobQ
       end
     end
 
-    # The claim's fiber ends. True when shutdown had abandoned it (the job is already back on its queue: leave the
-    # processing list alone).
+    # The claim's fiber ends and its cleanup begins (the claim stays counted, as `finishing`, until `done`). True
+    # when shutdown had abandoned it (the job is already back on its queue: leave the processing list alone, and do
+    # not call `done`).
+    def self.finishing(token : Int64) : Bool
+      @@lock.synchronize do
+        entry = @@jobs[token]?
+        next true unless entry
+
+        entry.fiber.try { |fiber| @@fibers.delete(fiber) if @@fibers[fiber]? == token }
+        next !@@jobs.delete(token).nil? if entry.state.abandoned?
+
+        @@jobs[token] = Entry.new(entry.queue, entry.job, State::Finishing)
+        false
+      end
+    end
+
+    # The cleanup of a `finishing` claim is over: the claim is forgotten, or with `retain` (Redis refused the
+    # cleanup, so the copy is still in the processing list) it becomes `retained`, in the same step. A claim that
+    # shutdown abandoned meanwhile (the last resort) is forgotten either way: the requeued copy owns the job.
+    def self.done(token : Int64, retain : Bool) : Nil
+      @@lock.synchronize do
+        entry = @@jobs[token]?
+        next unless entry
+
+        if retain && entry.state.finishing?
+          @@jobs[token] = Entry.new(entry.queue, entry.job, State::Retained)
+        else
+          @@jobs.delete(token)
+        end
+      end
+    end
+
+    # The claim's fiber ends, with nothing to clean up. True when shutdown had abandoned it (the job is already back
+    # on its queue: leave the processing list alone).
     def self.finished(token : Int64) : Bool
       @@lock.synchronize do
         entry = @@jobs.delete(token)
@@ -83,25 +119,14 @@ module JoobQ
       end
     end
 
-    # Keeps the copy of a job whose outcome could not be stored (the claim has `finished`, but Redis refused the
-    # cleanup or the outcome), so the owner re-drives it. Returns the token that `release` takes.
-    def self.retain(queue : String, job : String) : Int64
-      @@lock.synchronize do
-        token = (@@next += 1)
-        @@jobs[token] = Entry.new(queue, job, State::Retained)
-        token
-      end
-    end
-
-    # The retained copies as {token, queue, job}, oldest claim first.
+    # The retained copies as {token, queue, job}, oldest claim first (by token, the order they were claimed in).
     def self.retained : Array({Int64, String, String})
       @@lock.synchronize do
         @@jobs.compact_map { |token, entry| {token, entry.queue, entry.job} if entry.state.retained? }.sort_by(&.first)
       end
     end
 
-    # Forgets a retained copy once it was put back (or found gone). False when it was not retained any more
-    # (shutdown took it first).
+    # Forgets a retained copy once it was put back (or found gone). False when it was not retained any more.
     def self.release(token : Int64) : Bool
       @@lock.synchronize do
         next false unless @@jobs[token]?.try(&.state.retained?)
@@ -145,8 +170,8 @@ module JoobQ
       @@lock.synchronize do
         abandoned = [] of {String, String}
         @@jobs.each do |token, entry|
-          next if entry.state.abandoned?
-          next if entry.state.settling? && !settling
+          next if entry.state.abandoned? || entry.state.retained?
+          next if (entry.state.settling? || entry.state.finishing?) && !settling
 
           abandoned << {entry.queue, entry.job}
           @@jobs[token] = Entry.new(entry.queue, entry.job, State::Abandoned, entry.fiber)
@@ -166,6 +191,7 @@ module JoobQ
       true
     end
 
+    # Claimed, running, settling or finishing: still the work of a fiber of this process
     private def self.active?(entry : Entry) : Bool
       !entry.state.abandoned? && !entry.state.retained?
     end

@@ -16,21 +16,23 @@
   again. A version that finds 0.6 keys logs an error at the first `Queue#start`; it does not read them. Running 0.6
   and this version against one Redis at the same time is not supported.
 - **Stored jobs carry a format version, `"v": 1`.** A reader refuses a greater version with
-  `JoobQ::UnsupportedJobVersion` (a `JSON::ParseException`, so the worker dead-letters the payload unread with a message
-  naming the version; redrive it after upgrading). A job without `v` is a 0.6 job and is read as before.
+  `JoobQ::UnsupportedJobVersion` (a `JSON::ParseException`, so the worker dead-letters the payload unread and whole, and logs a
+  message naming the version; redrive it after upgrading). A job without `v` is a 0.6 job and is read as before.
 
 ### Fixed
 
 - **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the
-  worker logged "Job outcome was not stored" and left the copy in the process's own processing list, where nothing
-  returned it until the process was restarted (the heartbeat that protects the list came back by itself). The copy is
-  now kept as `retained` in `InFlight`, and the owner heartbeat loop puts each retained copy back at the head of its
-  queue (`RedisStore#redrive_retained`, one atomic script per copy, at most once per copy; a copy another process
-  already reclaimed is forgotten). The same holds when the cleanup of a finished job fails
-  (`Store#cleanup_job` and `#mark_job_completed` now return `false` instead of `nil` after logging, and the abstract
-  signatures say `Bool`). A job can therefore run again after an outage: delivery stays at-least-once.
-- **Shutdown counts retained copies as abandoned.** A copy still retained at shutdown is returned to its queue, counted
-  in `JoobQ.abandoned_jobs` and the process exits with status 3, where it used to exit 0 with `abandoned_jobs: 0`.
+  worker could not remove the job's copy from its own processing list (or could not store a failure), and nothing
+  returned the copy until the process was restarted: the heartbeat that protects the list came back by itself. The
+  claim is now kept as `retained` in `InFlight` (it stays counted while the cleanup runs, and turns retained in one
+  step when the cleanup fails), and the owner heartbeat loop puts each retained copy back at the head of its queue
+  (`RedisStore#redrive_retained`, one atomic script per copy, oldest claim first, at most once per copy; a copy
+  another process already reclaimed is forgotten). `Store#cleanup_job` and `#mark_job_completed` now return `false`
+  instead of `nil` after logging, and the abstract signatures say `Bool`. **A job that succeeded but whose cleanup could
+  not be stored runs again after an outage**: delivery stays at-least-once, so jobs must be safe to run twice.
+- **Shutdown counts the retained copies it has to put back.** A copy still retained at shutdown is returned to its queue
+  in a step of its own and counted in `JoobQ.abandoned_jobs`, so the process exits with status 3 (it used to exit 0 with
+  `abandoned_jobs: 0`). A copy the owner had already re-driven is not counted.
 
 ## 0.7.2
 

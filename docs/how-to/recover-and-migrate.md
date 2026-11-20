@@ -35,7 +35,7 @@ description: Recover deliberately when processes, networks, or storage fail.
 2. Run `JoobQ.migrate_keyspace!(queues: ["default", "exports"])` once, naming every queue that has jobs. It renames the bare lists of those queues and each `joobq:` key into the new namespace, and returns a report with the number renamed and the keys it skipped because the new name already existed.
 3. Run it again: it must report `renamed: 0`. Start the new processes.
 
-A job stored before this release has no `v` field and is read as before. A job with a greater `v` than the process knows is dead-lettered unread, with a message that names the version; redrive it after upgrading that process.
+A job stored before this release has no `v` field and is read as before. A job with a greater `v` than the process knows is dead-lettered unread, payload intact, and the worker log names the version; redrive it after upgrading that process.
 
 
 In staging, cause each failure below and check what the second column names:

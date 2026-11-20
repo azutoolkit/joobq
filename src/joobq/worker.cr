@@ -240,34 +240,45 @@ module JoobQ
           )
         end
       ensure
-        if InFlight.finished(token)
+        if InFlight.finishing(token)
           # Shutdown already put this job back on its queue; another process may hold it now, so the
           # processing list is not touched
           Log.warn &.emit("Job outlived the shutdown deadline; it was returned to its queue", queue: @queue.name, worker_id: @worker_id)
         else
-          # Use appropriate cleanup method based on job completion status
-          # IMPORTANT: Pass the full job JSON string, not just the job ID
-          if keys_missing
-            requeue_for_missing_keys(job)
-          elsif outcome_stored && job_completed_successfully && parsed_job
-            # Use enhanced cleanup for successfully completed jobs
-            retain(job) unless @queue.cleanup_completed_job_pipelined(@worker_id, job)
-          elsif outcome_stored
-            # Use standard cleanup for failed or unparseable jobs
-            retain(job) unless @queue.cleanup_job_processing_pipelined(@worker_id, job)
-          else
-            Log.error &.emit("Job outcome was not stored; retaining processing copy for re-drive", queue: @queue.name, worker_id: @worker_id)
-            InFlight.retain(@queue.name, job)
+          stored = false
+          begin
+            stored = settle_outcome(job, keys_missing, outcome_stored, job_completed_successfully && !parsed_job.nil?)
+          ensure
+            # one step: the claim is forgotten, or kept (retained) when the outcome could not be stored, so shutdown
+            # never sees a moment with neither
+            InFlight.done(token, retain: !stored)
           end
         end
       end
     end
 
-    # The cleanup of a finished job failed (Redis was away): its copy is still in this process's processing list, so
-    # it is kept for the owner heartbeat to re-drive (`RedisStore#redrive_retained`).
-    private def retain(job : String) : Nil
-      Log.error &.emit("Job cleanup was not stored; retaining processing copy for re-drive", queue: @queue.name, worker_id: @worker_id)
-      InFlight.retain(@queue.name, job)
+    # Removes the finished job's copy from the processing list the way its outcome calls for, and says whether that
+    # was stored. False (Redis was away): the copy is still in this process's list, and the owner re-drives it
+    # (`RedisStore#redrive_retained`).
+    # IMPORTANT: the full job JSON string is passed, not just the job ID
+    private def settle_outcome(job : String, keys_missing : Bool, outcome_stored : Bool, completed : Bool) : Bool
+      if keys_missing
+        requeue_for_missing_keys(job)
+        true
+      elsif outcome_stored && completed
+        # Enhanced cleanup for successfully completed jobs
+        retained_log(@queue.cleanup_completed_job_pipelined(@worker_id, job), "Job cleanup was not stored")
+      elsif outcome_stored
+        # Standard cleanup for failed or unparseable jobs
+        retained_log(@queue.cleanup_job_processing_pipelined(@worker_id, job), "Job cleanup was not stored")
+      else
+        retained_log(false, "Job outcome was not stored")
+      end
+    end
+
+    private def retained_log(stored : Bool, message : String) : Bool
+      Log.error &.emit("#{message}; retaining processing copy for re-drive", queue: @queue.name, worker_id: @worker_id) unless stored
+      stored
     end
 
     # Monotonic milliseconds since the process started (a wall clock step must not stretch or cut the pause).

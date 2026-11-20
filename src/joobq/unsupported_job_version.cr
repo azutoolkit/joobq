@@ -1,7 +1,7 @@
 module JoobQ
   # A stored job whose format version this JoobQ does not know (written by a newer JoobQ). It is a `JSON::ParseException`,
-  # so a worker dead-letters it as an unreadable job with this message and the payload intact, and the job can be
-  # redriven once the process is upgraded.
+  # so a worker dead-letters it as an unreadable job (its log line carries this message) with the payload intact, and the
+  # job can be redriven once the process is upgraded.
   class UnsupportedJobVersion < JSON::ParseException
     getter version : Int32
 

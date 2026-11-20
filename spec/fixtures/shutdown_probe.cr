@@ -9,6 +9,7 @@ require "../../src/joobq"
 #   and lives on for 3.5 s, then writes the number of job.completed events it saw into `completed-events`.
 # * "retained": no queue is started; one job whose outcome was "not stored" sits retained in this process's own
 #   processing list, and `forge` runs with PROBE_TIMEOUT seconds of shutdown budget.
+# * "redriven": like "retained", but the owner has already re-driven the copy when the signal comes.
 # * "concurrent": no jobs; three fibers call `JoobQ.shutdown` at once and `results` gets what each returned.
 #
 # The watchdog ends the program if the spec forgot it.
@@ -85,14 +86,15 @@ when "failing", "succeeding"
   sleep 3.5.seconds
   File.write(File.join(ENV["PROBE_DIR"], "completed-events"), sink.completed.get.to_s)
   exit 0
-when "retained"
+when "retained", "redriven"
   store = JoobQ.store.as(JoobQ::RedisStore)
   job = ProbeJob.new.to_json
   store.redis.lpush("joobq:v1:processing:#{ENV["PROBE_QUEUE"]}:#{store.owner_id}", job)
   token = JoobQ::InFlight.claimed(ENV["PROBE_QUEUE"], [job]).first
   JoobQ::InFlight.begin_run(token)
-  JoobQ::InFlight.finished(token)
-  JoobQ::InFlight.retain(ENV["PROBE_QUEUE"], job)
+  JoobQ::InFlight.finishing(token)
+  JoobQ::InFlight.done(token, retain: true)
+  store.redrive_retained if mode == "redriven"
   File.write(File.join(ENV["PROBE_DIR"], "started-retained"), "run\n")
   # not `forge`: it starts the queues, and a started queue recovers this process's own list at once
   JoobQ.trap_termination((ENV["PROBE_TIMEOUT"]? || "15").to_f.seconds)

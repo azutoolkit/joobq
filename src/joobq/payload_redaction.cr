@@ -5,16 +5,25 @@ module JoobQ
   # carries the real arguments. Values of `encrypted_property` are sealed in the stored job and the API never opens
   # them.
   #
-  # Matching is a case-insensitive substring of the name after `-` and spaces become `_`, so an argument named
-  # `author` is hidden by the entry `auth`. Set the list with `config.redacted_payload_keys`, or switch the whole
-  # thing off with `config.redact_api_payloads = false` (readers then see every plain argument).
+  # Matching is a case-insensitive substring of the name with `-`, `_` and spaces removed on both sides, so
+  # `privateKey`, `private_key` and `Private-Key` are all hidden by the entry `private_key`. A fragment also hides
+  # longer names that contain it (`token` hides `tokenizer`); `auth` and `pass` are not in the default list because
+  # they would hide `author` and `passenger_count`. Set the list with `config.redacted_payload_keys`, or switch the
+  # whole thing off with `config.redact_api_payloads = false` (readers then see every plain argument).
+  #
+  # Only argument values are redacted. Free text the library records (an error's message, backtrace and cause, the
+  # job's own `error`) is shown as it is, so keep secrets out of exception messages. The raw `original_job_data` of
+  # an unparseable job's dead-letter stub is always withheld.
   module PayloadRedaction
     REDACTED = "[REDACTED]"
 
     DEFAULT_KEYS = [
-      "password", "passwd", "secret", "token", "api_key", "apikey", "authorization",
+      "password", "passwd", "pwd", "passphrase", "secret", "token", "api_key", "authorization", "bearer", "jwt",
       "credential", "private_key", "cookie", "card_number",
     ]
+
+    # The field of a dead-letter stub that holds up to 1000 characters of a job that could not be parsed.
+    RAW_FIELD = "original_job_data"
 
     # `value` with every secret-named entry replaced, at any depth. A copy; `value` is not changed.
     def self.redact(value : JSON::Any) : JSON::Any
@@ -22,12 +31,12 @@ module JoobQ
       redact(value, normalized(JoobQ.config.redacted_payload_keys))
     end
 
-    # The same for a stored job's JSON text; text that is not JSON is returned as it is.
+    # The same for a stored job's JSON text. Text that is not JSON cannot be checked, so it is withheld.
     def self.redact_json(text : String) : String
       return text unless JoobQ.config.redact_api_payloads?
       redact(JSON.parse(text)).to_json
     rescue JSON::ParseException
-      text
+      REDACTED
     end
 
     # The error record as the API shows it: `job_data` goes through `redact_json`.
@@ -46,13 +55,17 @@ module JoobQ
       case raw = value.raw
       when Hash
         JSON::Any.new(raw.each_with_object({} of String => JSON::Any) do |(key, item), result|
-          result[key] = secret?(key, names) ? JSON::Any.new(REDACTED) : redact(item, names)
+          result[key] = secret?(key, names) || withheld?(key, item) ? JSON::Any.new(REDACTED) : redact(item, names)
         end)
       when Array
         JSON::Any.new(raw.map { |item| redact(item, names) })
       else
         value
       end
+    end
+
+    private def self.withheld?(key : String, value : JSON::Any) : Bool
+      key == RAW_FIELD && !value.as_s?.nil?
     end
 
     private def self.secret?(key : String, names : Array(String)) : Bool
@@ -65,7 +78,7 @@ module JoobQ
     end
 
     private def self.normalize(name : String) : String
-      name.downcase.tr("- ", "__")
+      name.downcase.delete("-_ ")
     end
   end
 end

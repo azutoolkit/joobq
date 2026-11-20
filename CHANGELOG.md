@@ -36,12 +36,18 @@
   drained, then remove it. The decision for 1.0 is `false`; a spec pins it.
 - **The management API redacts secret-named job arguments (#55).** `GET /joobq/jobs/retrying`, `/joobq/jobs/dead` and the
   `job_data` of `/joobq/errors/recent`, `/by-type` and `/by-queue` returned every plain argument to the reader role. The
-  value of an argument whose name contains one of `config.redacted_payload_keys` (default `password`, `passwd`, `secret`,
-  `token`, `api_key`, `apikey`, `authorization`, `credential`, `private_key`, `cookie`, `card_number`; case-insensitive,
-  `-` and spaces as `_`, any depth) is now `[REDACTED]` in the answer, for every role. Stored jobs are untouched, so retries
+  value of an argument whose name contains one of `config.redacted_payload_keys` (default `password`, `passwd`, `pwd`,
+  `passphrase`, `secret`, `token`, `api_key`, `authorization`, `bearer`, `jwt`, `credential`, `private_key`, `cookie`,
+  `card_number`; case-insensitive, `-`, `_` and spaces ignored so `privateKey` matches, any depth) is now `[REDACTED]` in
+  the answer, for every role. `auth` and `pass` are not in the list: they would hide `author` and `passenger_count`. The
+  raw `original_job_data` of an unparseable job's dead-letter stub is always withheld, and text that cannot be parsed
+  is withheld rather than shown. Stored jobs are untouched, so retries
   keep the real arguments. **A client that read those arguments through the API sees `[REDACTED]`.** Opt out with
   `config.redact_api_payloads = false`. Redaction goes by name: a secret under another name stays visible, so seal it
-  with `encrypted_property` (the API never opens a sealed value).
+  with `encrypted_property` (the API never opens a sealed value). **Known limit: only argument values are redacted.** The
+  error text the library records (`error_message`, `backtrace`, `error_cause` of `/joobq/errors/*`, and the job's `error` in
+  the job listings) is shown as it is, so a secret an exception message quotes is visible to a reader; keep secrets out
+  of exception messages (the library scrubs only the values of `encrypted_property` from error text).
 
 ### Changed (public API for 1.0, #43)
 

@@ -39,7 +39,7 @@ description: Turn on Core's HTTP management API with bearer tokens for the roles
    # config.redact_api_payloads = false   readers then see every plain argument
    ```
 
-   Redaction goes by name, so a secret under an innocent name is shown: seal it with `encrypted_property` instead (see [Encrypt job payloads](../../README.md)).
+   Redaction goes by name and covers argument values only: a secret under an innocent name, or one quoted in an exception message (`error_message`, `backtrace`), is shown. Seal the value with `encrypted_property` instead (see [Encrypt job payloads](../../README.md)).
 
 ## Verify
 

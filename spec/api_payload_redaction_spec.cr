@@ -191,8 +191,48 @@ module JoobQ
       redis.zrange(Keys::DEAD_LETTER, 0, -1).first.to_s.should contain(plain_password)
     end
 
-    it "does not raise on a stored entry that is not JSON" do
-      PayloadRedaction.redact_json("not json").should eq("not json")
+    it "fails closed on a stored entry that is not JSON" do
+      PayloadRedaction.redact_json("not json password=hunter2").should eq(PayloadRedaction::REDACTED)
+      PayloadRedaction.redact_json("not json").should eq(PayloadRedaction::REDACTED)
+    end
+
+    it "matches camelCase and snake_case names alike" do
+      any = JSON.parse(%({"privateKey":"a","private_key":"b","cardNumber":"c","apiKey":"d","accessToken":"e","dbPwd":"f","passPhrase":"g","Bearer":"h","jwt":"i","passenger_count":3,"author":"j"}))
+
+      redacted = PayloadRedaction.redact(any)
+
+      %w(privateKey private_key cardNumber apiKey accessToken dbPwd passPhrase Bearer jwt).each do |name|
+        redacted[name].as_s.should eq(PayloadRedaction::REDACTED)
+      end
+      redacted["passenger_count"].as_i.should eq(3)
+      redacted["author"].as_s.should eq("j")
+    end
+
+    it "withholds the raw text of an unparseable job's dead-letter stub" do
+      raw = %({"jid":"x","password":"hunter2-correct-horse","note":"truncated)
+      stub = {"jid" => "j1", "queue" => "example", "status" => "Dead", "original_job_data" => raw}
+      JoobQ.store.as(RedisStore).redis.zadd(Keys::DEAD_LETTER, 1_i64, stub.to_json)
+
+      status, body = get.call("/joobq/jobs/dead")
+
+      status.should eq(200)
+      body.should_not contain("hunter2-correct-horse")
+      JSON.parse(body)["jobs"][0]["original_job_data"].as_s.should eq(PayloadRedaction::REDACTED)
+      JSON.parse(body)["jobs"][0]["queue"].as_s.should eq("example")
+    end
+
+    # Pins a known limit: only argument VALUES are redacted, by name. Free text the library records (the error
+    # message, backtrace and cause, and the job's own error) is shown as it is, so a secret an exception message
+    # quotes is visible to a reader. Keep secrets out of exception messages, or seal them with encrypted_property
+    # (the library scrubs those values from error text). Change this spec only together with that documentation.
+    it "does not scrub error text: a secret quoted in an exception message stays visible" do
+      job = build_job.call
+      context = ErrorContext.from_exception(job, Queue(PaymentJob).new("example", 1), RuntimeError.new("bad password hunter2-from-message"), "worker-1")
+      JoobQ.error_monitor.record_error(context)
+
+      body = get.call("/joobq/errors/recent")[1]
+
+      JSON.parse(body).as_a.first["error_message"].as_s.should contain("hunter2-from-message")
     end
   end
 

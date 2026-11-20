@@ -117,7 +117,9 @@ module JoobQ
 
       store.close
 
-      admin.call.command(["CLIENT", "LIST"]).to_s.should_not contain("user=#{user}")
+      # The server notices a closed socket on its next event-loop pass, so the connection can outlive #close a moment
+      # (Redis 6.2 does it often); a connection that #close left open stays listed.
+      eventually { !admin.call.command(["CLIENT", "LIST"]).to_s.includes?("user=#{user}") }.should be_true
     ensure
       admin.call.del("acl_spec:key")
     end

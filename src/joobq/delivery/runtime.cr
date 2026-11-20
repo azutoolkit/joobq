@@ -112,13 +112,17 @@ module JoobQ::Delivery
       verify_durability! if production
     end
 
+    DURABLE_CONFIG = {"appendonly" => "yes", "appendfsync" => "always", "maxmemory-policy" => "noeviction"}
+
     def verify_durability! : Nil
-      config = store.redis.command(["CONFIG", "GET", "appendonly", "appendfsync", "maxmemory-policy"]).as(Array)
-      values = {} of String => String
-      config.each_slice(2) { |pair| values[pair[0].as(String)] = pair[1].as(String) }
-      unless values["appendonly"]? == "yes" && values["appendfsync"]? == "always" && values["maxmemory-policy"]? == "noeviction"
+      unless DURABLE_CONFIG.all? { |name, required| config_value(name) == required }
         raise ArgumentError.new(ErrorCodes["JQ-201"].tag("durable runtime requires appendonly=yes, appendfsync=always and maxmemory-policy=noeviction"))
       end
+    end
+
+    # One CONFIG GET per setting: several names in one call are Redis 7.0+, and the floor is 6.2.
+    private def config_value(name : String) : String?
+      store.redis.command(["CONFIG", "GET", name]).as(Array)[1]?.try(&.as(String))
     end
 
     def register(queue : String, &handler : String, Context -> Outcome) : Ledger

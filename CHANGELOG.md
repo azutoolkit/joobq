@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.1
+
+A patch release: one data-loss fix in the keyspace migration. Nothing else changes.
+
+### Fixed
+
+- **`JoobQ.migrate_keyspace!` no longer deletes a queue's waiting jobs when the queue is named like a transient key.** A
+  queue called `events`, `workers`, `processing-owners`, `events:trim_lock`, `worker:<id>` or `delivery-bridge:<queue>` kept its 0.6 waiting
+  jobs under that bare name. When `joobq:v1:queue:<name>` already existed (a 0.8 process had enqueued to it or started
+  before the migration), the merge took the bare list for JoobQ's own stale `joobq:events` (and so on) key, deleted it
+  and counted it as merged: the waiting jobs were lost and the run exited normally. Only keys that start with `joobq:`
+  are classified as transient now; a bare queue list is merged into the v1 list (old jobs at the head, in order).
+  Upgrade note: if you have not migrated yet, use 0.8.1. If you migrated with 0.8.0 and a queue of yours had one of
+  those names while its `joobq:v1:queue:<name>` list already existed, its 0.6 jobs were dropped: check that queue and
+  enqueue them again from your source of truth (the 0.6 list is gone from Redis; a backup or RDB snapshot from before the
+  migration still holds it).
+
 ## 0.8.0
 
 This release holds breaking changes (the keyspace move, the `allow_plaintext_payloads` default, redacted API payloads, the

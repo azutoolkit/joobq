@@ -12,7 +12,7 @@ Every page of these docs describes the versions below. A page that says somethin
 
 | Component | Version | Source |
 | --- | --- | --- |
-| JoobQ (Core) | 0.8.0, tag `v0.8.0` | `joobq/shard.yml` |
+| JoobQ (Core) | 0.8.1, tag `v0.8.1` | `joobq/shard.yml` |
 | JoobQ Pro | 0.7.5, needs `joobq >= 0.7.2, < 0.8.0` (as of its `shard.yml`) | `joobq-pro/shard.yml` |
 | JoobQUI | `master` of `azutoolkit/joobqui` | |
 | Azu CLI | 0.1.62, tag `v0.1.62` | `azu_cli/shard.yml` |

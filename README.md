@@ -419,7 +419,7 @@ When defining jobs in JoobQ, it's important to follow certain best practices to 
 
 ##### Idempotency
 
-Jobs must be idempotent. This means that running the same job multiple times should produce the same result. Idempotency is crucial for ensuring that jobs can be retried safely without causing unintended side effects. To achieve idempotency:
+JoobQ delivers at least once, so a job can run more than once: [Delivery guarantees](docs/reference/delivery-guarantees.md) lists when. Jobs must be idempotent. This means that running the same job multiple times should produce the same result. Idempotency is crucial for ensuring that jobs can be retried safely without causing unintended side effects. To achieve idempotency:
 
 - Avoid modifying external state directly within the job.
 - Use unique identifiers (an idempotency key of your own) so that a second run of the same job is detected and does nothing: JoobQ itself does not deduplicate jobs.

@@ -55,6 +55,7 @@
   * [Core API](reference/core-api.md)
   * [Public API](reference/public-api.md)
   * [Error codes](reference/error-codes.md)
+  * [Delivery guarantees](reference/delivery-guarantees.md)
   * [Pro API](reference/pro-api.md)
   * [Workflow DSL](reference/workflow-dsl.md)
   * [Workflow lifecycle controls](reference/workflow-lifecycle-controls.md)

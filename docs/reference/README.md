@@ -19,6 +19,7 @@ Reference pages are tables that mirror the code at the versions on the [compatib
 * [Core API](core-api.md) · Core
 * [Public API](public-api.md) · Core
 * [Error codes](error-codes.md) · Core
+* [Delivery guarantees](delivery-guarantees.md) · Core
 
 ## Advanced
 

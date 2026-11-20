@@ -45,6 +45,9 @@ removal of `JoobQ.scheduler`), so the next release is **0.8.0**, not a patch. Be
 
 ### Added
 
+- **Docs: the at-least-once guarantee is written down (#50).** [Delivery guarantees](docs/reference/delivery-guarantees.md)
+  lists, per failure, what happens and whether the job body can run twice, each row citing its spec. The docs check
+  (`scripts/check_docs.py`) fails when a cited spec file or spec name disappears.
 - **The crash-recovery time is a setting.** `owner_ttl` (how long a heartbeat counts as alive, default 30 s, 1 s to 1 h)
   and `reaper_interval` (default 30 s, 100 ms up to `owner_ttl`) are `Configure` properties, `settings` keys in YAML and
   the environment variables `JOOBQ_OWNER_TTL` and `JOOBQ_REAPER_INTERVAL`. A process's jobs are back on their queue at

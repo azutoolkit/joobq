@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_docs import anchors, check, compatibility_errors, gitbook_errors, landing_errors, markup_errors, nodoc_errors, pro_manifest
+from check_docs import anchors, check, compatibility_errors, gitbook_errors, landing_errors, markup_errors, nodoc_errors, pro_manifest, spec_reference_errors
 
 
 class DocumentationChecks(unittest.TestCase):
@@ -66,6 +66,20 @@ class DocumentationChecks(unittest.TestCase):
             self.assertEqual([], compatibility_errors(root, Path(directory) / 'absent'))
             self.assertEqual(pro / 'shard.yml', pro_manifest(root, pro))
             self.assertIsNone(pro_manifest(root, Path(directory) / 'absent'))
+
+    def test_cited_specs_must_exist_and_keep_their_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'docs').mkdir()
+            (root / 'spec').mkdir()
+            (root / 'spec' / 'a_spec.cr').write_text('it "keeps its name" do\nend\n')
+            page = root / 'docs' / 'page.md'
+            page.write_text('| `spec/a_spec.cr` "keeps its name" |\n')
+            self.assertEqual([], spec_reference_errors(root))
+            page.write_text('| `spec/a_spec.cr` "was renamed" |\n')
+            self.assertIn('no longer contains "was renamed"', '\n'.join(spec_reference_errors(root)))
+            page.write_text('| `spec/gone_spec.cr` "keeps its name" |\n')
+            self.assertIn('spec file missing: spec/gone_spec.cr', '\n'.join(spec_reference_errors(root)))
 
     def test_nodoc_must_start_its_comment(self):
         with tempfile.TemporaryDirectory() as directory:

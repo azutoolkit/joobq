@@ -13,6 +13,7 @@ FENCE = re.compile(r"^```([^\n]*)\n(.*?)^```[ \t]*$", re.M | re.S)
 LINK = re.compile(r"(?<!!)\[[^\]\n]+\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)|href=\"([^\"]+)\"")
 EXAMPLE = re.compile(r"<!-- example: ([a-z_/]+\.cr) -->\s*```crystal\n(.*?)^```", re.M | re.S)
 ILLUSTRATIVE = re.compile(r"<!-- illustrative: [^\n]+ -->\s*$")
+SPEC_REFERENCE = re.compile(r'`(spec/[\w/.]+\.cr)` "([^"\n]+)"')
 PAIRS = {"hint": "endhint", "tabs": "endtabs", "tab": "endtab", "code": "endcode", "stepper": "endstepper", "step": "endstep"}
 SECTIONS = ("tutorials", "how-to", "reference", "explanation")
 AREAS = ("Getting Started", "Core", "Advanced", "Production Ops")
@@ -113,6 +114,20 @@ def nodoc_errors(root):
     return errors
 
 
+def spec_reference_errors(root):
+    """A page that cites a spec as `spec/x_spec.cr` "name" names a file that exists and still contains that name."""
+    errors = []
+    docs = root / "docs"
+    for page in sorted(docs.rglob("*.md")) if docs.is_dir() else []:
+        for path, name in SPEC_REFERENCE.findall(FENCE.sub("", page.read_text())):
+            source = root / path
+            if not source.is_file():
+                errors.append(f"{page.relative_to(root)}: spec file missing: {path}")
+            elif name not in source.read_text():
+                errors.append(f"{page.relative_to(root)}: {path} no longer contains \"{name}\"")
+    return errors
+
+
 def row_errors(page_text, label, manifest, source, required):
     """The version in the `label` row of the versions table is the one in `manifest` (a shard.yml)."""
     declared = re.search(r"^version:\s*(\S+)\s*$", manifest.read_text(), re.M)
@@ -156,6 +171,7 @@ def check(root):
     errors += gitbook_errors(root)
     errors += compatibility_errors(root)
     errors += nodoc_errors(root)
+    errors += spec_reference_errors(root)
     summary = docs / "SUMMARY.md"
     if not summary.exists():
         return errors + ["missing docs/SUMMARY.md"]

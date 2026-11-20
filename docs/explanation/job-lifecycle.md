@@ -83,6 +83,7 @@ Your own properties (`invoice_id`, `email`) sit next to the fields JoobQ adds. P
 | --- | --- | --- | --- |
 | `jid` | `UUID` | random | The job's identity; Core has no other idempotency key |
 | `queue` | `String` | `config.default_queue` (`"default"`) | The Redis list the job is pushed to |
+| `v` | `Int32` | `1` | The stored format version (JSON key `v`); a reader refuses a greater one |
 | `retries` | `Int32` | `config.retries` (3) | Retries left; the retry middleware decrements it |
 | `max_retries` | `Int32` | `config.retries` (3) | The budget the job started with |
 | `expires` | `Int64` | now + `config.expires` (3 days) | Unix time in milliseconds after which the job is dead-lettered instead of run |

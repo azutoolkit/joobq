@@ -357,10 +357,10 @@ module JoobQ
     # Owner ids whose heartbeat is within the TTL. Lapsed entries are pruned as they are read. Liveness is scored by
     # the Redis clock, so recovery does not depend on the worker and reaper clocks agreeing. A process paused (GC,
     # starvation) longer than OWNER_TTL can still be judged dead and have its jobs recovered, so jobs stay idempotent.
-    def live_owners : Set(String)
+    def live_owners(key : String = OWNERS) : Set(String)
       cutoff = redis_now_ms - OWNER_TTL.total_milliseconds.to_i64
-      redis.zremrangebyscore(OWNERS, "-inf", cutoff)
-      redis.zrange(OWNERS, 0, -1).map(&.as(String)).to_set
+      redis.zremrangebyscore(key, "-inf", cutoff)
+      redis.zrange(key, 0, -1).map(&.as(String)).to_set
     end
 
     # Drains a processing list to the head of its queue, oldest claim first, in one atomic script, and returns the

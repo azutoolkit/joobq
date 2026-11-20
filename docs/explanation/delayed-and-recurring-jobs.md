@@ -18,7 +18,7 @@ JoobQ has four ways to run work later or on a schedule, and they differ in one t
 
 ```mermaid
 flowchart LR
-  D[Job.delay / enqueue_at] --> Set[(joobq:delayed_jobs)] -->|due, checked every second| Q[(queue)] --> W[worker: retries, DLQ]
+  D[Job.delay / enqueue_at] --> Set[(joobq:v1:delayed_jobs)] -->|due, checked every second| Q[(queue)] --> W[worker: retries, DLQ]
   E[Job.schedule every: / scheduler every, cron] --> P[perform called in this process]
   Y[YAML schedulers:] -->|JoobQUI worker fires it| Q
   S[Pro workflow schedule] -->|leader starts a run| WF[workflow run]

@@ -22,7 +22,7 @@ description: Stop workers from taking new jobs from a queue while a dependency i
 
 ## Verify
 
-The pause is a flag in Redis (`joobq:queue:<name>:paused`), and workers in every process see it within about half a second. Captured against a self-hosted JoobQUI, with the `test` queue:
+The pause is a flag in Redis (`joobq:v1:paused:<name>`), and workers in every process see it within about half a second. Captured against a self-hosted JoobQUI, with the `test` queue:
 
 ```
 $ curl -s -X POST -H "Authorization: Bearer $JOOBQUI_TOKEN" -w "%{http_code}\n" $JOOBQUI/api/v1/queues/test/pause

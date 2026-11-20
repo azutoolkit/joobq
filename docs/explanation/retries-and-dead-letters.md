@@ -19,14 +19,14 @@ A job that raises is retried with exponential backoff until its retry budget run
 ```mermaid
 flowchart LR
   Run[perform raises] --> Q{retries left and not NonRetryableError?}
-  Q -->|yes| Delay[(joobq:delayed_jobs, due after backoff)]
+  Q -->|yes| Delay[(joobq:v1:delayed_jobs, due after backoff)]
   Delay -->|due, checked every second| Queue[(queue)]
   Queue --> Run
-  Q -->|no| DLQ[(joobq:dead_letter)]
+  Q -->|no| DLQ[(joobq:v1:dead_letter)]
   DLQ -->|redrive| Queue
 ```
 
-The delay before retry *n* (n = 0 for the first failure) is drawn uniformly between 1 second and the ceiling `min(2^n seconds, 1 hour)`, so jobs that failed together do not all retry at the same moment; the first retry always waits exactly 1 second. With `config.retry_jitter = false` the delay is the ceiling itself. `n` is `max_retries - retries` at the time of the failure. The delay never goes below 1 second: the retry is added to the delayed set before the failed copy leaves the processing list, and a retry due at once could run while that copy is still there. The retry waits in a delayed set that is checked once a second, so an attempt starts up to about a second after its backoff. A retry lock (`joobq:retry_lock:<jid>`) makes sure one failure is scheduled once, even if two handlers see it.
+The delay before retry *n* (n = 0 for the first failure) is drawn uniformly between 1 second and the ceiling `min(2^n seconds, 1 hour)`, so jobs that failed together do not all retry at the same moment; the first retry always waits exactly 1 second. With `config.retry_jitter = false` the delay is the ceiling itself. `n` is `max_retries - retries` at the time of the failure. The delay never goes below 1 second: the retry is added to the delayed set before the failed copy leaves the processing list, and a retry due at once could run while that copy is still there. The retry waits in a delayed set that is checked once a second, so an attempt starts up to about a second after its backoff. A retry lock (`joobq:v1:retry_lock:<jid>`) makes sure one failure is scheduled once, even if two handlers see it.
 
 ## Example
 

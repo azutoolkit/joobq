@@ -184,7 +184,7 @@ JOOBQ_EVENTS_MAX_BYTES=67108864
 JOOBQ_PAYLOAD_KEYS=2026a:<64 hex digits>,2025:<64 hex digits> # see "Encrypting Job Arguments"
 ```
 
-`JOOBQ_EVENTS_MAX_BYTES` is the most memory the `joobq:events` stream may use (0 turns the limit off). The stream is also capped at about 50 000 entries. The byte limit is enforced from the worker heartbeat (every 10 s, at most one process checks per 10 s), so it is approximate: the stream can overshoot between beats, and it is trimmed to 90 % of the limit, never below 100 entries.
+`JOOBQ_EVENTS_MAX_BYTES` is the most memory the `joobq:v1:events` stream may use (0 turns the limit off). The stream is also capped at about 50 000 entries. The byte limit is enforced from the worker heartbeat (every 10 s, at most one process checks per 10 s), so it is approximate: the stream can overshoot between beats, and it is trimmed to 90 % of the limit, never below 100 entries.
 
 ### Connecting with a URL
 
@@ -285,14 +285,14 @@ schedules. Workers claim nothing once the shutdown has begun.
 
 Jobs put back run again from the start, possibly in another process while this one winds down, so they must be safe to
 run twice, as they must be after a crash. A process that is killed (`SIGKILL`) cannot do this; its jobs stay in its
-own processing list (`joobq:processing:<queue>:<owner>`). Each process claims into its own list and publishes a
-heartbeat (the `joobq:processing:owners` sorted set). Start-up recovery (`Queue#start`), the expired-job reaper and
+own processing list (`joobq:v1:processing:<queue>:<owner>`). Each process claims into its own list and publishes a
+heartbeat (the `joobq:v1:processing:owners` sorted set). Start-up recovery (`Queue#start`), the expired-job reaper and
 `POST /joobq/queues/:name/reprocess` return **every** job a crashed or stopped process left in processing back to the
 head of its queue, in the order it was claimed, so it runs before newer work. Recovery reclaims a process's list only
 once that process's heartbeat has lapsed (`OWNER_TTL`, 30 seconds), so a process that starts beside live workers never
 moves their in-flight jobs and never makes them run twice. Prefer a graceful stop (`SIGTERM`) in rolling deploys so
 jobs come back at once rather than after the heartbeat times out. (Workers from 0.5 share one
-`joobq:processing:<queue>` list and publish no heartbeat; stop them before relying on 0.6 recovery — see the
+`joobq:v1:processing:<queue>` list and publish no heartbeat; stop them before relying on 0.6 recovery — see the
 CHANGELOG.)
 
 ### Defining Queues

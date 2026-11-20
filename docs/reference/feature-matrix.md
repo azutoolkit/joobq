@@ -47,7 +47,7 @@ description: Which feature is in the open-source core, in the Pro shard and in t
 | Feature | Core | Pro | JoobQUI |
 | --- | --- | --- | --- |
 | HTTP management API | `/joobq/*`, bearer tokens, off by default | adds `/joobq/metrics`, `/joobq/percentiles`, `/joobq/alerts` | `/api/v1`, described at `/api/v1/openapi.json` |
-| Run-time histogram | in Redis (`joobq:stats:latency`) | percentiles in process | charts; `joobqui_job_duration_seconds` |
+| Run-time histogram | in Redis (`joobq:v1:stats:latency`) | percentiles in process | charts; `joobqui_job_duration_seconds` |
 | Prometheus endpoint | no | no (Roadmap) | `/metrics` |
 | Alert rules | | yes (log handler; webhook handler only logs) | rules, acknowledgement |
 | Alert channels: email, Slack, PagerDuty, webhook | | | yes (webhook HMAC-signed when it has a secret) |

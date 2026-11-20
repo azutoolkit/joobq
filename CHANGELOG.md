@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Changed (upgrade note: the keyspace moved)
+
+- **Every Redis key is under `joobq:v1:`.** 0.6 stored a queue's waiting jobs under the bare queue name (a queue
+  `default` was the Redis key `default`) and everything else under `joobq:` without a version. Now `JoobQ::Keys` names
+  every key (`Keys.queue("default")` is `joobq:v1:queue:default`; processing lists, the delayed set, dead letters,
+  stats, retry locks, error records, workers, events and the delivery-bridge marker follow; the pause and config
+  flags are `joobq:v1:paused:<queue>` and `joobq:v1:config:<queue>`). Code that built these keys by hand (joobqui,
+  joobq-pro) must call `Keys` instead. `Delivery::Ledger` refuses a namespace named like one of these families.
+- **Upgrade with every JoobQ process stopped, then run `JoobQ.migrate_keyspace!(queues: [...])` once.** It renames the
+  bare lists of the queues you name and every `joobq:` key into the new namespace, refuses while another process has a
+  live heartbeat, never overwrites an existing new key (it is listed in the report), and reports `renamed: 0` when run
+  again. A version that finds 0.6 keys logs an error at the first `Queue#start`; it does not read them. Running 0.6
+  and this version against one Redis at the same time is not supported.
+- **Stored jobs carry a format version, `"v": 1`.** A reader refuses a greater version with
+  `JoobQ::UnsupportedJobVersion` (a `JSON::ParseException`, so the worker dead-letters the payload unread with a message
+  naming the version; redrive it after upgrading). A job without `v` is a 0.6 job and is read as before.
+
 ### Fixed
 
 - **A live process re-drives the jobs whose outcome it could not store.** When Redis was away as a job ended, the

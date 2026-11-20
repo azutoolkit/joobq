@@ -19,7 +19,7 @@ A JoobQ queue is a Redis list for one job type, served by a fixed number of work
 ```mermaid
 flowchart LR
   P[Producer] -->|RPUSH| Q[(Redis list: exports)]
-  Q -->|BLMOVE head| Proc[(joobq:processing:exports:owner)]
+  Q -->|BLMOVE head| Proc[(joobq:v1:processing:exports:owner)]
   Proc --> W[Worker runs perform]
   W -->|done| X[Removed from processing]
 ```

@@ -1,5 +1,10 @@
 require "./spec_helper"
 
+class NamespaceDocument
+  include JSON::Serializable
+  getter id : String = "d"
+end
+
 class DefaultQueueJob
   include JoobQ::Job
 
@@ -52,11 +57,32 @@ module JoobQ
       Keys.paused("q").should_not eq(Keys.queue("paused:q")) # a queue named like a flag cannot collide with it
     end
 
-    it "keeps the delivery runtime's namespaces apart from JoobQ's own families" do
-      Keys::RESERVED_NAMESPACES.each do |namespace|
-        expect_raises(ArgumentError, /reserved/) { Delivery::Ledger.new(redis, namespace, "work") }
+    describe "delivery namespaces named like one of JoobQ's families" do
+      reserved = "events"
+      leftovers = -> { redis.keys("joobq:v1:#{reserved}:*").map(&.to_s) }
+      before_each { redis.del(leftovers.call) unless leftovers.call.empty? }
+      after_each { redis.del(leftovers.call) unless leftovers.call.empty? }
+
+      it "refuses a new one, in the ledger, the journal and the backup alike" do
+        Keys::RESERVED_NAMESPACES.each do |namespace|
+          expect_raises(ArgumentError, /reserved/) { Delivery::Ledger.new(redis, namespace, "work") }
+          expect_raises(ArgumentError, /reserved/) { Delivery::Journal(NamespaceDocument).new(redis, namespace, "audit") }
+          expect_raises(ArgumentError, /reserved/) { Delivery::Backup.new(redis, namespace) }
+        end
+        Delivery::Ledger.new(redis, "billing", "work").ready_key.should start_with("joobq:v1:billing:")
       end
-      Delivery::Ledger.new(redis, "billing", "work").ready_key.should start_with("joobq:v1:billing:")
+
+      it "accepts one that already holds delivery data, so an upgrade does not break it" do
+        redis.hset("joobq:v1:#{reserved}:work:records", "id", "x") # what a ledger of that namespace wrote before
+        Delivery::Ledger.new(redis, reserved, "work").ready_key.should eq("joobq:v1:#{reserved}:work:ready")
+        Delivery::Journal(NamespaceDocument).new(redis, reserved, "audit").key.should eq("joobq:v1:#{reserved}:journal:audit")
+        Delivery::Backup.new(redis, reserved)
+      end
+
+      it "is not fooled by JoobQ's own keys under the same segment" do
+        redis.set("joobq:v1:#{reserved}:live", "x") # not delivery data
+        expect_raises(ArgumentError, /reserved/) { Delivery::Ledger.new(redis, reserved, "work") }
+      end
     end
 
     describe "the leased-delivery guard of Queue#start" do

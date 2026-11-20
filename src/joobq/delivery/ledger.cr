@@ -131,7 +131,7 @@ module JoobQ::Delivery
       [namespace, queue].each do |name|
         raise ArgumentError.new("namespace and queue must be 1..128 safe characters") unless name.matches?(/\A[a-zA-Z0-9_.~-]{1,128}\z/)
       end
-      raise ArgumentError.new("namespace #{namespace.inspect} is reserved for JoobQ's own keys") if Keys::RESERVED_NAMESPACES.includes?(namespace)
+      Keys.check_namespace!(@redis, namespace)
       raise ArgumentError.new("record limit must be positive") unless @max_records > 0
       raise ArgumentError.new("payload limit must be positive") unless @max_payload_bytes > 0
       prefix = "joobq:v1:#{namespace}:#{queue}"

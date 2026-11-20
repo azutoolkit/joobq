@@ -7,14 +7,14 @@ module JoobQ
     private PROCESSING_QUEUE = Keys::PROCESSING
     private BLOCKING_TIMEOUT = 0.5
 
-    # Each process claims into its own processing list, `joobq:processing:<queue>:<owner>`, and publishes a liveness
-    # heartbeat in the `joobq:processing:owners` sorted set (score = last beat, ms). Recovery returns a processing
+    # Each process claims into its own processing list, `joobq:v1:processing:<queue>:<owner>`, and publishes a liveness
+    # heartbeat in the `joobq:v1:processing-owners` sorted set (score = last beat, ms). Recovery returns a processing
     # list to its queue only when its owner's heartbeat has lapsed, so a live process's in-flight jobs are never
-    # moved out from under it. `joobq:processing:<queue>` with no owner suffix is the shared list older (0.5)
+    # moved out from under it. `joobq:v1:processing:<queue>` with no owner suffix is the shared list older (0.5)
     # workers claimed into; it is migrated once no live owner remains. The heartbeat is independent of the optional
     # `WorkerRegistry`, so recovery is correct whether or not a process publishes the richer worker snapshot.
-    # Not under the `joobq:processing:` prefix, so the processing-list SCANs never match it, and a queue
-    # literally named "owners" does not collide with it.
+    # Not under the `joobq:v1:processing:` prefix (a hyphen, not a colon), so the processing-list SCANs never match it,
+    # and a queue literally named "owners" does not collide with it.
     OWNERS = Keys::PROCESSING_OWNERS
     # The shape of an owner id: `<host>:<pid>`, exactly one colon. Recovery tells a queue's own processing lists
     # from those of a queue whose name merely starts with it by this shape.

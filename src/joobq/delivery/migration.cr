@@ -112,6 +112,7 @@ module JoobQ::Delivery
 
     def initialize(@redis : Redis::PooledClient, @namespace : String)
       raise ArgumentError.new("invalid namespace") unless @namespace.matches?(/\A[a-zA-Z0-9_.~-]{1,128}\z/)
+      Keys.check_namespace!(@redis, @namespace)
       @prefix = "joobq:v1:#{@namespace}:"
     end
 

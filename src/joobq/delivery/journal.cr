@@ -26,6 +26,7 @@ module JoobQ::Delivery
         raise ArgumentError.new("invalid journal namespace/collection") unless name.matches?(/\A[a-zA-Z0-9_.~-]{1,128}\z/)
       end
       raise ArgumentError.new("journal limits must be positive") unless @capacity > 0 && @max_bytes > 0
+      Keys.check_namespace!(@redis, namespace)
       @key = "joobq:v1:#{namespace}:journal:#{collection}"
       @quarantine_key = "#{@key}:quarantine"
       @keys = [@key]

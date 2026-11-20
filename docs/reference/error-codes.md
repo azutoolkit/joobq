@@ -15,6 +15,11 @@ is copied from, and `error.as(JoobQ::Coded).joobq_error_code` gives the entry of
 Ranges: JQ-1xx configuration, JQ-2xx Redis and storage, JQ-3xx jobs and queues, JQ-4xx payload encryption, JQ-5xx
 management API (no codes yet).
 
+Other JoobQ products use the same scheme and the same `https://joobq.io/errors/JQ-xxx` pages, so a code means one thing
+everywhere: JQ-6xx and JQ-7xx are JoobQ Pro (workflows, batches, rate limits), JQ-8xx and JQ-8000 and up are the JoobQUI
+console and API, and JQ-9xx are the nine SDKs. This page lists only the JQ-1xx to JQ-5xx codes that JoobQ itself raises;
+the full registry is `errors/codes.json` in the joobqui repository.
+
 | Code | Title | What it means | What to do |
 | --- | --- | --- | --- |
 | [JQ-101](https://joobq.io/errors/JQ-101) | Configuration not initialized | JoobQ.config was read while no configuration was set, for example right after JoobQ.reset_config. | Set the configuration before using JoobQ: JoobQ.configure, JoobQ.set_config or one of the JoobQ.initialize_config loaders. |

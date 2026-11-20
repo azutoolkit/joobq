@@ -143,9 +143,9 @@ module JoobQ
       @[JSON::Field(ignore: true)]
       property enqueue_time = Time.instant
 
-      # Every JSON read of a job goes through here, so the version check holds for a class that defines its own
-      # `after_initialize` too.
-      def self.new(pull : ::JSON::PullParser)
+      # Every JSON read of a job goes through here (`self.new(pull)` of the class and of its subclasses calls it), so
+      # the version check holds for a class that defines its own `after_initialize` and for a subclass.
+      private def self.new_from_json_pull_parser(pull : ::JSON::PullParser)
         job = previous_def
         raise ::JoobQ::UnsupportedJobVersion.new(job.format_version) if job.format_version > ::JoobQ::Job::FORMAT_VERSION
         job

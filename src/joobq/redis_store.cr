@@ -594,18 +594,30 @@ module JoobQ
       put_back
     end
 
+    # What a pass over the retained copies did: *moved* copies the script put back, *failed* copies it did not
+    # reach because Redis failed (they stay retained for the next pass). A copy already reclaimed by another process
+    # is forgotten and counts as neither.
+    record Redrive, moved : Int32, failed : Int32
+
     # Puts the copies this process retained (jobs whose outcome it could not store) back at the head of their queues,
-    # oldest claim first, each in one atomic step, and returns how many were put back. A copy another process (or
-    # shutdown) already reclaimed is no longer in the list and counts for nothing; either way it is forgotten, so a
-    # copy is re-driven at most once. If Redis fails, the copy stays retained for the next pass.
-    def redrive_retained : Int32
-      put_back = 0
-      InFlight.retained.reverse_each do |(token, queue_name, job_json)|
-        moved = redis.eval(REQUEUE_MANY, requeue_keys(queue_name), [job_json]).as(Int).to_i
+    # newest claim first so the oldest ends up in front, each in one atomic step. Each copy is forgotten once handled,
+    # so it is re-driven at most once. On a Redis failure it stops there and counts the copies not reached as failed.
+    def redrive_retained : Redrive
+      moved = 0
+      entries = InFlight.retained
+      entries.reverse_each.with_index do |(token, queue_name, job_json), done|
+        moved += redrive_one(queue_name, job_json)
         InFlight.release(token)
-        put_back += moved
+      rescue ex
+        Log.error &.emit("Could not re-drive retained jobs; they stay retained", queue: queue_name, error: ex.message)
+        return Redrive.new(moved, entries.size - done)
       end
-      put_back
+      Redrive.new(moved, 0)
+    end
+
+    # Runs the requeue script for one retained copy: 1 when it was still in the list and went back, 0 otherwise.
+    def redrive_one(queue_name : String, job_json : String) : Int32
+      redis.eval(REQUEUE_MANY, requeue_keys(queue_name), [job_json]).as(Int).to_i
     end
 
     # Removes a finished job from the processing list and counts it as processed. False (after logging) when Redis

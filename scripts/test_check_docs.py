@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_docs import anchors, check, gitbook_errors, landing_errors, markup_errors
+from check_docs import anchors, check, compatibility_errors, gitbook_errors, landing_errors, markup_errors
 
 
 class DocumentationChecks(unittest.TestCase):
@@ -34,6 +34,21 @@ class DocumentationChecks(unittest.TestCase):
             errors = '\n'.join(check(root))
             for expected in ('page missing from SUMMARY', 'missing target', 'link escapes repository', 'missing anchor', 'example differs'):
                 self.assertIn(expected, errors)
+
+    def test_compatibility_page_names_the_shard_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'docs' / 'reference').mkdir(parents=True)
+            page = root / 'docs' / 'reference' / 'compatibility.md'
+            (root / 'shard.yml').write_text('name: joobq\nversion: 0.7.2\n')
+            page.write_text('| JoobQ (Core) | 0.7.2, tag `v0.7.2` | `joobq/shard.yml` |\n')
+            self.assertEqual([], compatibility_errors(root))
+            page.write_text('| JoobQ (Core) | 0.5.6, tag `v0.5.6` | `joobq/shard.yml` |\n')
+            self.assertIn('documents JoobQ (Core) 0.5.6, tag `v0.5.6`, shard.yml declares 0.7.2', '\n'.join(compatibility_errors(root)))
+            page.write_text('| JoobQ (Core) | 0.7.2, tag `v0.7.1` | `joobq/shard.yml` |\n')
+            self.assertTrue(compatibility_errors(root))
+            page.write_text('no table\n')
+            self.assertIn('no `JoobQ (Core)` row', '\n'.join(compatibility_errors(root)))
 
     def test_gitbook_configuration(self):
         with tempfile.TemporaryDirectory() as directory:

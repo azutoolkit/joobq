@@ -98,10 +98,29 @@ def gitbook_errors(root):
     return errors
 
 
+def compatibility_errors(root):
+    """The version docs/reference/compatibility.md documents for JoobQ (Core) is the one in shard.yml."""
+    manifest = root / "shard.yml"
+    page = root / "docs" / "reference" / "compatibility.md"
+    if not manifest.is_file() or not page.is_file():
+        return []
+    declared = re.search(r"^version:\s*(\S+)\s*$", manifest.read_text(), re.M)
+    row = re.search(r"^\| JoobQ \(Core\) \| ([^|]+)\|", page.read_text(), re.M)
+    if not declared:
+        return ["shard.yml: no version"]
+    if not row:
+        return ["docs/reference/compatibility.md: no `JoobQ (Core)` row in the versions table"]
+    documented = re.match(r"\s*(\d+\.\d+\.\d+)(?:,\s*tag `v(\d+\.\d+\.\d+)`)?", row[1])
+    if not documented or {documented[1], documented[2] or documented[1]} != {declared[1]}:
+        return [f"docs/reference/compatibility.md documents JoobQ (Core) {row[1].strip()}, shard.yml declares {declared[1]}"]
+    return []
+
+
 def check(root):
     docs = root / "docs"
     errors = []
     errors += gitbook_errors(root)
+    errors += compatibility_errors(root)
     summary = docs / "SUMMARY.md"
     if not summary.exists():
         return errors + ["missing docs/SUMMARY.md"]

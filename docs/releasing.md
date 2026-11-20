@@ -19,7 +19,8 @@ package registry.
 
 ## Prepare a release
 
-1. Choose a stable semantic version greater than the latest released version.
+1. Choose a stable semantic version greater than the latest released version. What a major, minor and patch
+   number promise, and how deprecations are announced, is the [compatibility policy](reference/compatibility.md).
 2. Update the top-level `version:` in `shard.yml` in a normal pull request. For
    example, change `0.5.4` to `0.5.5` for a patch release. The runtime `VERSION`
    reads this manifest, so no separate source constant needs editing.

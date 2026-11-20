@@ -52,7 +52,8 @@
   `Job.enqueue_at(span, ...)` is deprecated in favour of `Job.delay(for: span, ...)` (same result, it now calls it).
   The nine `JoobQ.load_*` wrappers and `JoobQ.find_config_file` are deprecated in favour of `JoobQ.initialize_config` and
   `JoobQ.initialize_config_with(:file | :yaml | :string | :sources | :cli_args | :env_overrides | :hybrid)`. They are
-  removed no sooner than the deprecation rule of the compatibility page allows (the first removal is 1.0 at the earliest).
+  removed no sooner than two minor releases and 90 days after the release that deprecates them (the deprecation rule of the
+  [compatibility page](docs/reference/compatibility.md)).
   Known callers outside this repository: none for these; `azu_cli`'s joobq initializer uses `initialize_config_with(:file, ...)`,
   which stays.
 - **Internal helpers are marked `:nodoc:`:** `JoobQ.reset_config` (JoobQUI calls it), `JoobQ::RedisStore#redis` (JoobQ Pro and
@@ -133,7 +134,7 @@
   workflow failures and anything matching the message saw. The message is yours again; the code is still on the
   error (`joobq_error_code`). Errors JoobQ raises itself keep the suffix.
 
-## 0.7.0 (MINOR)
+## 0.7.0
 
 ### Added
 
@@ -178,7 +179,7 @@
 - `QueueFactory.clear_queues_cache` does nothing now and goes in the next minor release. To rebuild a queue after
   editing `queue_configs`, delete it from `JoobQ.queues` and call `JoobQ.queues` again, or call `JoobQ.reset_config`.
 
-## 0.6.1 (PATCH)
+## 0.6.1
 
 ### Changed
 
@@ -190,7 +191,7 @@
   processing list, so FIFO order and crash recovery are unchanged; blocking connections are O(active queues). A
   non-Redis store, or a `Worker` run outside `Queue#start`, keeps the previous self-claiming behaviour.
 
-## 0.6.0 (MINOR)
+## 0.6.0
 
 ### Changed
 

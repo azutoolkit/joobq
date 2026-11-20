@@ -674,10 +674,17 @@ The JSON formatter preserves structured identifiers in `data` and application co
 4. Push to the branch (git push origin my-new-feature)
 5. Create a new Pull Request
 
+## Versioning and support
+
+JoobQ follows semantic versioning. The [public API](docs/reference/public-api.md) is frozen for 1.0, deprecations last at
+least two minor releases, and only the latest release receives fixes: see the
+[compatibility and support policy](docs/reference/compatibility.md).
+
 ## Security
 
 Report vulnerabilities privately, not in a public issue: see [SECURITY.md](SECURITY.md) for the address, what to
-include and what response to expect.
+include and what response to expect. Fixes ship in new releases and are announced with them
+([policy](docs/reference/compatibility.md#security-fixes)).
 
 ## Testing
 

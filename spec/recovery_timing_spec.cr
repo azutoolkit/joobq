@@ -9,7 +9,6 @@ module JoobQ
 
     after_each do
       store.owner_ttl = RedisStore::DEFAULT_OWNER_TTL
-      JoobQ.config.reaper_interval = 30.seconds
       redis.del(Keys.queue(name), Keys.processing(name, crashed))
       redis.zrem(RedisStore::OWNERS, crashed)
     end
@@ -75,6 +74,62 @@ module JoobQ
         expect_raises(ConfigValidationError, /reaper_interval/) { config.validate_configuration }
       end
 
+      it "derives the reaper interval from a lowered owner_ttl, so lowering the TTL alone boots" do
+        config = Configure.new
+        config.owner_ttl = 10.seconds
+        config.reaper_interval.should eq(10.seconds)
+        config.effective_reaper_interval.should eq(10.seconds)
+        config.validate_configuration
+        config.owner_ttl = 100.seconds
+        config.reaper_interval.should eq(30.seconds) # the default is never raised by a longer TTL
+      end
+
+      it "keeps an existing reaper_interval above the default TTL booting: it is clamped, with a warning" do
+        config = Configure.new
+        config.reaper_interval = 60.seconds
+        logs = Log::MemoryBackend.new
+        Log.builder.bind("*", :warn, logs)
+        begin
+          config.validate_configuration
+          config.validate_recovery_timing
+        ensure
+          Log.builder.unbind("*", :warn, logs)
+        end
+        config.reaper_interval.should eq(60.seconds)
+        config.effective_reaper_interval.should eq(30.seconds)
+        logs.entries.count(&.message.includes?("reaper_interval")).should eq(2)
+      end
+
+      it "raises for an interval above the TTL only when both were set" do
+        config = Configure.new
+        config.reaper_interval = 20.seconds
+        config.owner_ttl = 10.seconds
+        expect_raises(ConfigValidationError, /reaper_interval.*owner_ttl/) { config.validate_recovery_timing }
+      end
+
+      it "sees a TTL set directly on the store" do
+        config = Configure.new
+        config.reaper_interval = 5.seconds
+        config.store.as(RedisStore).owner_ttl = 2.seconds
+        config.owner_ttl.should eq(2.seconds)
+        config.effective_reaper_interval.should eq(2.seconds)
+        config.validate_recovery_timing # clamped, not raised: the TTL was not set through the configuration
+      end
+
+      it "keeps the TTL of an assigned store unless the configuration's was set" do
+        config = Configure.new
+        custom = RedisStore.new
+        custom.owner_ttl = 12.seconds
+        config.store = custom
+        custom.owner_ttl.should eq(12.seconds)
+        config.owner_ttl.should eq(12.seconds)
+
+        config.owner_ttl = 9.seconds
+        other = RedisStore.new
+        config.store = other
+        other.owner_ttl.should eq(9.seconds)
+      end
+
       it "passes the setting to the store of the configuration" do
         config = Configure.new
         config.owner_ttl = 7.seconds
@@ -122,6 +177,15 @@ module JoobQ
       ensure
         ENV.delete("JOOBQ_OWNER_TTL")
         ENV.delete("JOOBQ_REAPER_INTERVAL")
+      end
+
+      it "refuses an environment override that is not a time span, with a ConfigValidationError" do
+        ENV["JOOBQ_OWNER_TTL"] = "soon"
+        expect_raises(ConfigValidationError, /JOOBQ_OWNER_TTL/) do
+          YamlConfigLoader.load_with_env_overrides(File.expand_path("../config/joobq.base.yml", __DIR__))
+        end
+      ensure
+        ENV.delete("JOOBQ_OWNER_TTL")
       end
 
       it "refuses a TTL that is not a time span" do

@@ -28,6 +28,13 @@
 
 ### Fixed
 
+- **`POST /joobq/jobs` fails loudly instead of answering 201 for a job it dropped (#48).** The route kept its shape
+  (`{queue, job_type, data}`) but fed the whole body to the lenient `Queue#add`, which parsed it as the job itself,
+  swallowed the error and returned nothing, so the client got `201` with an empty `job_id` and no job. It now uses the
+  strict `Queue#add!` with `data` as the job's JSON: a `data` that does not fit the job class, or a `job_type` that is
+  not the queue's, answers `422` and enqueues nothing; `job_id` is the stored job's id. The HTML escaping of `data`
+  (`&` became `&amp;`) is gone: arguments reach `perform` unchanged. `retries` and `delay` (validated before, ignored)
+  are applied; `priority` is still validated and has no effect. The route stays deprecated.
 - **Management API list limits are validated and capped (#54).** `GET /joobq/jobs/retrying?limit=N` and
   `/joobq/jobs/dead?limit=N` used `.max` where a cap was meant, so a reader token could make Redis return an unbounded
   number of entries, and `?limit=abc` or `?limit=-1` raised out of the handler. `limit` must now be an integer from 1 to

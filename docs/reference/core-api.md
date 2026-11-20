@@ -77,7 +77,7 @@ Off by default (`rest_api_enabled = false`). With it on, `forge` listens on `127
 | `GET` | `/joobq/jobs/retrying`, `/joobq/jobs/dead` | reader |
 | `GET` | `/joobq/errors/stats`, `/joobq/errors/recent`, `/joobq/errors/by-type`, `/joobq/errors/by-queue` | reader |
 | `GET` | `/joobq/pipeline/health`, `/joobq/pipeline/stats` | reader |
-| `POST` | `/joobq/jobs` (deprecated) | operator |
+| `POST` | `/joobq/jobs` (deprecated; `{queue, job_type, data, retries?, delay?}`, `422` when `job_type` or `data` do not fit the queue's job class) | operator |
 | `POST` | `/joobq/queues/:queue_name/reprocess` | operator |
 | `POST` | `/joobq/jobs/:job_id/retry` | operator |
 | `POST` | `/joobq/pipeline/stats/reset` | admin |

@@ -259,6 +259,23 @@ module JoobQ
     # Entries of the delayed set `GET /joobq/jobs/retrying` scans for retrying jobs, whatever `limit` is.
     RETRYING_SCAN_WINDOW = 1000
 
+    # Enqueues the job a `POST /joobq/jobs` body describes: its `data` object is the job's own JSON, with `retries` from
+    # the body when given, put on `queue` (or delayed by `delay` seconds). Raises `JSON::ParseException` or
+    # `JSON::SerializableError` when `data` does not fit the queue's job class, and then enqueues nothing. Returns the job id.
+    def self.enqueue_posted_job(queue : BaseQueue, payload : JSON::Any) : String
+      job = payload["data"].as_h.dup
+      if retries = payload["retries"]?
+        job["retries"] = retries
+        job["max_retries"] = retries
+      end
+
+      if delay = payload["delay"]?.try(&.as_i?)
+        queue.add_delayed(job.to_json, delay.seconds.from_now)
+      else
+        queue.add!(job.to_json)
+      end
+    end
+
     ENDPOINTS = {
       {method: "POST", path: "/joobq/jobs"} => ->(context : HTTP::Server::Context) do
         context.response.content_type = "application/json"
@@ -292,28 +309,35 @@ module JoobQ
           return
         end
 
-        # Sanitize job data
-        sanitized_payload = payload.as_h.dup
-        if data = sanitized_payload["data"]?
-          sanitized_payload["data"] = APIValidation.sanitize_job_data(data)
-        end
-
         begin
           queue_name = payload["queue"].to_s
           queue = JoobQ[queue_name]
 
-          # Enqueue the job
-          jid = queue.add(sanitized_payload.to_json)
+          unless queue.job_type == payload["job_type"].to_s
+            mismatch = APIValidation::ValidationResult.new(true)
+            mismatch.add_error("job_type", "Queue '#{queue_name}' runs #{queue.job_type} jobs, not #{payload["job_type"]}", payload["job_type"], "job_type_mismatch")
+            context.response.status_code = 422
+            context.response.print(mismatch.error_response.to_json)
+            return
+          end
+
+          # Strict enqueue: a payload that does not fit the queue's job class is refused here, not dropped after a 201
+          jid = APIHandler.enqueue_posted_job(queue, payload)
 
           response = {
             status:    "Job enqueued",
             queue:     queue_name,
-            job_id:    jid.to_s,
+            job_id:    jid,
             timestamp: Time.local.to_rfc3339,
           }
 
           context.response.status = HTTP::Status::CREATED
           context.response.print(response.to_json)
+        rescue ex : JSON::ParseException | JSON::SerializableError
+          unfit = APIValidation::ValidationResult.new(true)
+          unfit.add_error("data", "Job data does not fit the job class: #{ex.message.to_s.lines.first? || "invalid"}", nil, "invalid_job_data")
+          context.response.status_code = 422
+          context.response.print(unfit.error_response.to_json)
         rescue ex
           Log.error &.emit(
             "Error enqueuing job",

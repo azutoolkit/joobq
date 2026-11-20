@@ -516,34 +516,37 @@ Host: localhost:8080
 
 ### POST /joobq/jobs
 
-This endpoint allows users to enqueue jobs.
+Deprecated (it answers with a `Deprecation: true` header): prefer `JoobQ.enqueue` in your own authenticated code.
+The route enqueues a job and answers `201` with its id only when the job was stored.
 
 **Request:**
 
 ```http
 POST /joobq/jobs HTTP/1.1
 Host: localhost:8080
+Authorization: Bearer <operator token>
 Content-Type: application/json
-Content-Length: 175
 
 {
-    "jid": "a13324f4-bdd8-4cf5-b566-c0c9c312f68b",
-    "queue": "queue:test",
-    "retries": 3,
-    "expires": {{timestamp_plus_30}},
-    "status": "enqueued",
-    // Job initialization arguments
-    "x": 10
+  "queue": "example",
+  "job_type": "ExampleJob",
+  "data": {"x": 10},
+  "retries": 3,
+  "delay": 60
 }
 ```
+
+`queue` and `job_type` must name a queue and the job class it runs. `data` is the job's own JSON (its arguments,
+passed on unchanged). `retries` (0 to 10) and `delay` in seconds (0 to 86400) are optional. `priority` is validated and
+has no effect. `data` that does not fit the job class answers `422` and nothing is enqueued.
 
 **Response:**
 
 ```json
 {
   "status": "Job enqueued",
-  "queue": "default",
-  "job_id": "some-unique-job-id"
+  "queue": "example",
+  "job_id": "a13324f4-bdd8-4cf5-b566-c0c9c312f68b"
 }
 ```
 

@@ -105,7 +105,7 @@ module JoobQ
 
     @owner_heartbeat = BackgroundLoop.new("processing_owner")
     # Whether this process has published a heartbeat since it started it (a first beat has no predecessor to compare)
-    @beating = false
+    @beating = Atomic(Bool).new(false)
     @list_move_checked = Atomic(Bool).new(false)
     # Endpoint and timeouts kept so a queue dispatcher can mint its own dedicated blocking connection (a BLMOVE
     # holds its connection for the block, so it must not take one from the shared pool).
@@ -356,14 +356,20 @@ module JoobQ
       @owner_heartbeat.start do
         beat_owner
         redrive_retained
-        InFlight.retained.empty? ? owner_beat : REDRIVE_RETRY
+        heartbeat_pause
       end
+    end
+
+    # How soon the heartbeat looks again: the beat period, or sooner while retained copies wait to be re-driven (never
+    # later than the beat period, or a short TTL would lapse while the re-drive keeps failing).
+    def heartbeat_pause : Time::Span
+      InFlight.retained.empty? ? owner_beat : {REDRIVE_RETRY, owner_beat}.min
     end
 
     # Stops the heartbeat and drops this process's owner entry, so recovery on another process can reclaim this
     # process's lists at once rather than waiting out the TTL. A crash skips this and the entry lapses after the TTL.
     def stop_owner_heartbeat : Nil
-      @beating = false
+      @beating.set(false)
       @owner_heartbeat.stop
       redis.zrem(OWNERS, @owner_id)
     rescue ex
@@ -384,8 +390,8 @@ module JoobQ
       now = redis_now_ms
       previous = redis.zscore(OWNERS, @owner_id).try(&.to_f.to_i64)
       redis.zadd(OWNERS, now, @owner_id)
-      warn_lapsed(previous.try { |last| now - last }) if @beating && (previous.nil? || now - previous > @owner_ttl.total_milliseconds)
-      @beating = true
+      warn_lapsed(previous.try { |last| now - last }) if @beating.get && (previous.nil? || now - previous > @owner_ttl.total_milliseconds)
+      @beating.set(true)
     end
 
     private def warn_lapsed(silent_ms : Int64?) : Nil

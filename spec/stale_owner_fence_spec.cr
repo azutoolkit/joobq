@@ -127,6 +127,20 @@ module JoobQ
         stat.call("processed").should eq(0)
       end
 
+      it "refuses a late batch cleanup too, and counts a held one (cleanup_jobs_batch)" do
+        stale, _, raw = claim_as_stale.call
+        second = FenceJob.new(name).to_json
+        redis.rpush(Keys.queue(name), second)
+        second = stale.dequeue(name, FenceJob).not_nil!
+        stale.cleanup_jobs_batch([second], name)
+        stat.call("processed").should eq(1)
+        redis.llen(Keys.processing(name, stale_id)).should eq(1) # only the settled copy left the list
+
+        reclaim.call(stale)
+        stale.cleanup_jobs_batch([raw], name)
+        stat.call("processed").should eq(1) # the reclaimed one counted nothing
+      end
+
       it "logs a warning" do
         stale, _, raw = claim_as_stale.call
         reclaim.call(stale)
@@ -232,6 +246,21 @@ module JoobQ
         end
         redis.zremrangebyscore(Keys::DEAD_LETTER, "-inf", "+inf")
         redis.del(Keys::DEAD_LETTER_COUNTS)
+      end
+    end
+
+    describe "the heartbeat pause" do
+      it "never exceeds the beat period, even while retained copies wait to be re-driven" do
+        short = RedisStore.new
+        short.owner_ttl = 1.second
+        InFlight.clear
+        token = InFlight.claimed(name, ["x"]).first
+        InFlight.begin_run(token)
+        InFlight.finishing(token)
+        InFlight.done(token, retain: true)
+        short.heartbeat_pause.should be <= short.owner_beat
+        InFlight.clear
+        short.heartbeat_pause.should eq(short.owner_beat)
       end
     end
 

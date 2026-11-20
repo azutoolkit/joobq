@@ -146,33 +146,29 @@ module JoobQ
       raise ex
     end
 
-    # Batch job cleanup for high performance
+    # Batch job cleanup: each job is settled like `RedisStore#cleanup_job` (`RedisStore::SETTLE`): its copy is taken off
+    # this process's list (or the legacy shared list) and counted processed only if it was there; a copy another
+    # process reclaimed counts nothing (logged).
     def cleanup_jobs_batch(job_jsons : Array(String), queue_name : String) : Nil
       return if job_jsons.empty?
 
-      owned_key = Keys.processing(queue_name, @owner_id)
-      legacy_key = Keys.processing(queue_name)
-
-      @redis.pipelined do |pipe|
-        # Remove from this process's list and the legacy shared list (a migrated or seeded job)
-        job_jsons.each do |job_json|
-          pipe.lrem(owned_key, 0, job_json)
-          pipe.lrem(legacy_key, 0, job_json)
-        end
-
-        # Update statistics
-        pipe.hincrby(Keys.stat("processed"), queue_name, job_jsons.size)
-        pipe.hincrby(Keys.stat("total_processed"), "global", job_jsons.size)
+      keys = [Keys.processing(queue_name, @owner_id), Keys.processing(queue_name), Keys.stat("processed"), Keys.stat("total_processed"),
+              Keys.stat("completed"), Keys.stat("total_completed")]
+      results = @redis.pipelined do |pipe|
+        job_jsons.each { |job_json| pipe.command(["EVAL", RedisStore::SETTLE, keys.size.to_s] + keys + [job_json, queue_name, "0"]) }
       end
+      refused = results.count { |result| result == 0 }
+      Log.warn &.emit("Another process reclaimed jobs of this batch after this process's heartbeat lapsed; they are not counted again",
+        queue: queue_name, owner: @owner_id, count: refused) if refused > 0
 
-      track_pipeline_operation(job_jsons.size + 2, true) # +2 for stats updates
+      track_pipeline_operation(job_jsons.size, true)
 
       Log.debug &.emit("Batch job cleanup successful",
         queue: queue_name,
         job_count: job_jsons.size
       )
     rescue ex
-      track_pipeline_operation(job_jsons.size + 2, false)
+      track_pipeline_operation(job_jsons.size, false)
       Log.error &.emit("Error in batch job cleanup",
         queue: queue_name,
         job_count: job_jsons.size,

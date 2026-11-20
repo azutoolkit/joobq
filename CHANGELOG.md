@@ -43,7 +43,28 @@
   `config.redact_api_payloads = false`. Redaction goes by name: a secret under another name stays visible, so seal it
   with `encrypted_property` (the API never opens a sealed value).
 
+### Changed (public API for 1.0, #43)
+
+- **The frozen public API is listed** on [docs/reference/public-api.md](docs/reference/public-api.md), and
+  `spec/public_surface_spec.cr` reads that page and fails when a listed member does not exist.
+- **`JoobQ.enqueue(job)` is the way to enqueue a job instance** (`JoobQ.enqueue(queue_name, json)` is unchanged).
+  `JoobQ.add(job)` is deprecated (`@[Deprecated]`, still works); it now takes a `JoobQ::Job` (it took any value).
+  `Job.enqueue_at(span, ...)` is deprecated in favour of `Job.delay(for: span, ...)` (same result, it now calls it).
+  The nine `JoobQ.load_*` wrappers and `JoobQ.find_config_file` are deprecated in favour of `JoobQ.initialize_config` and
+  `JoobQ.initialize_config_with(:file | :yaml | :string | :sources | :cli_args | :env_overrides | :hybrid)`. They are
+  removed no sooner than the deprecation rule of the compatibility page allows (the first removal is 1.0 at the earliest).
+  Known callers outside this repository: none for these; `azu_cli`'s joobq initializer uses `initialize_config_with(:file, ...)`,
+  which stays.
+- **Internal helpers are marked `:nodoc:`:** `JoobQ.reset_config` (JoobQUI calls it), `JoobQ::RedisStore#redis` (JoobQ Pro and
+  JoobQUI call it), `JoobQ::MiddlewarePipeline`, `Configure#middleware_pipeline`, `Configure.load_*`, `JoobQ::YamlConfigLoader`
+  and `Job#__secret_values`. They keep working; they are not part of the frozen API.
+- **`JoobQ.scheduler` is removed.** It called `Scheduler.instance`, which does not exist, and compiled only because nothing called
+  it; a caller now fails to compile instead of at the first call. Build schedulers with `config.scheduler { ... }`.
+
 ### Fixed
+
+- **`register_job` outside the `JoobQ` namespace compiled to an unknown constant** (`QueueFactory`); it now names
+  `::JoobQ::QueueFactory`, so `JoobQ.configure { register_job MyJob }` works from application code (#43).
 
 - **`GET /joobq/jobs/retrying` listed nothing (#55).** It compared the job status with `"Retrying"`, but jobs serialize it as
   `"retrying"`, so the route always answered an empty list. The comparison now ignores case.

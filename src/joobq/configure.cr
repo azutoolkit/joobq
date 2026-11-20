@@ -171,6 +171,7 @@ module JoobQ
       Middleware::Timeout.new,
     ] of Middleware
 
+    # :nodoc:
     getter middleware_pipeline : MiddlewarePipeline do
       MiddlewarePipeline.new(middlewares)
     end
@@ -259,7 +260,9 @@ module JoobQ
       error_monitor.notify_alert = notify_alert if notify_alert
     end
 
-    # YAML configuration loading methods
+    # YAML configuration loading methods: the helpers behind `JoobQ.initialize_config_with`.
+    #
+    # :nodoc:
     def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure
       if path
         YamlConfigLoader.load_with_env_overrides(path, env)
@@ -269,6 +272,8 @@ module JoobQ
     end
 
     # Hybrid configuration - YAML + programmatic
+    #
+    # :nodoc:
     def self.load_hybrid(yaml_path : String? = nil, &)
       # Start with YAML configuration
       config = if yaml_path
@@ -284,11 +289,15 @@ module JoobQ
     end
 
     # Load from multiple YAML sources with merging
+    #
+    # :nodoc:
     def self.load_from_yaml_sources(sources : Array(String)) : Configure
       YamlConfigLoader.load_from_sources(sources)
     end
 
     # Load from CLI arguments
+    #
+    # :nodoc:
     def self.load_from_cli_args(args : Array(String)) : Configure
       YamlConfigLoader.load_from_cli_args(args)
     end
@@ -342,7 +351,7 @@ module JoobQ
     # ```
     macro register_job(job_class)
       job_registry.register({{job_class.id}})
-      QueueFactory.register_job_type({{job_class.id}})
+      ::JoobQ::QueueFactory.register_job_type({{job_class.id}})
     end
   end
 end

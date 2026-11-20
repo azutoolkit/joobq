@@ -53,6 +53,7 @@
   * [Open Source vs Pro vs JoobQUI feature matrix](reference/feature-matrix.md)
   * [Configuration](reference/configuration.md)
   * [Core API](reference/core-api.md)
+  * [Public API](reference/public-api.md)
   * [Error codes](reference/error-codes.md)
   * [Pro API](reference/pro-api.md)
   * [Workflow DSL](reference/workflow-dsl.md)

@@ -17,6 +17,7 @@ Reference pages are tables that mirror the code at the versions on the [compatib
 * [Configuration](configuration.md) · Core · Pro
 * [Configuration and environment variables](https://joobq-website.onrender.com/docs/reference/configuration-and-env-vars) · JoobQUI
 * [Core API](core-api.md) · Core
+* [Public API](public-api.md) · Core
 * [Error codes](error-codes.md) · Core
 
 ## Advanced

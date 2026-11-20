@@ -408,7 +408,6 @@ EmailJob.new(email_address: "john.doe@example.com").perform
 
 # Delayed
 EmailJob.delay(for: 1.hour, email_address: "john.doe@example.com")
-EmailJob.enqueue_at(time: 3.minutes.from_now, email_address: "john.doe@example.com")
 
 # Recurring at given interval
 EmailJob.schedule(every: 1.second, email_address: "john.doe@example.com")

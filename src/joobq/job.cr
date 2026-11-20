@@ -79,16 +79,11 @@ module JoobQ
   #
   # #### Delay and Scheduling
   #
-  # - `enqueue_at(time : Time::Span, **args)`: Enqueues a job to be processed after a specified delay.
+  # - `delay(for wait_time : Time::Span, **args)`: Enqueues a job to be processed after a specified delay
+  #   (`enqueue_at` is a deprecated alias).
   #
   # ```
-  # ExampleJob.enqueue_at(1.minute, param: "value")
-  # ```
-  #
-  # - `delay(for wait_time : Time::Span, **args)`: Delays job execution by a specified timespan.
-  #
-  # ```
-  # ExampleJob.delay(2.minutes, param: "value")
+  # ExampleJob.delay(for: 2.minutes, param: "value")
   # ```
   #
   # - `schedule(every : Time::Span, **args)`: Schedules a recurring job to run at a specified interval.
@@ -153,6 +148,8 @@ module JoobQ
 
       # The plain values of this job's encrypted properties (see `JoobQ::Encryption`); empty, and free, for a job
       # without any. Used to keep them out of the errors the library records.
+      #
+      # :nodoc:
       def __secret_values : Array(String)
         values = [] of String
         \{% for iv in @type.instance_vars %}
@@ -220,7 +217,7 @@ module JoobQ
       # TestJob.enqueue(x: 1)
       # ```
       def self.enqueue(**args)
-        JoobQ.add new(**args)
+        JoobQ.enqueue new(**args)
       end
 
       # Execute the job immediately does not enqueue the job
@@ -241,20 +238,15 @@ module JoobQ
         new(**args).perform
       end
 
-      # Delay a job for a specific time span and enqueue it
-      # ```
-      # TestJob.enqueue_at(1.minute, x: 1)
-      # ```
+      # Same as `delay`, with the span as the first argument.
+      @[Deprecated("Use delay(for: span, ...)")]
       def self.enqueue_at(time : Time::Span, **args)
-        job = new(**args)
-        job.scheduled!
-        JoobQ::DelayedJobScheduler.new.delay(job: job, delay_time: time)
-        job.jid
+        delay(time, **args)
       end
 
-      # Delay a job for a specific time span and enqueue it
+      # Delay a job for a specific time span and enqueue it; returns its job id
       # ```
-      # TestJob.delayed(time: 1.minute, x: 1)
+      # TestJob.delay(for: 1.minute, x: 1)
       # ```
       def self.delay(for wait_time : Time::Span, **args)
         job = new(**args)
@@ -276,6 +268,8 @@ module JoobQ
     abstract def perform
 
     # See the override that `included` defines.
+    #
+    # :nodoc:
     def __secret_values : Array(String)
       [] of String
     end

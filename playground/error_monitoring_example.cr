@@ -67,7 +67,7 @@ queue.start
 puts "Adding failing jobs..."
 (1..7).each do |i|
   job = FailingJob.new(i)
-  JoobQ.add(job)
+  JoobQ.enqueue(job)
   puts "  Added FailingJob with x = #{i}"
 end
 
@@ -75,7 +75,7 @@ end
 puts "Adding successful jobs..."
 (1..3).each do |i|
   job = SuccessfulJob.new(i)
-  JoobQ.add(job)
+  JoobQ.enqueue(job)
   puts "  Added SuccessfulJob with x = #{i}"
 end
 
@@ -129,7 +129,7 @@ JoobQ.error_monitor.alert_thresholds["error"] = 3
 puts "Adding more errors to trigger alerts..."
 (8..10).each do |i|
   job = FailingJob.new(i)
-  JoobQ.add(job)
+  JoobQ.enqueue(job)
 end
 
 sleep 2.seconds

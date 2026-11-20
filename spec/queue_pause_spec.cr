@@ -16,7 +16,7 @@ module JoobQ
     it "does not process jobs while paused, then drains after resume" do
       queue = Queue(ExampleJob).new("example", 2)
       queue.pause!
-      JoobQ.add ExampleJob.new(1)
+      JoobQ.enqueue ExampleJob.new(1)
       queue.start
       eventually { queue.running_workers == 2 }.should be_true
       sleep 300.milliseconds # several worker loop iterations
@@ -37,7 +37,7 @@ module JoobQ
       Events.subscribe(sink)
       begin
         queue = Queue(ExampleJob).new("example", 1)
-        JoobQ.add ExampleJob.new(7)
+        JoobQ.enqueue ExampleJob.new(7)
         queue.start
 
         types = [] of String
@@ -54,7 +54,7 @@ module JoobQ
       Events.subscribe(sink)
       begin
         queue = Queue(FailJob).new("failed", 1)
-        JoobQ.add FailJob.new
+        JoobQ.enqueue FailJob.new
         queue.start
 
         types = [] of String

@@ -171,8 +171,8 @@ module JoobQ
         poison = AuditMixedJob.new(true)
         poison.retries = 2
         poison.max_retries = 2
-        JoobQ.add(poison)
-        20.times { JoobQ.add(AuditMixedJob.new) }
+        JoobQ.enqueue(poison)
+        20.times { JoobQ.enqueue(AuditMixedJob.new) }
         worker = Worker(AuditMixedJob).new(1, Channel(Nil).new, queue)
         worker.run
 
@@ -194,7 +194,7 @@ module JoobQ
       it "a payload that is not JSON is dead-lettered as a stub and the next job runs" do
         queue = Queue(AuditMixedJob).new("audit_mixed", 1)
         redis.rpush(JoobQ::Keys.queue("audit_mixed"), %({"jid": "not-a-job))
-        JoobQ.add(AuditMixedJob.new)
+        JoobQ.enqueue(AuditMixedJob.new)
         worker = Worker(AuditMixedJob).new(1, Channel(Nil).new, queue)
         worker.run
 
@@ -271,8 +271,8 @@ module JoobQ
 
       it "has no enqueue deduplication: the same job enqueued twice is queued twice" do
         job = ExampleJob.new(7)
-        JoobQ.add(job)
-        JoobQ.add(job)
+        JoobQ.enqueue(job)
+        JoobQ.enqueue(job)
         redis.lrange(JoobQ::Keys.queue("example"), 0, -1).count { |raw| JSON.parse(raw.to_s)["jid"] == job.jid.to_s }.should eq(2)
       end
     end

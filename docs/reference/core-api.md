@@ -1,5 +1,5 @@
 ---
-description: The public Crystal API of JoobQ Core 0.5.6 (jobs, queues, workers, dead letters, lifecycle) and its HTTP management routes.
+description: The public Crystal API of JoobQ Core (the frozen members are listed on [Public API](public-api.md); jobs, queues, workers, dead letters, lifecycle) and its HTTP management routes.
 ---
 
 # Core API
@@ -13,7 +13,6 @@ description: The public Crystal API of JoobQ Core 0.5.6 (jobs, queues, workers, 
 | `enqueue` | `self.enqueue(**args) : String` | Builds the job with `args` and pushes it to its queue; returns the `jid` |
 | `batch_enqueue` | `self.batch_enqueue(jobs : Array(self), batch_size = 1000) : Nil` | Pipelined enqueue; `batch_size` must be 1 to 1000 and is only validated |
 | `delay` | `self.delay(for wait_time : Time::Span, **args) : UUID` | One job, due after `wait_time` |
-| `enqueue_at` | `self.enqueue_at(time : Time::Span, **args) : UUID` | Same as `delay` (takes a span) |
 | `schedule` | `self.schedule(every : Time::Span, **args)` | Calls `perform` every span in this process; no queue, retries or dead letter |
 | `perform` | `self.perform(**args)` / `abstract def perform` | Runs the job now, in this process |
 | properties | `jid : UUID`, `queue : String`, `retries : Int32`, `max_retries : Int32`, `expires : Int64` (Unix ms), `status : Status`, `error` | Stored with your own properties as JSON |
@@ -25,10 +24,15 @@ description: The public Crystal API of JoobQ Core 0.5.6 (jobs, queues, workers, 
 | Member | Signature | Description |
 | --- | --- | --- |
 | `configure` | `configure(&)` | Yields the `JoobQ::Configure` instance (see [Configuration](configuration.md)) |
+| `config` | `: JoobQ::Configure` | The configuration in effect; loads the YAML search result on first use |
+| `initialize_config` | `: Nil` | Loads the YAML configuration found by the search order |
+| `initialize_config_with` | `(:file \| :yaml \| :string \| :sources \| :cli_args \| :env_overrides, *args)`, `(:hybrid, *args) { \|config\| }` | Loads a configuration from the named source; does nothing once a configuration is set |
+| `set_config` | `(config : JoobQ::Configure) : Nil` | Installs a configuration you built |
+| `store`, `error_monitor` | `: JoobQ::Store`, `: JoobQ::ErrorMonitor` | The configured store and error monitor |
 | `forge` | `forge(trap_signals = true, shutdown_timeout = 15.seconds)` | Starts schedulers, the delayed-job mover, the expiry reaper, every queue and (if enabled) the management API; with `trap_signals` it blocks and handles SIGTERM, SIGINT, SIGHUP |
 | `shutdown` | `shutdown(timeout = 15.seconds) : Bool` | Stops the API, schedulers and queues, waits for running jobs, requeues those still running at the deadline; `false` if already shut down |
 | `abandoned_jobs` | `: Int32` | Jobs put back on their queue by the last shutdown |
-| `enqueue` | `enqueue(queue_name : String, json : String) : String` | Enqueues raw JSON on a configured queue; raises `JoobQ::UnknownQueue` |
+| `enqueue` | `enqueue(queue_name : String, json : String) : String`, `enqueue(job : Job) : String` | Enqueues raw JSON on a configured queue (raises `JoobQ::UnknownQueue`), or a job instance on its own queue |
 | `queues` | `: Hash(String, BaseQueue)` | The one queue registry, `JoobQ.config.queues`, after creating the YAML-configured queues missing from it. Engines add a queue with `JoobQ.queues[name] = queue`; it is not started for you, and the `Hash` is not synchronized (one writer) |
 | `[]` | `JoobQ[name]` | A registered queue: `JoobQ.queues[name]` |
 | exit codes | `EXIT_CLEAN = 0`, `EXIT_ABANDONED = 3` | Exit status after a signal; `1` on a second signal more than 1 s after the first |

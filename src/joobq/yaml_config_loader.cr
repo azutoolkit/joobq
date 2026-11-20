@@ -17,7 +17,9 @@ module JoobQ
     joobq_error_code "JQ-105"
   end
 
-  # YAML configuration loader for JoobQ
+  # YAML configuration loader for JoobQ. Use `JoobQ.initialize_config` / `JoobQ.initialize_config_with`.
+  #
+  # :nodoc:
   class YamlConfigLoader
     # Configuration file search paths (in order of precedence)
     DEFAULT_SEARCH_PATHS = [

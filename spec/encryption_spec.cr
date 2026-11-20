@@ -246,7 +246,7 @@ module JoobQ
         done = Channel(Nil).new
         worker = Worker(SecretJob).new(1, done, queue)
 
-        JoobQ.add SecretJob.new(1, SECRET_TOKEN, SECRET_NOTE)
+        JoobQ.enqueue SecretJob.new(1, SECRET_TOKEN, SECRET_NOTE)
         redis_dump(redis).should_not contain(SECRET_TOKEN)
         redis_dump(redis).should contain("jqe1:a1:")
 
@@ -265,7 +265,7 @@ module JoobQ
         done = Channel(Nil).new
         worker = Worker(SecretJob).new(1, done, queue)
 
-        JoobQ.add SecretJob.new(1, SECRET_TOKEN)
+        JoobQ.enqueue SecretJob.new(1, SECRET_TOKEN)
         worker.run
         eventually { SecretJob.performed.size == 1 && DeadLetterQueue.new(redis).count == 1 }.should be_true
         worker.terminate
@@ -278,7 +278,7 @@ module JoobQ
       it "dead-letters a job whose key is gone, as the job itself, and redrives it when the key is back" do
         JoobQ.reset
         job = SecretJob.new(1, SECRET_TOKEN)
-        JoobQ.add job
+        JoobQ.enqueue job
 
         JoobQ.config.payload_encryption KEY_B # the key that sealed the job is gone
         queue = Queue(SecretJob).new("secrets", 1)
@@ -308,7 +308,7 @@ module JoobQ
 
       it "leaves a job in its queue, not the dead letter set, when the process has no keys" do
         JoobQ.reset
-        JoobQ.add SecretJob.new(1, SECRET_TOKEN)
+        JoobQ.enqueue SecretJob.new(1, SECRET_TOKEN)
         JoobQ.config.payload_keys = nil
         Encryption.reset_env_keys
         Encryption.key_backoff = 100.milliseconds
@@ -361,7 +361,7 @@ module JoobQ
         job = SecretJob.new(1, SECRET_TOKEN)
         job.retries = 2
         job.max_retries = 2
-        JoobQ.add job
+        JoobQ.enqueue job
         worker.run
         eventually { redis.zcard(RedisStore::DELAYED_SET) >= 1 }.should be_true
         worker.terminate
@@ -409,7 +409,7 @@ module JoobQ
         job = SecretJob.new(1, SECRET_TOKEN)
         job.retries = 0
         job.max_retries = 1
-        JoobQ.add job
+        JoobQ.enqueue job
         worker.run
         eventually { DeadLetterQueue.new(redis).count >= 1 && JoobQ.store.processing_queue_size("secrets") == 0 }.should be_true
         worker.terminate
@@ -461,7 +461,7 @@ module JoobQ
             job.retries = 0
             job.max_retries = 1
             worker = Worker(SecretJob).new(1, Channel(Nil).new, Queue(SecretJob).new("secrets", 1))
-            JoobQ.add job
+            JoobQ.enqueue job
             worker.run
             eventually { DeadLetterQueue.new(redis).count == 1 }.should be_true
             worker.terminate
@@ -512,7 +512,7 @@ module JoobQ
         begin
           queue = Queue(SecretJob).new("secrets", 1)
           worker = Worker(SecretJob).new(1, Channel(Nil).new, queue)
-          JoobQ.add SecretJob.new(1, SECRET_TOKEN)
+          JoobQ.enqueue SecretJob.new(1, SECRET_TOKEN)
           worker.run
           seen = [] of String
           spawn { loop { seen << sink.received.receive.to_json } }

@@ -39,6 +39,16 @@ class FenceJob
   end
 end
 
+# Specs only: an exception after the retry was stored, as a failing sink or log line would raise
+module JoobQ::Events
+  class_property spec_raise_on : String? = nil
+
+  def self.emit(type : String, & : -> _) : Nil
+    raise "boom after the write" if type == @@spec_raise_on
+    previous_def { yield }
+  end
+end
+
 module JoobQ
   describe "a stale owner" do
     store = JoobQ.store.as(RedisStore)
@@ -185,6 +195,37 @@ module JoobQ
         redis.llen(Keys.processing(name, stale_id)).should eq(0) # the same step took the claim copy off the list
         stat.call("processed").should eq(1)
         stale.redrive_one(name, raw).should eq(0) # so there is nothing to re-drive if the worker's cleanup is lost
+        InFlight.applied?(token).should be_true
+      end
+
+      it "still answers true, and keeps the claim applied, when an exception follows the stored retry" do
+        stale, job, raw = claim_as_stale.call
+        token = claim_in_flight.call(stale, raw)
+        Events.spec_raise_on = "job.retrying"
+        begin
+          stale.move_to_retry(job, name, 1000_i64).should be_true # else the Retry middleware would try a dead letter
+        ensure
+          Events.spec_raise_on = nil
+        end
+        InFlight.applied?(token).should be_true
+        stat.call("retries").should eq(1)
+      end
+
+      it "keeps the applied mark through settle, fence and abandon_all" do
+        stale, _, raw = claim_as_stale.call
+        token = claim_in_flight.call(stale, raw)
+        InFlight.applied
+        InFlight.settle.should be_true # the catch-all rescue settles again after the outcome was applied
+        InFlight.applied?(token).should be_true
+        InFlight.fence
+        InFlight.applied?(token).should be_true
+      end
+
+      it "keeps the applied mark of a claim that shutdown abandons" do
+        stale, _, raw = claim_as_stale.call
+        token = claim_in_flight.call(stale, raw)
+        InFlight.applied
+        InFlight.abandon_all(settling: true)
         InFlight.applied?(token).should be_true
       end
 

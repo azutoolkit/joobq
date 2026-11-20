@@ -7,7 +7,10 @@ import subprocess
 import tarfile
 import tempfile
 
+# SHA-256 of each release tarball, from https://github.com/redis/redis-hashes. CI tests the oldest Redis JoobQ supports
+# (6.2, the first with LMOVE/BLMOVE), a 7.x and the newest: .github/workflows/ci.yml and docs/reference/compatibility.md.
 HASHES = {
+    '6.2.24': 'c3f112749c7cb108597713469cc9beed305e91f036fba313ce8dcbad829f5821',
     '7.4.12': '56588ee1648539556f2b6cf4e873e3734afbbe40fa952fec2fcd6b6d7dae2924',
     '8.0.6': '6d0a9913887a4972536f9da226f1575859c34d86354129163260a5f9c6bd4229',
 }

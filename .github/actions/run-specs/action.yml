@@ -1,0 +1,29 @@
+name: Run the specs and the Redis smokes
+description: Installs the shards, builds the pinned Redis, then runs the specs and the Redis restart, outage and crash-recovery smokes (the steps every specs leg shares).
+inputs:
+  redis:
+    description: Redis version (a key of HASHES in scripts/install_test_redis.py)
+    required: true
+  connection:
+    description: legacy (REDIS_HOST/REDIS_PORT) or url (REDIS_URL)
+    required: true
+runs:
+  using: composite
+  steps:
+    - run: shards install --frozen
+      shell: bash
+    - uses: ./.github/actions/pinned-redis
+      with:
+        version: ${{ inputs.redis }}
+    - name: Specs (no skips)
+      shell: bash
+      run: python3 scripts/run_integration.py ${{ inputs.connection == 'url' && '--url' || '' }}
+    - name: Redis restart smoke
+      shell: bash
+      run: python3 scripts/redis_restart_smoke.py
+    - name: Redis outage smoke (a live process re-drives retained copies)
+      shell: bash
+      run: python3 scripts/redis_outage_smoke.py
+    - name: Crash recovery smoke (SIGKILL a worker process; a second one recovers within TTL + reaper interval)
+      shell: bash
+      run: python3 scripts/crash_recovery_smoke.py

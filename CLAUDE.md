@@ -6,9 +6,9 @@ JoobQ is an enterprise-grade, high-performance asynchronous job queue system for
 
 - **Version:** 0.7.2
 - **License:** MIT
-- **Crystal:** 1.22.0+
+- **Crystal:** 1.22.0+ (CI tests 1.22.0, 1.22.1 and `latest`; `latest` is reported, not gating)
 - **Dependencies:** redis, cron_parser
-- **Redis:** 6.2+ (FIFO claims use `BLMOVE`/`LMOVE`; per-process recovery uses per-owner processing lists and a heartbeat sorted set); CI tests 8.0
+- **Redis:** 6.2+ (FIFO claims use `BLMOVE`/`LMOVE`; per-process recovery uses per-owner processing lists and a heartbeat sorted set); CI tests 6.2.24, 7.4.12 and 8.0.6 (`.github/workflows/ci.yml`; `.github/scripts/test_ci_matrix.py` keeps this line, the README and `docs/reference/compatibility.md` in step with it)
 
 ## Architecture Summary
 

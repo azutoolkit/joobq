@@ -39,6 +39,8 @@ with tempfile.TemporaryDirectory(prefix='joobq-integration-') as temporary:
     (root / 'ext.cnf').write_text('subjectAltName=DNS:localhost,IP:127.0.0.1\n')
     run(['openssl', 'x509', '-req', '-in', 'srv.csr', '-CA', 'ca.pem', '-CAkey', 'ca.key',
          '-CAcreateserial', '-out', 'srv.pem', '-days', '2', '-extfile', 'ext.cnf'], cwd=root)
+    version = run(['redis-server', '--version']).stdout.decode().strip()
+    redis_major = int(re.search(r'v=(\d+)\.', version)[1])
     processes, logs, ports = [], [], []
     child = None
     try:
@@ -54,8 +56,9 @@ with tempfile.TemporaryDirectory(prefix='joobq-integration-') as temporary:
             log = open(directory / 'redis.log', 'wb')
             logs.append(log)
             server = ['redis-server', '--bind', '127.0.0.1', '127.0.0.2', '--port', str(port if index < 2 else 0),
-                      '--dir', str(directory), '--save', '', '--appendonly', 'yes', '--appendfsync', 'always',
-                      '--enable-debug-command', 'yes']
+                      '--dir', str(directory), '--save', '', '--appendonly', 'yes', '--appendfsync', 'always']
+            if redis_major >= 7:  # 6.2 has DEBUG on and does not know the option
+                server += ['--enable-debug-command', 'yes']
             ping = ['redis-cli', '-h', '127.0.0.1', '-p', str(port)]
             if index == 2:
                 server += ['--tls-port', str(port), '--tls-cert-file', str(root / 'srv.pem'),
@@ -81,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix='joobq-integration-') as temporary:
                    JOOBQ_SPEC_TLS_CA_FILE=str(root / 'ca.pem'))
         if args.url:
             env['REDIS_URL'] = f'redis://127.0.0.1:{ports[0]}/0'
-        print(run(['redis-server', '--version']).stdout.decode().strip(), flush=True)
+        print(version, flush=True)
         print(f'Integration: {command}; workers={env.get("CRYSTAL_WORKERS", "default")}; url={args.url}', flush=True)
         child = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  text=True, start_new_session=True)

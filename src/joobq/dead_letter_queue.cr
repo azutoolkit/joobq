@@ -34,16 +34,19 @@ module JoobQ
       return added
     LUA
 
-    # `ADD` of one member, but only while the claimed copy (ARGV[1]) is still in this process's processing list
-    # (KEYS[3]) or the legacy shared list (KEYS[4]): a copy another process reclaimed is not dead-lettered by the old
-    # owner. Returns 1 when the member was written (or was already there), -1 when the copy is gone.
+    # `ADD` of one member that also takes the claimed copy (ARGV[1]) off this process's processing list (KEYS[3]) or the
+    # legacy shared list (KEYS[4]) and counts the job processed (KEYS[5], KEYS[6]; ARGV[4] the queue), in one step: a
+    # copy another process reclaimed is not dead-lettered by the old owner, and a cleanup lost afterwards has no copy
+    # left to re-drive. Returns 1 when the member was written (or was already there), -1 when the copy is gone.
     ADD_IF_HELD = QUEUE_OF + <<-LUA
-      if redis.call('LPOS', KEYS[3], ARGV[1]) == false and redis.call('LPOS', KEYS[4], ARGV[1]) == false then
-        return -1
-      end
+      local removed = redis.call('LREM', KEYS[3], 1, ARGV[1])
+      if removed == 0 then removed = redis.call('LREM', KEYS[4], 1, ARGV[1]) end
+      if removed == 0 then return -1 end
       if redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]) == 1 then
         redis.call('HINCRBY', KEYS[2], queue_of(ARGV[3]), 1)
       end
+      redis.call('HINCRBY', KEYS[5], ARGV[4], 1)
+      redis.call('HINCRBY', KEYS[6], 'global', 1)
       return 1
     LUA
 
@@ -137,10 +140,12 @@ module JoobQ
       redis.eval(ADD, [KEY, COUNTS], [score.to_s] + members).as(Int64)
     end
 
-    # Adds `member` only while `claimed` is still in one of the two processing lists; false when the copy is gone.
-    def self.add_if_held(redis : Redis::PooledClient, score : Int64, member : String, claimed : String,
+    # Adds `member` and takes `claimed` off the processing lists, counting the job processed (`ADD_IF_HELD`); false
+    # when the copy is gone.
+    def self.add_if_held(redis : Redis::PooledClient, score : Int64, member : String, claimed : String, queue_name : String,
                          own_list : String, legacy_list : String) : Bool
-      redis.eval(ADD_IF_HELD, [KEY, COUNTS, own_list, legacy_list], [claimed, score.to_s, member]) == 1
+      keys = [KEY, COUNTS, own_list, legacy_list, Keys.stat("processed"), Keys.stat("total_processed")]
+      redis.eval(ADD_IF_HELD, keys, [claimed, score.to_s, member, queue_name]) == 1
     end
 
     def count(queue : String? = nil) : Int64

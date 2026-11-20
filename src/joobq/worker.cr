@@ -247,7 +247,8 @@ module JoobQ
         else
           stored = false
           begin
-            stored = settle_outcome(job, keys_missing, outcome_stored, job_completed_successfully && !parsed_job.nil?)
+            # a retry or dead letter applied inside the middleware already took the copy off the list and counted the job
+            stored = InFlight.applied?(token) || settle_outcome(job, keys_missing, outcome_stored, job_completed_successfully && !parsed_job.nil?)
           ensure
             # one step: the claim is forgotten, or kept (retained) when the outcome could not be stored, so shutdown
             # never sees a moment with neither

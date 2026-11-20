@@ -512,8 +512,8 @@ module JoobQ
     # Inside a worker, only while this process still holds the claim (see `settle_claim`).
     def mark_as_dead(job : Job, expiration_time : Int64) : Nil
       member = job.to_json
-      if claimed = InFlight.current_job
-        dead_letter_if_held(claimed, member, job.queue, Time.utc.to_unix_ms)
+      if claim = InFlight.current
+        dead_letter_if_held(claim[1], member, claim[0], Time.utc.to_unix_ms)
       else
         DeadLetterQueue.add(redis, Time.utc.to_unix_ms, [member])
       end
@@ -719,7 +719,10 @@ module JoobQ
     end
 
     private def dead_letter_if_held(claimed : String, member : String, queue_name : String, score : Int64) : Bool
-      return true if DeadLetterQueue.add_if_held(redis, score, member, claimed, processing_queue(queue_name), legacy_processing_queue(queue_name))
+      if DeadLetterQueue.add_if_held(redis, score, member, claimed, queue_name, processing_queue(queue_name), legacy_processing_queue(queue_name))
+        InFlight.applied
+        return true
+      end
 
       fence_claim(queue_name, claimed)
       false
@@ -1020,11 +1023,10 @@ module JoobQ
       job_json = job.to_json
       retry_lock_key = Keys.retry_lock(job.jid)
 
-      # Persist the destination before acknowledging the source. If either write fails, retain a recoverable copy.
-      if claimed = InFlight.current_job
-        # In a worker: dead-letter only while this process still holds the claim, and leave the copy for the worker's
-        # cleanup (`settle_claim`), which removes it and counts the job.
-        return unless dead_letter_if_held(claimed, job_json, queue_name, current_timestamp)
+      if claim = InFlight.current
+        # In a worker: dead-letter only while this process still holds the claim, in one step that also takes the copy
+        # off the list and counts the job (nothing is left for a lost cleanup to re-drive).
+        return unless dead_letter_if_held(claim[1], job_json, queue_name, current_timestamp)
       else
         DeadLetterQueue.add(redis, current_timestamp, [job_json])
         remove_job_from_processing_by_id(job.jid.to_s, queue_name)
@@ -1058,10 +1060,10 @@ module JoobQ
       schedule_time = Time.local.to_unix_ms + delay_ms
       job_json = job.to_json
 
-      if claimed = InFlight.current_job
-        # In a worker: schedule the retry only while this process still holds the claim, in one step; the copy is left
-        # for the worker's cleanup (`settle_claim`), which removes it and counts the job. False once it was reclaimed.
-        return false unless retry_if_held(claimed, job_json, queue_name, schedule_time)
+      if claim = InFlight.current
+        # In a worker: schedule the retry only while this process still holds the claim, in one step that also takes the
+        # copy off the list and counts the job. False once it was reclaimed.
+        return false unless retry_if_held(claim[1], job_json, queue_name, schedule_time)
       else
         store_retry_then_release(job, job_json, queue_name, schedule_time)
       end
@@ -1084,21 +1086,29 @@ module JoobQ
       false
     end
 
-    # Schedules a retry, one step, only while the claimed copy is in this process's processing list (KEYS: own list,
-    # legacy list, delayed set, retries, total retries; ARGV: the claimed copy, the due time, the retry, the queue).
+    # Schedules a retry and takes the claimed copy off this process's processing list, in one step, only while the copy
+    # is there (KEYS: own list, legacy list, delayed set, retries, total retries, processed, total processed; ARGV: the
+    # claimed copy, the due time, the retry, the queue). One step, so a cleanup lost afterwards leaves no copy to
+    # re-drive (it would run the job a third time).
     RETRY_IF_HELD = <<-LUA
-      if redis.call('LPOS', KEYS[1], ARGV[1]) == false and redis.call('LPOS', KEYS[2], ARGV[1]) == false then
-        return 0
-      end
+      local removed = redis.call('LREM', KEYS[1], 1, ARGV[1])
+      if removed == 0 then removed = redis.call('LREM', KEYS[2], 1, ARGV[1]) end
+      if removed == 0 then return 0 end
       redis.call('ZADD', KEYS[3], ARGV[2], ARGV[3])
       redis.call('HINCRBY', KEYS[4], ARGV[4], 1)
       redis.call('HINCRBY', KEYS[5], 'global', 1)
+      redis.call('HINCRBY', KEYS[6], ARGV[4], 1)
+      redis.call('HINCRBY', KEYS[7], 'global', 1)
       return 1
     LUA
 
     private def retry_if_held(claimed : String, job_json : String, queue_name : String, schedule_time : Int64) : Bool
-      keys = [processing_queue(queue_name), legacy_processing_queue(queue_name), DELAYED_SET, Keys.stat("retries"), Keys.stat("total_retries")]
-      return true if redis.eval(RETRY_IF_HELD, keys, [claimed, schedule_time.to_s, job_json, queue_name]) == 1
+      keys = [processing_queue(queue_name), legacy_processing_queue(queue_name), DELAYED_SET, Keys.stat("retries"), Keys.stat("total_retries"),
+              Keys.stat("processed"), Keys.stat("total_processed")]
+      if redis.eval(RETRY_IF_HELD, keys, [claimed, schedule_time.to_s, job_json, queue_name]) == 1
+        InFlight.applied
+        return true
+      end
 
       fence_claim(queue_name, claimed)
       false

@@ -162,15 +162,16 @@ module JoobQ
 
       it "schedules the retry of a claim it still holds, in one step (control)" do
         stale, job, raw = claim_as_stale.call
-        claim_in_flight.call(stale, raw)
+        token = claim_in_flight.call(stale, raw)
 
         stale.move_to_retry(job, name, 1000_i64).should be_true
         mentions.call(RedisStore::DELAYED_SET, job.jid.to_s).should be_true
         stat.call("retries").should eq(1)
         InFlight.abandoned?.should be_false
-        redis.llen(Keys.processing(name, stale_id)).should eq(1) # the worker's cleanup removes and counts it
-        stale.cleanup_job(raw, name).should be_true
+        redis.llen(Keys.processing(name, stale_id)).should eq(0) # the same step took the claim copy off the list
         stat.call("processed").should eq(1)
+        stale.redrive_one(name, raw).should eq(0) # so there is nothing to re-drive if the worker's cleanup is lost
+        InFlight.applied?(token).should be_true
       end
 
       it "dead-letters nothing once the claim was reclaimed" do
@@ -193,6 +194,9 @@ module JoobQ
         stale.move_to_dead_letter(job, name)
         mentions.call(Keys::DEAD_LETTER, job.jid.to_s).should be_true
         stat.call("dead_letter").should eq(1)
+        stat.call("processed").should eq(1)
+        redis.llen(Keys.processing(name, stale_id)).should eq(0)
+        stale.redrive_one(name, raw).should eq(0)
       end
 
       it "writes no dead letter for an expired job whose claim was reclaimed (mark_as_dead)" do

@@ -113,6 +113,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
     - [Performance Comparison](#performance-comparison)
       - [Disclaimer](#disclaimer)
   - [Contributing](#contributing)
+  - [Security](#security)
   - [Testing](#testing)
   - [Deployment](#deployment)
   - [License](#license)
@@ -665,6 +666,11 @@ The JSON formatter preserves structured identifiers in `data` and application co
 3. Commit your changes (git commit -am 'Add some feature')
 4. Push to the branch (git push origin my-new-feature)
 5. Create a new Pull Request
+
+## Security
+
+Report vulnerabilities privately, not in a public issue: see [SECURITY.md](SECURITY.md) for the address, what to
+include and what response to expect.
 
 ## Testing
 

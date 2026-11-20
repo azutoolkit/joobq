@@ -1,11 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## 0.8.0
 
-This section holds breaking changes (the keyspace move, the `allow_plaintext_payloads` default, redacted API payloads, the
-removal of `JoobQ.scheduler`), so the next release is **0.8.0**, not a patch. Before it ships, JoobQ Pro's
-`joobq >= 0.7.2, < 0.8.0` constraint must be widened and the Core row of
-[docs/reference/compatibility.md](docs/reference/compatibility.md) changed to 0.8.0 (the docs check enforces the second).
+This release holds breaking changes (the keyspace move, the `allow_plaintext_payloads` default, redacted API payloads, the
+removal of `JoobQ.scheduler`), so it is a minor release under the [compatibility policy](docs/reference/compatibility.md),
+not a patch. JoobQ Pro and JoobQUI still declare `joobq < 0.8.0` / `= 0.7.2`: move them together with this release (they
+build keys by hand today, see the keyspace upgrade note below) before upgrading either of them to 0.8.0.
 
 ### Changed (CI)
 

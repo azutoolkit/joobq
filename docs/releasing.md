@@ -19,9 +19,9 @@ package registry.
 
 ## Prepare a release
 
-1. Choose a stable semantic version greater than the latest released version. The next one is **0.8.0**: the
-   changelog's *Unreleased* section holds breaking changes, which the policy puts in a minor release before 1.0. Before
-   that release, JoobQ Pro's `joobq >= 0.7.2, < 0.8.0` constraint must be widened (joobq-pro and joobqui move together with it), and the Core row of
+1. Choose a stable semantic version greater than the latest released version. A section of the changelog that holds
+   breaking changes is a minor release before 1.0 (0.8.0 was one); when a release breaks what JoobQ Pro or JoobQUI
+   rely on, their `joobq` constraint is widened in the same release train (joobq-pro and joobqui move together with it). The Core row of
    `docs/reference/compatibility.md` is changed to the new version in the same pull request (the docs check fails otherwise). What a major, minor and patch
    number promise, and how deprecations are announced, is the [compatibility policy](reference/compatibility.md).
 2. Update the top-level `version:` in `shard.yml` in a normal pull request. For

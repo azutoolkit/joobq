@@ -64,8 +64,9 @@ removal of `JoobQ.scheduler`), so the next release is **0.8.0**, not a patch. Be
   The nine `JoobQ.load_*` wrappers and `JoobQ.find_config_file` are deprecated. They return a `Configure` and install
   nothing, so they are not the same as `JoobQ.initialize_config` and `JoobQ.initialize_config_with(:file | :yaml | :string |
   :sources | :cli_args | :env_overrides | :hybrid)`, which load **and install** the configuration, return `nil` and do nothing
-  once a configuration is set. A caller that uses the returned object calls `JoobQ::Configure.load_*` or
-  `JoobQ::YamlConfigLoader.load_*` (still available, `:nodoc:`) and passes the result to `JoobQ.set_config`. They are
+  once a configuration is set. A caller that uses the returned object calls the frozen `JoobQ::Configure.load_from_yaml`, `.load_hybrid`,
+  `.load_from_yaml_sources` or `.load_from_cli_args` and passes the result to `JoobQ.set_config` (`load_from_string` and
+  `find_config_file` have no such replacement). They are
   removed no sooner than two minor releases and 90 days after the release that deprecates them (the deprecation rule of the
   [compatibility page](docs/reference/compatibility.md)).
   Known callers outside this repository: `JoobQ.add` is called by joobqui's `examples/conformance/crystal/worker.cr` (line 500) and
@@ -73,7 +74,7 @@ removal of `JoobQ.scheduler`), so the next release is **0.8.0**, not a patch. Be
   (`docs/how-to/jobs/background-jobs.md`) mention `enqueue_at`. Nothing in joobqui, joobq-pro or `azu_cli`'s `src` calls the other deprecated members; `azu_cli`'s joobq initializer uses
   `initialize_config_with(:file, ...)`, which stays.
 - **Internal helpers are marked `:nodoc:`:** `JoobQ.reset_config` (JoobQUI calls it), `JoobQ::RedisStore#redis` (JoobQ Pro and
-  JoobQUI call it), `JoobQ::MiddlewarePipeline`, `Configure#middleware_pipeline`, `Configure.load_*`, `JoobQ::YamlConfigLoader`
+  JoobQUI call it), `JoobQ::MiddlewarePipeline`, `Configure#middleware_pipeline`, `JoobQ::YamlConfigLoader`
   and `Job#__secret_values`. They keep working; they are not part of the frozen API.
 - **`JoobQ.scheduler` is removed.** It called `Scheduler.instance`, which does not exist, and compiled only because nothing called
   it; a caller now fails to compile instead of at the first call. Build schedulers with `config.scheduler { ... }`.

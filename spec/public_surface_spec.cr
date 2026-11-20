@@ -82,6 +82,19 @@ describe "the public surface of JoobQ" do
       end
     end
 
+    it "Configure.load_from_yaml_sources returns a configuration without installing it" do
+      file = File.tempfile("joobq-surface", ".yml") { |io| io.print "joobq:\n  settings:\n    timezone: \"Asia/Tokyo\"\n" }
+      begin
+        installed = JoobQ.config
+        loaded = JoobQ::Configure.load_from_yaml_sources([file.path])
+        loaded.should be_a(JoobQ::Configure)
+        loaded.time_location.name.should eq "Asia/Tokyo"
+        JoobQ.config.should be(installed)
+      ensure
+        file.delete
+      end
+    end
+
     it "keeps JoobQ.scheduler out: it called a Scheduler.instance that never existed" do
       {{ JoobQ.class.has_method?("scheduler") }}.should be_false
     end

@@ -42,6 +42,10 @@ Before 1.0 the freeze is a promise about the shape of 1.0: a 0.x release may sti
 | `JoobQ.initialize_config` | Load the YAML configuration found by the search order in [Configuration](configuration.md) |
 | `JoobQ.initialize_config_with` | Load it from a given source: `:file`, `:yaml`, `:string`, `:sources`, `:cli_args`, `:env_overrides` or `:hybrid` |
 | `JoobQ.set_config` | Install a `JoobQ::Configure` you built |
+| `JoobQ::Configure.load_from_yaml` | Load and return a `Configure` from a YAML file (with the environment's override file) or the search order, without installing it |
+| `JoobQ::Configure.load_hybrid` | The same from a file or the search order, then yields it for programmatic overrides |
+| `JoobQ::Configure.load_from_yaml_sources` | Merge several YAML files into a returned `Configure` |
+| `JoobQ::Configure.load_from_cli_args` | Build a returned `Configure` from command-line arguments |
 | `JoobQ.forge` | Start schedulers, queues and the management API; handles signals |
 | `JoobQ.shutdown` | Stop gracefully |
 | `JoobQ.abandoned_jobs` | Jobs put back by the last shutdown |
@@ -120,13 +124,13 @@ Still callable; the compiler warns at each call site. Removed no sooner than the
 | --- | --- |
 | `JoobQ.add` | `JoobQ.enqueue(job)` |
 | `Job.enqueue_at` | `Job.delay(for: span, ...)` |
-| `JoobQ.load_from_yaml`, `JoobQ.load_hybrid`, `JoobQ.load_from_yaml_sources`, `JoobQ.load_from_cli_args`, `JoobQ.load_auto`, `JoobQ.load_from_file`, `JoobQ.load_from_string`, `JoobQ.load_with_env_overrides`, `JoobQ.find_config_file` | These return a `Configure` and install nothing. To load **and install**, call `JoobQ.initialize_config` or `JoobQ.initialize_config_with` (it returns `nil` and does nothing once a configuration is set). To keep using the returned `Configure`, call `JoobQ::Configure.load_*` (`load_from_yaml`, `load_hybrid`, `load_from_yaml_sources`, `load_from_cli_args`) or `JoobQ::YamlConfigLoader.load_*` and pass it to `JoobQ.set_config`; those two are `:nodoc:` helpers that stay available |
+| `JoobQ.load_from_yaml`, `JoobQ.load_hybrid`, `JoobQ.load_from_yaml_sources`, `JoobQ.load_from_cli_args`, `JoobQ.load_auto`, `JoobQ.load_from_file`, `JoobQ.load_from_string`, `JoobQ.load_with_env_overrides`, `JoobQ.find_config_file` | These return a `Configure` and install nothing. To load **and install**, call `JoobQ.initialize_config` or `JoobQ.initialize_config_with` (it returns `nil` and does nothing once a configuration is set). To keep the returned `Configure`, call the frozen `JoobQ::Configure.load_from_yaml`, `.load_hybrid`, `.load_from_yaml_sources` or `.load_from_cli_args` and pass the result to `JoobQ.set_config`. `load_from_string` and `find_config_file` have no non-installing replacement (write the YAML to a file for the first) |
 | `POST /joobq/jobs` | `Job.enqueue`, or `JoobQ.enqueue(queue, json)` |
 
 ## Not covered
 
 - **Preview:** `JoobQ::Delivery::Runtime` and the rest of `JoobQ::Delivery`, and the workflow pages of JoobQ Pro marked Preview.
-- **Internal:** anything marked `:nodoc:` in the source or absent from this page, among them `JoobQ.reset_config`, `JoobQ::MiddlewarePipeline`, `JoobQ::RedisStore#redis`, `JoobQ::YamlConfigLoader`, `JoobQ::Configure.load_*`, `Job#__secret_values` and everything in `JoobQ::Keys` beyond the key layout. JoobQ Pro and JoobQUI use some of these today and ship with the matching JoobQ version.
+- **Internal:** anything marked `:nodoc:` in the source or absent from this page, among them `JoobQ.reset_config`, `JoobQ::MiddlewarePipeline`, `JoobQ::RedisStore#redis`, `JoobQ::YamlConfigLoader`, `Job#__secret_values` and everything in `JoobQ::Keys` beyond the key layout. JoobQ Pro and JoobQUI use some of these today and ship with the matching JoobQ version.
 - **Engine integration:** `JoobQ::Store`, `JoobQ::RedisStore`, `JoobQ::BaseQueue`, `JoobQ::QueueFactory` and the classes JoobQ Pro and JoobQUI build on are not frozen for third parties yet; they are reviewed separately.
 - Pro: [Pro API](pro-api.md) has its own status.
 

@@ -260,9 +260,9 @@ module JoobQ
       error_monitor.notify_alert = notify_alert if notify_alert
     end
 
-    # :nodoc:
-    #
-    # YAML configuration loading methods: the helpers behind `JoobQ.initialize_config_with`.
+    # Loads and returns a configuration from a YAML file (it also applies the environment's override
+    # file), or from the search order when `path` is nil. Installs nothing: pass the
+    # result to `JoobQ.set_config`, or use `JoobQ.initialize_config_with(:yaml, ...)` to load and install.
     def self.load_from_yaml(path : String? = nil, env : String? = nil) : Configure
       if path
         YamlConfigLoader.load_with_env_overrides(path, env)
@@ -271,9 +271,7 @@ module JoobQ
       end
     end
 
-    # :nodoc:
-    #
-    # Hybrid configuration - YAML + programmatic
+    # Hybrid configuration - YAML + programmatic. Returns the configuration without installing it.
     def self.load_hybrid(yaml_path : String? = nil, &)
       # Start with YAML configuration
       config = if yaml_path
@@ -288,16 +286,12 @@ module JoobQ
       config
     end
 
-    # :nodoc:
-    #
-    # Load from multiple YAML sources with merging
+    # Load from multiple YAML sources with merging. Returns the configuration without installing it.
     def self.load_from_yaml_sources(sources : Array(String)) : Configure
       YamlConfigLoader.load_from_sources(sources)
     end
 
-    # :nodoc:
-    #
-    # Load from CLI arguments
+    # Load from CLI arguments. Returns the configuration without installing it.
     def self.load_from_cli_args(args : Array(String)) : Configure
       YamlConfigLoader.load_from_cli_args(args)
     end

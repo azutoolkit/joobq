@@ -17,7 +17,7 @@ description: Which feature is in the open-source core, in the Pro shard and in t
 | Dead letters and redrive | yes | yes | list, redrive, purge, export (CSV, JSON) |
 | Delayed jobs (`delay`) | yes | yes | |
 | Interval and cron loops in one process | yes | yes | |
-| YAML `schedulers:` that fire | no (loaded, never fired) | no | yes, for job classes built into JoobQUI |
+| YAML `schedulers:` that fire | yes (`forge` enqueues the job; one process per tick) | no | yes, for job classes built into JoobQUI |
 | Per-queue throttle, in one process | yes | yes | |
 | Job expiry (`expires`) | yes | yes | |
 | Cross-process rate limit (`RateLimiter`) | | yes | |

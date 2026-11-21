@@ -90,6 +90,7 @@ Every property in the table of [Configuration](configuration.md) is frozen, with
 | `JoobQ::Configure#default_queue` | Queue for jobs that name none |
 | `JoobQ::Configure#retries` | Default retries |
 | `JoobQ::Configure#expires` | Default job lifetime |
+| `JoobQ::Configure#fire_yaml_schedulers?` | Whether `forge` fires the YAML `schedulers:` entries |
 | `JoobQ::Configure#timeout` | Deprecated: not enforced by Core; joobq-pro's `Job#with_timeout` reads it as its default limit |
 | `JoobQ::Configure#dead_letter_ttl` | Dead letter retention |
 | `JoobQ::Configure#worker_batch_size` | Jobs a worker holds at once |

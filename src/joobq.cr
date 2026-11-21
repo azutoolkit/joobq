@@ -226,11 +226,14 @@ module JoobQ
   def self.forge(trap_signals : Bool = trap_signals_default?, shutdown_timeout : Time::Span = SHUTDOWN_TIMEOUT)
     Log.info { "JoobQ starting..." }
     config.validate_recovery_timing
+    config.yaml_schedules.validate!
     trap_termination(shutdown_timeout) if trap_signals
 
     config.schedulers.each do |scheduler|
       scheduler.run
     end
+    # The YAML `schedulers:` entries, on schedulers of their own that `JoobQ.shutdown` stops with the others.
+    config.yaml_schedules.start
 
     # Start delayed job scheduler (processes retrying jobs from DELAYED_SET)
     config.delayed_job_scheduler.start

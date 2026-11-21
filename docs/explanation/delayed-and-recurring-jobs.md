@@ -20,11 +20,11 @@ JoobQ has four ways to run work later or on a schedule, and they differ in one t
 flowchart LR
   D[Job.delay] --> Set[(joobq:v1:delayed_jobs)] -->|due, checked every second| Q[(queue)] --> W[worker: retries, DLQ]
   E[Job.schedule every: / scheduler every, cron] --> P[perform called in this process]
-  Y[YAML schedulers:] -->|JoobQUI worker fires it| Q
+  Y[YAML schedulers:] -->|forge enqueues the job| Q
   S[Pro workflow schedule] -->|leader starts a run| WF[workflow run]
 ```
 
-`Job.schedule(every:)` and the scheduler DSL's `every` and `cron` are loops in the process that registers them. They call `perform` (or your block) directly, starting at once for `every`: no queue, no retry, no dead letter, and two processes that register the same schedule both run it. Core parses the YAML `schedulers:` section into `config.scheduler_configs` but never fires it (the `setup_schedulers_from_config` that only logged "Would enqueue" was removed, and `forge` does not read the section); a host such as JoobQUI's worker process fires it, or you do with the scheduler DSL (`config.scheduler { cron ...; every ... }`).
+`Job.schedule(every:)` and the scheduler DSL's `every` and `cron` are loops in the process that registers them. They call `perform` (or your block) directly, starting at once for `every`: no queue, no retry, no dead letter, and two processes that register the same schedule both run it. The YAML `schedulers:` section is different: `forge` fires it (unless `fire_yaml_schedulers` is off), and each due `cron_jobs` or `recurring_jobs` entry **enqueues** a new job of its class onto the queue that serves that class, so it gets retries and dead letters like any other job. `args` are read as the job's JSON arguments, the way a stored job is read (its `initialize` does not run). `forge` refuses to start (`ConfigValidationError`) for an entry whose job is not registered with `QueueFactory.register_job_type`, whose `args` do not fit the job, or whose job no configured queue serves (or several do). Several processes may run `forge`, and one of them enqueues each run: a cron entry claims its minute in Redis (`SET NX` under `joobq:v1:schedule:`), a recurring one claims the right to enqueue for a little less than its interval, so no clocks have to agree. A process renews its own live claim and another is refused until it expires. The claim comes first, so a process that crashes between the claim and the enqueue loses that run (at most once per run); a failed enqueue gives back the process's own claim, and a process that cannot reach Redis skips the run. A refused claim still waits a full interval, so a process restarted inside an interval whose claim is alive can wait up to twice the interval once, and the enqueue in flight at shutdown may land just after `JoobQ.shutdown` returns. Cron patterns have a minute's resolution, so an entry fires at most once a minute. Entries of merged configuration files add up: an environment file that restates a base entry with other `args` gives two entries. Set `fire_yaml_schedulers: false` in a process whose host fires the entries itself.
 
 ## Example
 
@@ -84,7 +84,8 @@ Every failure was only logged. To keep retries, make the recurring callback enqu
 | `Job.schedule(every:, **args)` | `Time::Span` | none | Calls `perform` every span in this process, first call at once |
 | `config.scheduler { every ...; cron "..." { } }` | DSL | none | Interval and cron loops in this process |
 | `config.time_location` | `Time::Location` | `America/New_York` | Time zone of the scheduler DSL's cron patterns (set by YAML `timezone`); the process zone is not changed |
-| YAML `schedulers:` | YAML | none | Parsed into `config.scheduler_configs`, never fired by Core; fired by `joobqui-selfhosted --worker` or your own code |
+| YAML `schedulers:` | YAML | none | Parsed into `config.scheduler_configs`; `forge` fires each entry by enqueueing its job |
+| `config.fire_yaml_schedulers` | `Bool` | `true` | `false` (or `settings.fire_yaml_schedulers: false`, `JOOBQ_FIRE_YAML_SCHEDULERS=false`) fires none and checks none; for a host that fires the entries itself, such as `joobqui-selfhosted` |
 | Pro `overlap` | `OverlapPolicy` | `Skip` | `Skip`, `BufferOne`, `AllowAll` or `CancelPrevious` when the previous run is still open |
 | Pro `catchup_window_ms` | `Int64` | `60000` | How late a missed fire time may still start |
 | Pro `timezone` | `String` | `"UTC"` | Time zone of the workflow schedule |

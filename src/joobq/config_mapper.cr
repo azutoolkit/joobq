@@ -69,6 +69,10 @@ module JoobQ
         config.retries = retries.as_i
       end
 
+      if fire = settings["fire_yaml_schedulers"]?
+        config.fire_yaml_schedulers = fire.as_bool
+      end
+
       if retry_jitter = settings["retry_jitter"]?
         config.retry_jitter = retry_jitter.as_bool
       end
@@ -165,7 +169,7 @@ module JoobQ
 
     private def self.map_schedulers(config : Configure, schedulers : YAML::Any)
       schedulers.as_a.each do |scheduler_config|
-        timezone = scheduler_config["timezone"]?.try(&.as_s) || "America/New_York"
+        timezone = scheduler_config["timezone"]?.try(&.as_s) || config.time_location.name
 
         # Store scheduler configuration for later use
         # The actual scheduler setup will be handled by the application

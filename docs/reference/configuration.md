@@ -20,6 +20,7 @@ description: Every JoobQ Core setting (JoobQ.configure properties, YAML keys, JO
 | `worker_batch_size` | `Int32` | `10` | 1 to 1000; jobs one worker holds at once |
 | `rest_api_enabled` | `Bool` | `false` | Starts the management API in `forge` |
 | `stats_enabled` | `Bool` | `true` | |
+| `fire_yaml_schedulers` | `Bool` | `true` | `forge` fires the YAML `schedulers:` entries (each due entry enqueues its job onto the queue that serves it) and refuses to start when an entry cannot fire. Several processes can run it: each run is claimed in Redis (`joobq:v1:schedule:<entry>[:<minute>]`) and one process enqueues it, at most once per run. Merged files add their entries up. `false` fires and checks none: set it where a host fires the entries itself. Also `settings.fire_yaml_schedulers` in YAML and `JOOBQ_FIRE_YAML_SCHEDULERS` |
 | `time_location` | `Time::Location` | `America/New_York` | Time zone of `scheduler` cron patterns; set by `timezone` in YAML or `JOOBQ_TIMEZONE`. The process zone, `Time::Location.local`, is never changed |
 | `reaper_interval`, `reaper_scan_limit` | `Time::Span`, `Int32` | `min(30.seconds, owner_ttl)`, `1000` | Expired-job reaper, which also reclaims dead processes' jobs. `reaper_interval` is also the cadence of the expired-job scan of every queue (100 ms, the minimum, scans each queue ten times a second). The reaper is built on first use (`forge`): set both before it. Set above `owner_ttl` alone it is clamped to the TTL with a warning; set together with `owner_ttl` and above it, it raises `ConfigValidationError` |
 | `owner_ttl` | `Time::Span` | `30.seconds` | How long after its last beat a process counts as dead (1 second to 1 hour); also `owner_ttl` in YAML settings and `JOOBQ_OWNER_TTL` (an invalid value raises `ConfigValidationError`). A crashed process's jobs are back on their queue at most `owner_ttl + reaper_interval` after the crash (60 s by default). **Use the same value on every process that shares a Redis** (see below). An assigned `store` keeps its own TTL unless `owner_ttl` was set here |
@@ -41,14 +42,14 @@ Searched in order: `./joobq.yml`, `./config/joobq.yml`, `./config/joobq.yaml`, `
 
 | Key under `joobq:` | Contents |
 | --- | --- |
-| `settings` | `default_queue`, `retries`, `retry_jitter`, `expires`, `timeout`, `failed_ttl`, `dead_letter_ttl`, `worker_batch_size`, `owner_ttl`, `reaper_interval`, `timezone` |
+| `settings` | `default_queue`, `retries`, `retry_jitter`, `expires`, `timeout`, `failed_ttl`, `dead_letter_ttl`, `worker_batch_size`, `owner_ttl`, `reaper_interval`, `timezone`, `fire_yaml_schedulers` |
 | `queues` | `<name>: {job_class, workers, throttle: {limit, period}}` |
 | `redis` | `host`, `port`, `password`, `pool_size`, `pool_timeout`, `url`, `tls_verify`, `ca_file` |
 | `middlewares` | list of `{type: throttle|retry|timeout}` |
 | `pipeline` | `batch_size`, `timeout`, `max_commands` |
 | `features` | `rest_api`, `stats` (booleans) |
 | `error_monitoring` | `alert_thresholds`, `time_window`, `max_recent_errors` |
-| `schedulers` | list of `{timezone, cron_jobs: [{pattern, job, args}], recurring_jobs: [{interval, job, args}]}`: parsed into `config.scheduler_configs` for a host to read, never fired by Core |
+| `schedulers` | list of `{timezone (default: the configuration's), cron_jobs: [{pattern, job, args}], recurring_jobs: [{interval (at least 1 second), job, args}]}`; fired by `forge`, one process per tick (see `fire_yaml_schedulers`) |
 
 ## Environment variables
 
@@ -59,6 +60,7 @@ Searched in order: `./joobq.yml`, `./config/joobq.yml`, `./config/joobq.yaml`, `
 | `REDIS_POOL_SIZE`, `REDIS_POOL_TIMEOUT` | `500`, `2.0` s | Per process |
 | `REDIS_CONNECT_TIMEOUT`, `REDIS_COMMAND_TIMEOUT`, `REDIS_OPERATION_TIMEOUT` | `5.0` s each | |
 | `REDIS_TLS_VERIFY`, `REDIS_CA_FILE` | `true`, system CAs | |
+| `JOOBQ_FIRE_YAML_SCHEDULERS` | `true` | `true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off` (any case) overrides `fire_yaml_schedulers`, read where the flag is used; empty or blank counts as unset, any other value raises `ConfigValidationError` |
 | `JOOBQ_ENV`, `RACK_ENV`, `CRYSTAL_ENV` | `development` | Pick `./config/joobq.<env>.yml` |
 | `JOOBQ_CONFIG_PATH`, `JOOBQ_CONFIG_FILE` | none | Entries in the YAML search list |
 | `JOOBQ_API_READER_TOKEN`, `JOOBQ_API_OPERATOR_TOKEN`, `JOOBQ_API_ADMIN_TOKEN` | none | Management API tokens, at least 32 bytes each |

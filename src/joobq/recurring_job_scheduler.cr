@@ -16,27 +16,31 @@ module JoobQ
 
     def every(interval : Time::Span, job : Job.class, **args)
       job_instance = job.new(**args)
-      job_key = job_instance.class.name
+      every(interval, job.name, job.name, args.to_json) { job_instance.perform }
+      job_instance
+    end
+
+    # Runs `action` in a fiber every `interval`, the first time at once. `key` names the loop in `jobs`, next to
+    # the `job` name and its `args` (JSON).
+    def every(interval : Time::Span, key : String, job : String, args : String, &action : ->)
       @lock.synchronize do
-        @jobs[job_key] = Scheduler::RecurringJob.new(interval: interval, job: job.name, args: args.to_json)
+        @jobs[key] = Scheduler::RecurringJob.new(interval: interval, job: job, args: args)
       end
 
-      scheduler_loop = BackgroundLoop.new("recurring:#{job_key}", @error_backoff)
+      scheduler_loop = BackgroundLoop.new("recurring:#{key}", @error_backoff)
       @lock.synchronize { @loops << scheduler_loop }
 
       scheduler_loop.start do
         spawn do
           begin
-            job_instance.perform
+            action.call
           rescue ex : Exception
             Log.error &.emit("Recurring job execution failed",
-              job: job_key, error_class: ex.class.name, error: ex.message)
+              job: key, error_class: ex.class.name, error: ex.message)
           end
         end
         interval
       end
-
-      job_instance
     end
 
     # Stops every recurring loop. Returns once no loop will run another iteration.

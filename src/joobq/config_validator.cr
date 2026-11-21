@@ -90,6 +90,10 @@ module JoobQ
         raise ConfigValidationError.new("retries must be >= 0") if retries_value < 0
       end
 
+      if (fire = settings["fire_yaml_schedulers"]?) && !fire.raw.is_a?(Bool)
+        raise ConfigValidationError.new("fire_yaml_schedulers must be true or false, got #{fire.raw.inspect}")
+      end
+
       if (retry_jitter = settings["retry_jitter"]?) && !retry_jitter.raw.is_a?(Bool)
         raise ConfigValidationError.new("retry_jitter must be true or false, got #{retry_jitter.raw.inspect}")
       end
@@ -348,26 +352,48 @@ module JoobQ
       validate_time_span(period)
     end
 
+    # The fields of a cron pattern in order, each with the range its values must fall in.
+    CRON_FIELDS = [
+      {name: "minute", range: 0..59},
+      {name: "hour", range: 0..23},
+      {name: "day", range: 1..31},
+      {name: "month", range: 1..12},
+      {name: "weekday", range: 0..7},
+    ]
+
+    # One item of a field: `*`, `*/N`, `A`, `A-B` or `A-B/N` (what `cron_parser` computes runs for; a weekday range
+    # may not start at 7 or, from above 0, end at 7: the parser clamps weekdays to 0-6 there).
+    CRON_ITEM = /\A(?:\*(?:\/(?<star_step>\d+))?|(?<from>\d+)(?:-(?<to>\d+)(?:\/(?<step>\d+))?)?)\z/
+
     private def self.validate_cron_pattern(pattern : String)
-      # Basic cron pattern validation
       parts = pattern.split
-      unless parts.size == 5
+      unless parts.size == CRON_FIELDS.size
         raise ConfigValidationError.new("Invalid cron pattern: '#{pattern}' (must have 5 fields: minute hour day month weekday)")
       end
 
-      # Validate each field
       parts.each_with_index do |part, index|
-        field_name = ["minute", "hour", "day", "month", "weekday"][index]
+        field = CRON_FIELDS[index]
+        next if part.split(',', remove_empty: false).all? { |item| valid_cron_item?(item, field) }
 
-        # Allow wildcards, ranges, lists, and steps
-        unless part.match(/^(\*|([0-5]?\d)(-([0-5]?\d))?(\/([0-5]?\d))?|(\d{1,2})(,(\d{1,2}))*)$/) ||
-               part.match(/^(\*|[0-2]?\d(-[0-2]?\d)?(\/[0-2]?\d)?|[0-2]?\d(,[0-2]?\d)*)$/) ||
-               part.match(/^(\*|[1-2]?\d(-[1-2]?\d)?(\/[1-2]?\d)?|[1-2]?\d(,[1-2]?\d)*)$/) ||
-               part.match(/^(\*|[0-1]?\d(-[0-1]?\d)?(\/[0-1]?\d)?|[0-1]?\d(,[0-1]?\d)*)$/) ||
-               part.match(/^(\*|[0-6](-[0-6])?(\/[0-6])?|[0-6](,[0-6])*)$/)
-          raise ConfigValidationError.new("Invalid cron pattern: '#{pattern}' (invalid #{field_name} field: '#{part}')")
-        end
+        raise ConfigValidationError.new("Invalid cron pattern: '#{pattern}' (invalid #{field[:name]} field: '#{part}')")
       end
+    end
+
+    private def self.valid_cron_item?(item : String, field : NamedTuple(name: String, range: Range(Int32, Int32))) : Bool
+      return false unless match = CRON_ITEM.match(item)
+      unless match["from"]?
+        star_step = match["star_step"]?
+        return star_step.nil? || (star_step.to_i?.try(&.> 0) || false)
+      end
+
+      from = match["from"].to_i? || return false
+      to = match["to"]?.try { |text| text.to_i? || return false }
+      step = match["step"]?.try { |text| text.to_i? || return false }
+      range = field[:range]
+      return false unless range.includes?(from) && (to.nil? || (range.includes?(to) && from <= to))
+      return false if field[:name] == "weekday" && to && (from == 7 || (to == 7 && from > 0))
+
+      step.nil? || step > 0
     end
   end
 end

@@ -123,18 +123,15 @@ describe "config.timeout deprecation" do
     JoobQ::Configure.new.timeout.should eq(2.seconds)
   end
 
-  # Only each file's `settings:` section is loaded: config/joobq.production.yml does not load whole on this tree, because
-  # `ConfigValidator.validate_cron_pattern` refuses its `0 */6 * * *` (no `*/N` step). That is on master too, filed as
-  # azutoolkit/joobq#78, and has nothing to do with `timeout`.
+  # Each shipped file loads whole; production sets `timeout` (for Pro), so it is the one that logs the notice.
   Dir.glob(File.expand_path("../config/joobq.*.yml", __DIR__)).sort.each do |path|
     name = File.basename(path)
     expected = name == "joobq.production.yml" ? 1 : 0
 
-    it "#{name} logs the deprecation notice #{expected} time(s) (production sets it, for Pro; no other file does)" do
-      settings = YAML.parse(File.read(path))["joobq"]["settings"]
-      yaml = YAML.dump({"joobq" => {"settings" => settings}})
+    it "#{name} loads and logs the deprecation notice #{expected} time(s)" do
+      found = warnings.call(-> { JoobQ::YamlConfigLoader.load_from_file(path) })
 
-      warnings.call(-> { JoobQ::YamlConfigLoader.load_from_string(yaml) }).size.should eq(expected)
+      found.size.should eq(expected)
     end
   end
 end

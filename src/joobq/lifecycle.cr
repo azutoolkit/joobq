@@ -146,6 +146,7 @@ module JoobQ
   # The cron, recurring and delayed loops of every scheduler, the delayed-job scheduler and the reaper.
   private def self.stop_schedulers : Nil
     config.schedulers.each(&.stop)
+    config.yaml_schedules.stop
     RecurringJobScheduler.instance.stop
     config.delayed_job_scheduler.stop
     config.expired_job_reaper.stop

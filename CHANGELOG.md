@@ -18,9 +18,49 @@
 - **`config/joobq.development.yml` and `config/joobq.test.yml` no longer set `timeout`.** Core ignored it, but joobq-pro's
   `Job#with_timeout` reads it: for anyone running those files with Pro, its default limit moves from 5 seconds (development)
   to the 2-second default, and the file no longer logs the deprecation notice at boot.
+- **`JoobQ.forge` fires the YAML `schedulers:` entries (#42).** Core parsed `schedulers:` into `config.scheduler_configs` and
+  never ran it. Now each due `cron_jobs` or `recurring_jobs` entry enqueues a new job of its class, built from `args` as a
+  stored job is read (its `initialize` does not run; the job needs defaults for what `args` leaves out), onto the queue
+  that serves that class (`args: {queue: "name"}` picks one when several do). Cron entries run on a `Scheduler`'s cron
+  loop, recurring ones on its recurring loop, the first run at once. New public overload
+  `RecurringJobScheduler#every(interval, key, job, args, &block)` runs a block every interval; `every(interval, Job.class,
+  **args)` is built on it and behaves as before.
+  Several processes can run `forge`, and one of them enqueues each run. A cron entry claims its minute in Redis (`SET NX PX`
+  on `joobq:v1:schedule:<entry>:<minute>`, `Keys.schedule_tick`); a recurring entry claims the right to enqueue for a little
+  less than its interval (`joobq:v1:schedule:<entry>`, `Keys.schedule_claim`), so no two hosts' clocks have to agree. The
+  claim holds a per-process owner token and is taken by one Lua script: a process renews its own live claim, another is
+  refused until it expires. The entry is a digest of its kind, schedule, zone, job and args. The claim comes first: a process
+  that crashes between the claim and the enqueue loses that run (at most once per run), a failed enqueue gives back the
+  claim if it is still the process's own, and a process that cannot reach Redis skips the run. A refused claim still waits a
+  full interval, so a process restarted inside an interval whose claim is alive can wait up to twice the interval once. The
+  enqueue in flight when `JoobQ.shutdown` runs may land just after it returns. Cron patterns
+  have a minute's resolution: a YAML entry fires at most once a minute. A Delivery namespace named `schedule` with no data
+  is now refused (`Keys::RESERVED_NAMESPACES`); one that already holds data keeps working.
+  `scheduler_configs` of merged sources are additive: `load_from_sources` appends them, so an environment file that restates
+  a base entry with other `args` gives two live entries.
+  `forge` raises `ConfigValidationError` before starting anything for an entry with an unknown time zone, an invalid cron
+  pattern, a recurring interval under a second, a job not registered with `QueueFactory.register_job_type`, `args` the job
+  cannot be built from, or a job that no queue (or several) serves. `JoobQ.shutdown` stops the entries, and a second `forge`
+  does not start a second set. A group without `timezone` takes the configuration's time zone (it was
+  `America/New_York`), and `load_from_sources` keeps the entries of every source (it dropped them).
+  The `fire_yaml_schedulers` setting (default true) turns it off: `settings.fire_yaml_schedulers: false`,
+  `config.fire_yaml_schedulers = false`, or `JOOBQ_FIRE_YAML_SCHEDULERS` (true/1/yes/on, false/0/no/off, any case;
+  empty counts as unset, other values raise `ConfigValidationError`), which overrides the others; off, nothing is validated or fired.
+  **Upgrade note:** anyone who also fires the YAML entries in their own process (JoobQUI's worker does) must turn it off
+  there before upgrading, or each entry is enqueued twice (once by each, and the claim does not cover the host's own
+  loop). A deployment with `schedulers:` entries that no process fired before now has them fire, and `forge` refuses to
+  start if an entry names a job it cannot enqueue.
 
 ### Fixed
 
+- **The YAML cron validator accepts `*/N` steps and checks each field's range (#78).** `schedulers:` entries such as
+  `0 */6 * * *` (and the shipped `config/joobq.production.yml`) were refused with `Invalid cron pattern`, while
+  `61 * * * *` and `* 24 * * *` passed. Each field now accepts `*`, `*/N`, `A`, `A-B`, `A-B/N` and comma lists of them,
+  within its range (minute 0-59, hour 0-23, day 1-31, month 1-12, weekday 0-7), and still rejects a step of 0, a
+  reversed range and a pattern without five fields; the error names the field. The bare `N/M` form is no longer
+  accepted: `cron_parser` could not run it. A weekday range may not start at 7 or, from above 0, end at 7 (`7-7`, `1-7`:
+  the parser clamps weekdays to 0-6 there, so Sunday never fired or the parser failed); `7` and `0-7` stay valid. The validator
+  stays stricter than `cron_parser`: `@daily`, six-field patterns and `JAN`/`MON` names are still refused in YAML. Every shipped `config/joobq.*.yml` now loads (a spec checks it).
 - **`YamlConfigLoader.load_from_sources` (and `Configure.load_from_yaml_sources`) lost every source's `timeout`.** The merge
   started from a fresh configuration and folded each source in with `merged.timeout = base.timeout`, copying the unset
   value of the accumulated side, so the result was always 2 seconds. The last source that sets `timeout` now wins, and a

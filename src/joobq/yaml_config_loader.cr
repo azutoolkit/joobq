@@ -239,6 +239,8 @@ module JoobQ
       merged.default_queue = base.default_queue
       merged.retries = base.retries
       merged.retry_jitter = base.retry_jitter?
+      fire_source = override.fire_yaml_schedulers_set? ? override : base
+      merged.fire_yaml_schedulers = fire_source.fire_yaml_schedulers_setting if fire_source.fire_yaml_schedulers_set?
       merged.expires = base.expires
       timeout_source = override.timeout_set? ? override : base
       merged.timeout = timeout_source.timeout if timeout_source.timeout_set?
@@ -294,6 +296,7 @@ module JoobQ
 
       # Merge schedulers
       merged.schedulers = base.schedulers + override.schedulers
+      merged.scheduler_configs = base.scheduler_configs + override.scheduler_configs
 
       merged
     end

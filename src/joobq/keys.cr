@@ -26,7 +26,7 @@ module JoobQ
     # The second segment of every key above and below: a delivery namespace of the same name would share a key space
     # with it, so `Delivery::Ledger` refuses these as namespaces.
     RESERVED_NAMESPACES = %w[queue delayed_jobs dead_letter processing processing-owners error_counts recent_errors
-      error_index worker workers events failed_jobs lmove-probe stats retry_lock paused config delivery-bridge]
+      error_index worker workers events failed_jobs lmove-probe stats retry_lock schedule paused config delivery-bridge]
 
     # Refuses a delivery namespace (`Delivery::Ledger`, `Journal`, `Backup`) that is named like one of the families
     # above, because it would share a key space with them, unless it already holds delivery data: a namespace that
@@ -74,6 +74,17 @@ module JoobQ
 
     def self.retry_lock(jid) : String
       "#{PREFIX}:retry_lock:#{jid}"
+    end
+
+    # The claim of one tick of a YAML `schedulers:` entry (`entry` is the entry's digest, `tick` its minute or interval
+    # number): the process that sets it enqueues the tick's job.
+    def self.schedule_tick(entry : String, tick : Int64) : String
+      "#{PREFIX}:schedule:#{entry}:#{tick}"
+    end
+
+    # The claim of a recurring YAML `schedulers:` entry: set for about one interval by the process that enqueues it.
+    def self.schedule_claim(entry : String) : String
+      "#{PREFIX}:schedule:#{entry}"
     end
 
     # The pause flag and the desired-concurrency hash of a queue.

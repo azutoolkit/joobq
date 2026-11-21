@@ -180,7 +180,8 @@ module JoobQ
           },
           ->(registry : ::JoobQ::JobSchemaRegistry) {
             registry.register({{@type.id}})
-          }
+          },
+          ->(arguments : String) { {{@type.id}}.from_json(arguments).as(::JoobQ::Job) }
         )
       end
 

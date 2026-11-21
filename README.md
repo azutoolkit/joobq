@@ -212,9 +212,11 @@ JoobQ.configure do
 end
 ```
 
-The YAML `schedulers:` section is parsed into `config.scheduler_configs`, but JoobQ Core never fires it: nothing is
-scheduled or enqueued from it. A host that reads it (such as JoobQUI's worker) fires it; in your own code schedule with
-the scheduler DSL, `config.scheduler { cron "*/5 * * * *" { ... } }`.
+The YAML `schedulers:` section is fired by `JoobQ.forge`: each due `cron_jobs` or `recurring_jobs` entry enqueues a new
+job of its class onto the queue that serves it (an unregistered job, bad `args` or a job without a queue stop `forge` with
+a `ConfigValidationError`). Several processes may run `forge`: each tick is claimed in Redis and one of them enqueues it. Set
+`fire_yaml_schedulers: false` under `settings:` (or `JOOBQ_FIRE_YAML_SCHEDULERS=false`) for a host that fires the entries
+itself. In your own code schedule with the scheduler DSL, `config.scheduler { cron "*/5 * * * *" { ... } }`.
 
 ### Configuration Properties
 

@@ -52,6 +52,9 @@ module JoobQ
     # Type alias for the factory function
     alias FactoryProc = Proc(String, Int32, NamedTuple(limit: Int32, period: Time::Span)?, BaseQueue)
     alias RegistryProc = Proc(JobSchemaRegistry, Nil)
+    # Builds a job of a registered type from the JSON of its arguments (`{"x": 1}`), as a stored job is read: the
+    # defaults of its instance variable declarations fill the rest and its `initialize` does not run.
+    alias JobBuilder = Proc(String, Job)
 
     # Registry of job class names to queue factory functions
     @@registry = {} of String => FactoryProc
@@ -59,6 +62,9 @@ module JoobQ
     # Registry of job class names to schema registry functions
     # Used to populate JobSchemaRegistry after config reset
     @@schema_registry_procs = {} of String => RegistryProc
+
+    # Registry of job class names to the procs that build a job from its arguments (YAML `schedulers:` entries).
+    @@job_builders = {} of String => JobBuilder
 
     # YAML queue names `queues` failed to create for the configuration `@@failed_for`; tried again only after a
     # job type is registered, so a stale entry is not retried and logged on every call.
@@ -84,7 +90,8 @@ module JoobQ
         },
         ->(registry : ::JoobQ::JobSchemaRegistry) {
           registry.register({{job_class.id}})
-        }
+        },
+        ->(arguments : String) { {{job_class.id}}.from_json(arguments).as(::JoobQ::Job) }
       )
     end
 
@@ -126,8 +133,9 @@ module JoobQ
     end
 
     # Internal method to add a factory function to the registry
-    def self.add_to_registry(job_class_name : String, factory : FactoryProc, schema_proc : RegistryProc)
+    def self.add_to_registry(job_class_name : String, factory : FactoryProc, schema_proc : RegistryProc, builder : JobBuilder? = nil)
       @@registry[job_class_name] = factory
+      builder ? (@@job_builders[job_class_name] = builder) : @@job_builders.delete(job_class_name)
       @@schema_registry_procs[job_class_name] = schema_proc
       @@failed.clear
     end
@@ -204,6 +212,11 @@ module JoobQ
       @@registry.keys
     end
 
+    # The proc that builds a job of the registered type from the JSON of its arguments, or nil.
+    def self.job_builder(job_class_name : String) : JobBuilder?
+      @@job_builders[job_class_name]?
+    end
+
     # Check if a job type is registered
     def self.registered?(job_class_name : String) : Bool
       @@registry.has_key?(job_class_name)
@@ -213,6 +226,7 @@ module JoobQ
     def self.clear_registry
       @@registry.clear
       @@schema_registry_procs.clear
+      @@job_builders.clear
       @@failed.clear
     end
 

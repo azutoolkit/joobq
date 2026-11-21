@@ -48,6 +48,48 @@ module JoobQ
     property? store_configured : Bool = false
     property? rest_api_enabled : Bool = false
     property? stats_enabled : Bool = true
+
+    # Whether `JoobQ.forge` fires the YAML `schedulers:` entries (see `YamlSchedules`). On by default; turn it off in a
+    # process whose host fires them itself, or they run twice. `JOOBQ_FIRE_YAML_SCHEDULERS` (true/1/yes/on or
+    # false/0/no/off, any case) overrides the setting; empty or blank counts as unset, any other value raises
+    # `ConfigValidationError`.
+    def fire_yaml_schedulers? : Bool
+      text = ENV["JOOBQ_FIRE_YAML_SCHEDULERS"]?.try(&.strip.presence) || return @fire_yaml_schedulers
+
+      case text.downcase
+      when "true", "1", "yes", "on"  then true
+      when "false", "0", "no", "off" then false
+      else
+        raise ConfigValidationError.new("JOOBQ_FIRE_YAML_SCHEDULERS must be true, 1, yes, on, false, 0, no or off, got #{text.inspect}")
+      end
+    end
+
+    def fire_yaml_schedulers=(fire : Bool) : Bool
+      @fire_yaml_schedulers_set = true
+      @fire_yaml_schedulers = fire
+    end
+
+    # The value a source gave, whatever the environment says (what merging configurations copies).
+    def fire_yaml_schedulers_setting : Bool
+      @fire_yaml_schedulers
+    end
+
+    # True once a source (YAML `fire_yaml_schedulers` or the setter) gave a value.
+    def fire_yaml_schedulers_set? : Bool
+      @fire_yaml_schedulers_set
+    end
+
+    @fire_yaml_schedulers = true
+    @fire_yaml_schedulers_set = false
+
+    # The YAML `schedulers:` entries as one set of loops: `JoobQ.forge` starts it, `JoobQ.shutdown` stops it.
+    @yaml_schedules : YamlSchedules? = nil
+    @yaml_schedules_lock = Sync::Mutex.new
+
+    def yaml_schedules : YamlSchedules
+      @yaml_schedules_lock.synchronize { @yaml_schedules ||= YamlSchedules.new(self) }
+    end
+
     property default_queue : String = "default"
     property retries : Int32 = 3
     # Full jitter on retry delays: jobs that failed together do not all retry at the same moment.

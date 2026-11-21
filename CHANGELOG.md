@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Deprecated
+
+- **`config.timeout` says it is not enforced (#41).** Core never read it: a running job is not stopped, whatever the value
+  (the README and the configuration reference already said so). Only JoobQ Pro's `Job#with_timeout` reads it, as its default
+  limit, so the setting stays and keeps its value. Setting it from YAML (`settings.timeout`), `JOOBQ_TIMEOUT` or
+  `config.timeout =` now logs one warning per process that names this (a notice: the key is deprecated in Core). A
+  configuration that does not set it logs nothing. Core has no execution timeout; to bound a running job use Pro's
+  `with_timeout`.
+  `config/joobq.production.yml` still sets it (30 seconds) because joobq-pro's `Job#with_timeout` reads
+  `JoobQ.config.timeout`, so a process booted from that file logs the one-line notice.
+
+### Changed
+
+- **`config/joobq.development.yml` and `config/joobq.test.yml` no longer set `timeout`.** Core ignored it, but joobq-pro's
+  `Job#with_timeout` reads it: for anyone running those files with Pro, its default limit moves from 5 seconds (development)
+  to the 2-second default, and the file no longer logs the deprecation notice at boot.
+
+### Fixed
+
+- **`YamlConfigLoader.load_from_sources` (and `Configure.load_from_yaml_sources`) lost every source's `timeout`.** The merge
+  started from a fresh configuration and folded each source in with `merged.timeout = base.timeout`, copying the unset
+  value of the accumulated side, so the result was always 2 seconds. The last source that sets `timeout` now wins, and a
+  later source that sets none leaves the earlier value (as `owner_ttl` does). This changes joobq-pro's `Job#with_timeout`
+  default for anyone who merges a file with `timeout:` through these loaders: it is that file's value instead of 2 seconds.
+
 ## 0.8.1
 
 A patch release: one data-loss fix in the keyspace migration, and a test-only CI change.

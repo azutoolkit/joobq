@@ -21,7 +21,6 @@ end
 
 jobs = ENV["PROBE_JOBS"].to_i # the queue below has 12 workers: PROBE_JOBS must be 12
 JoobQ.set_config(JoobQ::Configure.new)
-JoobQ.config.timeout = 10.minutes
 JoobQ.configure do
   queue "outage_probe", 12, OutageProbeJob
 end

@@ -240,7 +240,8 @@ module JoobQ
       merged.retries = base.retries
       merged.retry_jitter = base.retry_jitter?
       merged.expires = base.expires
-      merged.timeout = base.timeout
+      timeout_source = override.timeout_set? ? override : base
+      merged.timeout = timeout_source.timeout if timeout_source.timeout_set?
       merged.failed_ttl = base.failed_ttl
       merged.dead_letter_ttl = base.dead_letter_ttl
       merged.worker_batch_size = base.worker_batch_size
@@ -329,7 +330,7 @@ module JoobQ
           4. User/system locations: ~/.joobq/joobq.yml, /etc/joobq/joobq.yml
 
         Environment Variable Overrides:
-          JOOBQ_DEFAULT_QUEUE, JOOBQ_RETRIES, JOOBQ_TIMEOUT, etc.
+          JOOBQ_DEFAULT_QUEUE, JOOBQ_RETRIES, JOOBQ_EXPIRES, etc.
 
         Examples:
           joobq --config ./my-config.yml

@@ -57,7 +57,6 @@ end
 mode = ENV["PROBE_MODE"]? || "stuck"
 
 JoobQ.set_config(JoobQ::Configure.new)
-JoobQ.config.timeout = 10.minutes
 JoobQ.configure do
   queue ENV["PROBE_QUEUE"], 1, ProbeJob
 end

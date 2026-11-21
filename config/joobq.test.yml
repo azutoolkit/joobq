@@ -2,7 +2,6 @@ joobq:
   settings:
     default_queue: "example"
     retries: 3
-    timeout: "2 seconds"
     timezone: "UTC"
     worker_batch_size: 10
 

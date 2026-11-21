@@ -23,7 +23,6 @@ end
 jobs = ENV["PROBE_JOBS"].to_i # the queue below has 12 workers: PROBE_JOBS must be 12
 JoobQ.set_config(JoobQ::Configure.new)
 config = JoobQ.config
-config.timeout = 10.minutes
 config.owner_ttl = ENV["PROBE_TTL_MS"].to_i.milliseconds
 config.reaper_interval = ENV["PROBE_INTERVAL_MS"].to_i.milliseconds
 config.validate_recovery_timing

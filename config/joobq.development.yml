@@ -2,7 +2,6 @@ joobq:
   settings:
     default_queue: "development"
     retries: 1
-    timeout: "5 seconds"
     timezone: "America/New_York"
 
   queues:

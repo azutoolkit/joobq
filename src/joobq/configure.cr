@@ -53,7 +53,38 @@ module JoobQ
     # Full jitter on retry delays: jobs that failed together do not all retry at the same moment.
     property? retry_jitter : Bool = true
     property expires : Time::Span = 3.days
-    property timeout : Time::Span = 2.seconds
+    @timeout = 2.seconds
+    @timeout_set = false
+    @@timeout_warned = Atomic(Int32).new(0)
+
+    # :nodoc:
+    # Lets the next `timeout=` warn again (the warning is once per process).
+    def self.reset_timeout_warning! : Nil
+      @@timeout_warned.set(0)
+    end
+
+    private def warn_timeout_not_enforced : Nil
+      return unless @@timeout_warned.compare_and_set(0, 1)[1]
+      Log.warn &.emit("config.timeout is deprecated in JoobQ Core: Core does not enforce it and never stops a running job; joobq-pro's Job#with_timeout still reads it as its default limit. See docs/reference/configuration.md")
+    end
+
+    # The default limit JoobQ Pro's `Job#with_timeout` reads. Core never enforces it.
+    def timeout : Time::Span
+      @timeout
+    end
+
+    # True once a source (YAML `timeout`, `JOOBQ_TIMEOUT` or this setter) gave a value.
+    def timeout_set? : Bool
+      @timeout_set
+    end
+
+    # Deprecated: Core does not enforce it (only JoobQ Pro reads it). Warns once per process.
+    def timeout=(span : Time::Span) : Time::Span
+      warn_timeout_not_enforced
+      @timeout_set = true
+      @timeout = span
+    end
+
     property failed_ttl : Time::Span = 7.days
     property dead_letter_ttl : Time::Span = 7.days
     property worker_batch_size : Int32 = 10

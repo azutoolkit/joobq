@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.8.2
+
+A patch release with one default that changes: YAML `schedulers:` entries now fire in Core (see Changed; a process that fires its own YAML entries, like JoobQUI's worker, must set `fire_yaml_schedulers = false`). It also fixes the cron validator, which rejected `*/N` steps, and deprecates `config.timeout`.
 
 ### Deprecated
 

@@ -17,7 +17,7 @@
 
 ## Overview
 
-Start with the **[unified JoobQ and JoobQ Pro documentation](docs/README.md)**: released-version quick starts, Core concepts, Pro workflows, configuration, and recovery guides. [Adding Pro](docs/how-to/add-pro.md) explains repository access, the compatible dependency pair, and feature setup. The book source lives here; hosted GitBook sync must be configured separately.
+Start with the **[unified JoobQ and JoobQ Pro documentation](docs/README.md)**: released-version quick starts, Core concepts, Pro workflows, configuration, and recovery guides. [Adding Pro](docs/how-to/add-pro.md) explains repository access, the compatible dependency pair, and feature setup.
 
 For workflows, follow the [typed DSL quick start](docs/tutorials/first-pro-workflow.md), available since **JoobQ Pro v0.2.2**, then explore [sequential and parallel flows](docs/tutorials/parallel-workflow-dsl.md). The authoring API remains a preview; existing constructors remain supported.
 

@@ -4,16 +4,106 @@
 
 ![JoobQ Logo](./joobq-logo.png)
 
+**Background jobs for Crystal on your own Redis: typed jobs, retries, dead letters and cron. MIT licensed.**
+
 [![CI](https://github.com/azutoolkit/joobq/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/azutoolkit/joobq/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/tag/azutoolkit/joobq?label=version&sort=semver)](https://github.com/azutoolkit/joobq/tags)
+[![Crystal](https://img.shields.io/badge/crystal-%3E%3D%201.22.0-black)](docs/reference/compatibility.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**A Redis-backed asynchronous job queue system for Crystal**
-
-[Features](#key-features) • [Installation](#installation) • [Quick Start](#getting-started) • [Unified documentation](docs/README.md) • [API Reference](#rest-api--openapi-specification)
+[Quickstart](#quickstart) • [Documentation](docs/README.md) • [Other languages, workflows, console](#beyond-crystal-sdks-workflows-and-a-console) • [joobq.io](https://www.joobq.io)
 
 </div>
 
 ---
+
+JoobQ is the open-source core of [joobq.io](https://www.joobq.io). This shard runs jobs in any Crystal program, straight on
+your Redis, with no server and no licence key. Worker SDKs for nine more languages, durable workflows and an operator
+console build on it: see [Beyond Crystal](#beyond-crystal-sdks-workflows-and-a-console).
+
+## Quickstart
+
+You need Crystal 1.22 or newer and a Redis 6.2 or newer server on `localhost:6379`.
+
+**1. Add the shard** to your `shard.yml`, then run `shards install`:
+
+```yaml
+dependencies:
+  joobq:
+    github: azutoolkit/joobq
+```
+
+**2. Write a job and a worker** in `src/worker.cr`:
+
+<!-- The same program as examples/docs/core/first_job.cr, which CI compiles. Change both together. -->
+```crystal
+require "joobq"
+
+struct ProcessOrderJob
+  include JoobQ::Job
+
+  @queue = "orders"
+  getter order_id : Int64
+
+  def initialize(@order_id : Int64)
+  end
+
+  def perform
+    puts "Processed order #{order_id}"
+  end
+end
+
+JoobQ.configure do |config|
+  config.rest_api_enabled = false
+  queue "orders", 2, ProcessOrderJob
+end
+
+ProcessOrderJob.enqueue(order_id: 42_i64)
+JoobQ.forge
+```
+
+**3. Run it:**
+
+```sh
+crystal run src/worker.cr
+```
+
+Among JoobQ's log lines you should see `Processed order 42`. Press Ctrl-C to stop: the worker finishes its job first.
+
+Next: the [first background job tutorial](docs/tutorials/first-background-job.md) explains each line, and
+[Write and enqueue jobs](docs/how-to/write-and-enqueue-jobs.md), [Handle failures](docs/how-to/handle-failures.md) and
+[Run cron and recurring jobs](docs/how-to/run-cron-and-recurring-jobs.md) cover what most applications need next.
+
+## Beyond Crystal: SDKs, workflows and a console
+
+| You need | Use | Licence |
+| --- | --- | --- |
+| Jobs, retries, dead letters and cron in a Crystal application | This shard | MIT, free |
+| Workers in Python, TypeScript, Ruby, Go, Rust, Java, PHP, .NET or Elixir, on queues every language shares | The [JoobQ SDKs](https://www.joobq.io/languages) | SDKs are MIT; they connect to a JoobQUI server |
+| Durable workflows, sagas with compensation, batches, unique jobs, rate limits | [JoobQ Pro](https://www.joobq.io/workflows) | Commercial, included with every JoobQUI licence |
+| A console for operators: live queues, dead-letter triage, roles, audit log | [JoobQUI](https://www.joobq.io/console), self-hosted on your servers | Commercial, 14-day trial without a card |
+
+[![The JoobQUI console: live throughput, latency percentiles, queues and dead letters](./joobqui-console.webp)](https://www.joobq.io/console)
+
+*The JoobQUI console, shown with synthetic data.*
+
+SDK workers long-poll the gateway of a JoobQUI server that you host; they never hold Redis credentials. Six SDKs
+install from their registries:
+
+```sh
+pip install joobq                             # Python
+npm install joobq                             # TypeScript
+gem install joobq                             # Ruby
+go get github.com/azutoolkit/joobq-sdk-go     # Go
+cargo add joobq                               # Rust
+composer require azutoolkit/joobq             # PHP
+```
+
+Java, .NET and Elixir are in the [SDK install guide](https://www.joobq.io/docs/develop/).
+
+- [Start a server and run your first worker](https://www.joobq.io/docs/quickstart.html)
+- [What is open source and what a licence adds](https://www.joobq.io/comparison)
+- [Pricing](https://www.joobq.io/pricing): one flat price per deployment; workers, accounts and jobs are not counted
 
 ## Overview
 
@@ -21,7 +111,7 @@ Start with the **[unified JoobQ and JoobQ Pro documentation](docs/README.md)**: 
 
 For workflows, follow the [typed DSL quick start](docs/tutorials/first-pro-workflow.md), available since **JoobQ Pro v0.2.2**, then explore [sequential and parallel flows](docs/tutorials/parallel-workflow-dsl.md). The authoring API remains a preview; existing constructors remain supported.
 
-Explore task-based [Guides](docs/how-to/README.md), reusable [Design Patterns](docs/explanation/application-architecture.md), [Production Deployment](docs/explanation/application-architecture.md), and [JoobQ Cloud](docs/explanation/application-architecture.md) for hosting on your cloud infrastructure.
+Explore task-based [Guides](docs/how-to/README.md), reusable [Design Patterns](docs/explanation/application-architecture.md), [Production Deployment](docs/explanation/application-architecture.md), and [preparing a cloud deployment](docs/how-to/prepare-a-cloud-deployment.md) on your own infrastructure.
 
 > Enterprise v1 remains under review. The opt-in [leased runtime and migration guide](design/durable-runtime-guide.md) describes the new delivery API, management authentication and compatibility changes. See [validation and open release gates](design/implementation-validation.md) before deployment.
 
@@ -75,6 +165,8 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 ### Table of Contents
 
 - [JoobQ](#joobq)
+  - [Quickstart](#quickstart)
+  - [Beyond Crystal: SDKs, workflows and a console](#beyond-crystal-sdks-workflows-and-a-console)
   - [Overview](#overview)
     - [Why Choose JoobQ?](#why-choose-joobq)
     - [Key Features](#key-features)

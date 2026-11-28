@@ -650,7 +650,9 @@ JoobQ has a REST management API under `/joobq/*` for job management, monitoring,
 
 Every route except the `/healthz` and `/readyz` probes needs an `Authorization: Bearer <token>` header. The tokens are read from `JOOBQ_API_READER_TOKEN`, `JOOBQ_API_OPERATOR_TOKEN` and `JOOBQ_API_ADMIN_TOKEN` (at least 32 bytes each). `GET` and `HEAD` requests need a reader. Of the others, `DELETE` and any path containing `/reset` or `/config` need an admin, and the rest need an operator. A higher role may do what a lower one may.
 
-JoobQ ships no OpenAPI document, and the server does not serve one. The [Core API reference](docs/reference/core-api.md#http-management-api) lists every route with the role it needs, and [Secure management access](docs/how-to/secure-management-access.md) shows how to turn the API on.
+This shard ships no OpenAPI document, and its server does not serve one. The [Core API reference](docs/reference/core-api.md#http-management-api) lists every route with the role it needs, and [Secure management access](docs/how-to/secure-management-access.md) shows how to turn the API on.
+
+OpenAPI is a feature of [JoobQUI](https://www.joobq.io/console), the self-hosted console, not of this shard: the console describes its own `/api/v1` API in OpenAPI 3.1 at `/api/v1/openapi.json`. That document covers the console's `/api/v1` routes, not the `/joobq/*` routes of this shard.
 
 ### API Endpoints
 

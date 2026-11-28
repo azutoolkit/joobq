@@ -1,7 +1,9 @@
 #!/usr/bin/env crystal
 
 # Example Crystal client for JoobQ REST API
-# This demonstrates how to use the generated OpenAPI client
+# Hand-written: JoobQ ships no OpenAPI document to generate a client from.
+# It sends no Authorization header, so add a bearer token before using it:
+# every route it calls answers 401 without one.
 
 require "http/client"
 require "json"

@@ -199,8 +199,6 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
     - [API Endpoints](#api-endpoints)
     - [Quick Start with the API](#quick-start-with-the-api)
   - [Performance](#performance)
-    - [Performance Comparison](#performance-comparison)
-      - [Disclaimer](#disclaimer)
   - [Contributing](#contributing)
   - [Security](#security)
   - [Testing](#testing)
@@ -589,6 +587,7 @@ This endpoint returns all available registered jobs and their JSON schemas that 
 ```http
 GET /joobq/jobs/registry HTTP/1.1
 Host: localhost:8080
+Authorization: Bearer <reader token>
 ```
 
 **Response:**

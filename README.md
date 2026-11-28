@@ -138,7 +138,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 **Developer Experience**
 
 - Clean, intuitive API following Crystal idioms
-- Comprehensive OpenAPI 3.0 specification
+- Optional REST management API: off by default, guarded by bearer tokens
 - Type-safe job definitions
 - Minimal configuration required
 
@@ -157,7 +157,7 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
 - **⏰ Scheduling**: Cron-style recurring jobs and delayed execution
 - **🎯 Throttling**: Fine-grained rate limiting to prevent system overload
 - **📊 Monitoring**: Comprehensive REST API for metrics and job management
-- **🔌 OpenAPI Integration**: Complete API specification for client generation
+- **🔌 REST Management API**: Routes under `/joobq/*`, off by default, with bearer tokens for reader, operator and admin roles
 - **🛡️ Error Tracking**: Detailed error monitoring and reporting
 - **♻️ Dead Letter Queue**: Automatic handling of failed jobs
 - **🔒 Type Safety**: Compile-time guarantees for job definitions
@@ -195,15 +195,10 @@ JoobQ combines the performance advantages of Crystal with the reliability of Red
     - [Rest API](#rest-api)
     - [GET /joobq/jobs/registry](#get-joobqjobsregistry)
     - [POST /joobq/jobs](#post-joobqjobs)
-  - [REST API \& OpenAPI Specification](#rest-api--openapi-specification)
+  - [REST API](#rest-api-1)
     - [API Endpoints](#api-endpoints)
-    - [OpenAPI Specification](#openapi-specification)
     - [Quick Start with the API](#quick-start-with-the-api)
-    - [Client Generation](#client-generation)
-    - [Interactive Documentation](#interactive-documentation)
   - [Performance](#performance)
-    - [Performance Comparison](#performance-comparison)
-      - [Disclaimer](#disclaimer)
   - [Contributing](#contributing)
   - [Security](#security)
   - [Testing](#testing)
@@ -592,6 +587,7 @@ This endpoint returns all available registered jobs and their JSON schemas that 
 ```http
 GET /joobq/jobs/registry HTTP/1.1
 Host: localhost:8080
+Authorization: Bearer <reader token>
 ```
 
 **Response:**
@@ -647,9 +643,15 @@ has no effect. `data` that does not fit the job class answers `422` and nothing 
 }
 ```
 
-## REST API & OpenAPI Specification
+## REST API
 
-JoobQ provides a comprehensive REST API for job management, monitoring, and debugging. The API is fully documented with an OpenAPI 3.0 specification that enables easy client generation and integration.
+JoobQ has a REST management API under `/joobq/*` for job management, monitoring, and debugging. It is off by default: set `config.rest_api_enabled = true` and `JoobQ.forge` serves it on `127.0.0.1:8080`.
+
+Every route except the `/healthz` and `/readyz` probes needs an `Authorization: Bearer <token>` header. The tokens are read from `JOOBQ_API_READER_TOKEN`, `JOOBQ_API_OPERATOR_TOKEN` and `JOOBQ_API_ADMIN_TOKEN` (at least 32 bytes each). `GET` and `HEAD` requests need a reader. Of the others, `DELETE` and any path containing `/reset` or `/config` need an admin, and the rest need an operator. A higher role may do what a lower one may.
+
+This shard ships no OpenAPI document, and its server does not serve one. The [Core API reference](docs/reference/core-api.md#http-management-api) lists every route with the role it needs, and [Secure management access](docs/how-to/secure-management-access.md) shows how to turn the API on.
+
+OpenAPI is a feature of [JoobQUI](https://www.joobq.io/console), the self-hosted console, not of this shard: the console describes its own `/api/v1` API in OpenAPI 3.1 at `/api/v1/openapi.json`. That document covers the console's `/api/v1` routes, not the `/joobq/*` routes of this shard.
 
 ### API Endpoints
 
@@ -658,26 +660,19 @@ JoobQ provides a comprehensive REST API for job management, monitoring, and debu
 - **Error Monitoring**: Track errors, get statistics, filter by type/queue
 - **Health Checks**: System status and monitoring
 
-### OpenAPI Specification
-
-The complete OpenAPI 3.0 specification is available in the `docs/` directory:
-
-- **Specification**: `docs/openapi.yaml`
-- **Documentation**: `docs/API_SPECIFICATION.md`
-- **Client Examples**: `examples/crystal_client_example.cr`
-
 ### Quick Start with the API
 
 ```bash
-# Health check
-curl http://localhost:8080/joobq/health/check
+# Health check (reader token)
+curl -H "Authorization: Bearer $JOOBQ_API_READER_TOKEN" http://localhost:8080/joobq/health/check
 
 # Liveness and readiness probes (no token needed; /readyz is 503 when Redis does not answer or JoobQ shuts down)
 curl http://localhost:8080/healthz
 curl http://localhost:8080/readyz
 
-# Enqueue a job
+# Enqueue a job (operator token)
 curl -X POST http://localhost:8080/joobq/jobs \
+  -H "Authorization: Bearer $JOOBQ_API_OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "queue": "email",
@@ -688,33 +683,11 @@ curl -X POST http://localhost:8080/joobq/jobs \
     }
   }'
 
-# Get error statistics
-curl http://localhost:8080/joobq/errors/stats
+# Get error statistics (reader token)
+curl -H "Authorization: Bearer $JOOBQ_API_READER_TOKEN" http://localhost:8080/joobq/errors/stats
 
-# Reprocess busy jobs
-curl -X POST http://localhost:8080/joobq/queues/default/reprocess
-```
-
-### Client Generation
-
-Generate clients for your preferred language:
-
-```bash
-# Install OpenAPI Generator
-brew install openapi-generator
-
-# Generate clients
-openapi-generator generate -i docs/openapi.yaml -g crystal -o clients/crystal/
-openapi-generator generate -i docs/openapi.yaml -g typescript-axios -o clients/typescript/
-openapi-generator generate -i docs/openapi.yaml -g python -o clients/python/
-```
-
-### Interactive Documentation
-
-View the interactive API documentation:
-
-```bash
-docker run -p 8080:8080 -e SWAGGER_JSON=/docs/openapi.yaml -v $(pwd)/docs:/docs swaggerapi/swagger-ui
+# Reprocess busy jobs (operator token)
+curl -X POST -H "Authorization: Bearer $JOOBQ_API_OPERATOR_TOKEN" http://localhost:8080/joobq/queues/default/reprocess
 ```
 
 ## Performance
